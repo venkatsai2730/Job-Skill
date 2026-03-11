@@ -61,7 +61,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(newUser);
   };
 
-  const signOut = () => {
+  const signOut = async () => {
+    try {
+      await api.post("/api/auth/logout");
+    } catch (e) {
+      console.error("Failed to sign out from server", e);
+    }
     localStorage.removeItem("auth_token");
     setToken(null);
     setUser(null);
