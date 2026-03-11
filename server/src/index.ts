@@ -4,6 +4,8 @@ import cors from "cors";
 import authRoutes from "./routes/auth.js";
 import profileRoutes from "./routes/profile.js";
 import resumeRoutes from "./routes/resume.js";
+import chatRoutes from "./routes/chat.js";
+import jobsRoutes from "./routes/jobs.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -19,6 +21,8 @@ app.use(express.json({ limit: "15mb" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/resume", resumeRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/jobs", jobsRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {
