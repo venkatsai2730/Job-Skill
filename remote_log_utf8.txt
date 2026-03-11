@@ -1,5 +1,0 @@
-﻿4ca054a Merge pull request #2 from venkatsai2730/feature/restore-jobs-ui
-f391af2 UI: Restore static mockup Jobs page with refined typography
-50216ef Merge pull request #1 from venkatsai2730/srinu-dev
-e7759f2 Update gitignore and fix storage auth
-a3012a1 Remove env files
