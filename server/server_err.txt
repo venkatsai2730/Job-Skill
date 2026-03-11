@@ -1,0 +1,82 @@
+ERROR: The process with PID 0 could not be terminated.
+Reason: This is critical system process. Taskkill cannot end this process.
+Google callback error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:141:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+Google callback error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:141:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+Google callback error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:141:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+Google callback error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:141:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+Login error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:83:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+Google callback error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:141:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+Google callback error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:141:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+Login error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:83:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+Login error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:83:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+Google callback error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:141:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+Google callback error: Error: secretOrPrivateKey must have a value
+    at module.exports [as sign] (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\node_modules\jsonwebtoken\sign.js:111:20)
+    at generateToken (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:9:16)
+    at <anonymous> (C:\Users\SRINU\OneDrive\Desktop\Job-Skill\server\src\routes\auth.ts:141:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+
+❌ ERROR: Port 3001 is already in use.
+   This means another backend process is still running.
+   ➡️ On Windows, run: (Get-NetTCPConnection -LocalPort 3001 -EA SilentlyContinue).OwningProcess | % { taskkill /PID $_ /F }
+   ➡️ Or close any other open terminals running the server.
+
+❌ ERROR: Port 3001 is already in use.
+   This means another backend process is still running.
+   ➡️ On Windows, run: (Get-NetTCPConnection -LocalPort 3001 -EA SilentlyContinue).OwningProcess | % { taskkill /PID $_ /F }
+   ➡️ Or close any other open terminals running the server.
+
+❌ ERROR: Port 3001 is already in use.
+   This means another backend process is still running.
+   ➡️ On Windows, run: (Get-NetTCPConnection -LocalPort 3001 -EA SilentlyContinue).OwningProcess | % { taskkill /PID $_ /F }
+   ➡️ Or close any other open terminals running the server.
+
+❌ ERROR: Port 3001 is already in use.
+   This means another backend process is still running.
+   ➡️ On Windows, run: (Get-NetTCPConnection -LocalPort 3001 -EA SilentlyContinue).OwningProcess | % { taskkill /PID $_ /F }
+   ➡️ Or close any other open terminals running the server.
+
+❌ ERROR: Port 3001 is already in use.
+   This means another backend process is still running.
+   ➡️ On Windows, run: (Get-NetTCPConnection -LocalPort 3001 -EA SilentlyContinue).OwningProcess | % { taskkill /PID $_ /F }
+   ➡️ Or close any other open terminals running the server.
