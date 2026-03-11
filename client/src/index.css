@@ -4,247 +4,170 @@
 
 @layer base {
   :root {
-    /* ── Core palette: warm ivory base + deep indigo accents ── */
-    --background: 240 20% 98%;
-    --foreground: 230 25% 14%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 230 25% 14%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 230 25% 14%;
-
-    --primary: 243 75% 59%;
+    --background: 228 24% 6%;
+    --foreground: 210 40% 96%;
+    --card: 228 22% 10%;
+    --card-foreground: 210 40% 96%;
+    --popover: 228 22% 10%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 250 89% 67%;
     --primary-foreground: 0 0% 100%;
-
-    --secondary: 240 18% 94%;
-    --secondary-foreground: 230 25% 14%;
-
-    --muted: 240 14% 92%;
-    --muted-foreground: 230 12% 48%;
-
-    --accent: 243 75% 59%;
+    --secondary: 228 20% 14%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 228 18% 16%;
+    --muted-foreground: 220 15% 55%;
+    --accent: 250 89% 67%;
     --accent-foreground: 0 0% 100%;
-
     --destructive: 0 72% 55%;
     --destructive-foreground: 0 0% 100%;
-
-    --border: 240 12% 88%;
-    --input: 240 14% 92%;
-    --ring: 243 75% 59%;
-
+    --border: 228 16% 18%;
+    --input: 228 18% 14%;
+    --ring: 250 89% 67%;
     --radius: 0.75rem;
-
-    /* Sidebar stays dark for premium contrast */
-    --sidebar-background: 232 40% 12%;
-    --sidebar-foreground: 230 15% 68%;
-    --sidebar-primary: 243 75% 59%;
+    --sidebar-background: 228 28% 8%;
+    --sidebar-foreground: 220 15% 60%;
+    --sidebar-primary: 250 89% 67%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 232 35% 18%;
-    --sidebar-accent-foreground: 230 20% 90%;
-    --sidebar-border: 232 30% 20%;
-    --sidebar-ring: 243 75% 59%;
-
-    /* ── Surface system ── */
-    --page: 240 20% 98%;
-    --surface-1: 0 0% 100%;
-    --surface-2: 240 25% 96%;
-    --surface-3: 240 18% 93%;
-    --glass: 0 0% 100%;
-
-    /* ── Accent blues / indigo ── */
-    --blue-electric: 243 75% 59%;
-    --blue-bright: 243 80% 65%;
-    --blue-deep: 243 70% 50%;
-    --blue-border: 240 15% 84%;
-    --blue-muted: 240 20% 90%;
-
-    /* ── Text opacity tokens (now map to dark text on light bg) ── */
-    --white-90: 230 25% 14%;
-    --white-60: 230 12% 42%;
-    --white-40: 230 10% 56%;
-    --white-30: 230 8% 68%;
-
-    /* ── Vibrant accents ── */
-    --cyan-spark: 195 90% 46%;
-    --indigo-soft: 243 60% 65%;
-    --violet-pulse: 270 70% 62%;
-
-    /* ── Status ── */
-    --success: 152 60% 40%;
-    --warning: 38 92% 50%;
+    --sidebar-accent: 228 22% 14%;
+    --sidebar-accent-foreground: 210 40% 90%;
+    --sidebar-border: 228 20% 16%;
+    --sidebar-ring: 250 89% 67%;
+    --page: 228 24% 6%;
+    --surface-1: 228 22% 10%;
+    --surface-2: 228 20% 13%;
+    --surface-3: 228 18% 17%;
+    --glass: 228 22% 10%;
+    --blue-electric: 250 89% 67%;
+    --blue-bright: 250 92% 73%;
+    --blue-deep: 250 85% 58%;
+    --blue-border: 228 16% 22%;
+    --blue-muted: 228 20% 16%;
+    --white-90: 210 40% 96%;
+    --white-60: 220 15% 60%;
+    --white-40: 220 12% 48%;
+    --white-30: 220 10% 36%;
+    --cyan-spark: 180 85% 60%;
+    --indigo-soft: 250 60% 72%;
+    --violet-pulse: 280 75% 68%;
+    --success: 160 70% 50%;
+    --warning: 38 92% 55%;
     --error: 0 75% 55%;
   }
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
-
-  body {
-    @apply bg-background text-foreground font-body antialiased;
-  }
-
-  html {
-    scroll-behavior: smooth;
-  }
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground font-body antialiased; }
+  html { scroll-behavior: smooth; }
 }
 
 @layer utilities {
-
-  /* ── Glassmorphism — soft frosted look ── */
   .glass {
-    background: rgba(255, 255, 255, 0.72);
-    backdrop-filter: blur(20px) saturate(1.6);
-    -webkit-backdrop-filter: blur(20px) saturate(1.6);
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    background: rgba(15, 17, 30, 0.65);
+    backdrop-filter: blur(24px) saturate(1.8);
+    -webkit-backdrop-filter: blur(24px) saturate(1.8);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
   }
-
   .glass-card {
-    background: rgba(255, 255, 255, 0.85);
-    border: 1px solid rgba(0, 0, 0, 0.06);
+    background: rgba(15, 17, 30, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 1rem;
-    box-shadow:
-      0 1px 3px rgba(0, 0, 0, 0.04),
-      0 4px 16px rgba(99, 91, 255, 0.04);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 8px 32px rgba(124, 101, 255, 0.06);
   }
-
   .glass-card-hover {
-    background: rgba(255, 255, 255, 0.85);
-    border: 1px solid rgba(0, 0, 0, 0.06);
+    background: rgba(15, 17, 30, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 1rem;
-    box-shadow:
-      0 1px 3px rgba(0, 0, 0, 0.04),
-      0 4px 16px rgba(99, 91, 255, 0.04);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 8px 32px rgba(124, 101, 255, 0.06);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
-
   .glass-card-hover:hover {
-    border-color: hsl(var(--blue-electric) / 0.4);
-    box-shadow:
-      0 8px 30px rgba(99, 91, 255, 0.12),
-      0 2px 8px rgba(0, 0, 0, 0.06);
-    transform: translateY(-2px);
+    border-color: hsl(var(--blue-electric) / 0.35);
+    box-shadow: 0 12px 40px rgba(124, 101, 255, 0.18), 0 4px 16px rgba(0, 0, 0, 0.3);
+    transform: translateY(-3px);
   }
-
-  /* ── Glow effects ── */
-  .glow-blue {
-    box-shadow: 0 0 40px rgba(99, 91, 255, 0.25);
-  }
-
-  .glow-blue-lg {
-    box-shadow: 0 40px 120px rgba(99, 91, 255, 0.2);
-  }
-
+  .glow-blue { box-shadow: 0 0 50px rgba(124, 101, 255, 0.35); }
+  .glow-blue-lg { box-shadow: 0 40px 120px rgba(124, 101, 255, 0.25); }
   .text-gradient-blue {
-    @apply bg-gradient-to-r from-blue-electric to-violet-pulse bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-blue-electric via-violet-pulse to-cyan-spark bg-clip-text text-transparent;
   }
-
-  /* ── Hero background — subtle gradient instead of dark starfield ── */
   .starfield {
     background:
-      radial-gradient(ellipse at 30% 0%, hsl(243 80% 95% / 0.7) 0%, transparent 50%),
-      radial-gradient(ellipse at 70% 0%, hsl(270 70% 95% / 0.5) 0%, transparent 50%),
-      radial-gradient(ellipse at 50% 80%, hsl(195 80% 96% / 0.4) 0%, transparent 50%);
+      radial-gradient(ellipse at 20% 0%, hsl(250 89% 67% / 0.15) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 10%, hsl(280 75% 68% / 0.12) 0%, transparent 45%),
+      radial-gradient(ellipse at 50% 90%, hsl(180 85% 60% / 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 10% 60%, hsl(160 70% 50% / 0.05) 0%, transparent 40%);
     background-color: hsl(var(--page));
   }
-
-  /* ── Float / bob animations ── */
-  .hero-float {
-    animation: heroFloat 3s ease-in-out infinite;
+  .hero-orb {
+    position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.4;
+    animation: orbFloat 8s ease-in-out infinite;
   }
-
-  .chip-bob-1 {
-    animation: chipBob 2.8s ease-in-out infinite;
+  .hero-orb-1 {
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, hsl(250 89% 67% / 0.5), transparent 70%);
+    top: -10%; left: 10%;
   }
-
-  .chip-bob-2 {
-    animation: chipBob 3.2s ease-in-out infinite 0.4s;
+  .hero-orb-2 {
+    width: 350px; height: 350px;
+    background: radial-gradient(circle, hsl(280 75% 68% / 0.4), transparent 70%);
+    top: 20%; right: 5%; animation-delay: -3s;
   }
-
-  .chip-bob-3 {
-    animation: chipBob 2.5s ease-in-out infinite 0.8s;
+  .hero-orb-3 {
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, hsl(180 85% 60% / 0.3), transparent 70%);
+    bottom: 10%; left: 30%; animation-delay: -5s;
   }
-
-  .chip-bob-4 {
-    animation: chipBob 3s ease-in-out infinite 1.2s;
+  .hero-float { animation: heroFloat 3s ease-in-out infinite; }
+  .chip-bob-1 { animation: chipBob 2.8s ease-in-out infinite; }
+  .chip-bob-2 { animation: chipBob 3.2s ease-in-out infinite 0.4s; }
+  .chip-bob-3 { animation: chipBob 2.5s ease-in-out infinite 0.8s; }
+  .chip-bob-4 { animation: chipBob 3s ease-in-out infinite 1.2s; }
+  .particle-grid {
+    background-image: radial-gradient(circle at 1px 1px, rgba(124, 101, 255, 0.15) 1px, transparent 0);
+    background-size: 40px 40px;
+  }
+  .shimmer-line {
+    background: linear-gradient(90deg, transparent 0%, hsl(250 89% 67% / 0.3) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 3s ease-in-out infinite;
   }
 }
 
-/* ── Keyframes ── */
 @keyframes heroFloat {
-
-  0%,
-  100% {
-    transform: perspective(1200px) rotateX(18deg) rotateY(-6deg) translateY(0);
-  }
-
-  50% {
-    transform: perspective(1200px) rotateX(18deg) rotateY(-6deg) translateY(-8px);
-  }
+  0%, 100% { transform: perspective(1200px) rotateX(12deg) rotateY(-8deg) translateY(0); }
+  50% { transform: perspective(1200px) rotateX(12deg) rotateY(-8deg) translateY(-10px); }
 }
-
 @keyframes chipBob {
-
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-5px);
-  }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
 }
-
 @keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-
-  100% {
-    background-position: 200% 0;
-  }
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
-
+@keyframes orbFloat {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -20px) scale(1.05); }
+  66% { transform: translate(-20px, 15px) scale(0.95); }
+}
 @keyframes pulse-glow {
-
-  0%,
-  100% {
-    opacity: 0.3;
-  }
-
-  50% {
-    opacity: 0.7;
-  }
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.7; }
 }
-
-/* ── Marquee ── */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 @keyframes marquee-left {
-  0% {
-    transform: translateX(0);
-  }
-
-  100% {
-    transform: translateX(-50%);
-  }
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
-
 @keyframes marquee-right {
-  0% {
-    transform: translateX(-50%);
-  }
-
-  100% {
-    transform: translateX(0);
-  }
+  0% { transform: translateX(-50%); }
+  100% { transform: translateX(0); }
 }
-
-.animate-marquee-left {
-  animation: marquee-left 30s linear infinite;
-}
-
-.animate-marquee-right {
-  animation: marquee-right 30s linear infinite;
-}
+.animate-marquee-left { animation: marquee-left 30s linear infinite; }
+.animate-marquee-right { animation: marquee-right 30s linear infinite; }
+.animate-spin-slow { animation: spin-slow 20s linear infinite; }

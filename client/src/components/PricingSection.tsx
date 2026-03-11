@@ -71,7 +71,6 @@ const PricingSection = ({ fullPage = false }: { fullPage?: boolean }) => {
           </h2>
           <p className="text-white-60 text-lg mb-8">Start free. Upgrade when you're ready.</p>
 
-          {/* Toggle */}
           <div className="inline-flex items-center gap-3 glass rounded-full px-2 py-1">
             <button
               onClick={() => setAnnual(false)}
@@ -100,7 +99,7 @@ const PricingSection = ({ fullPage = false }: { fullPage?: boolean }) => {
               whileHover={{ y: -8, transition: { duration: 0.25 } }}
               className={`rounded-2xl p-8 relative ${
                 plan.popular
-                  ? "bg-surface-2 border-2 border-blue-electric shadow-[0_8px_40px_rgba(59,91,255,0.3)]"
+                  ? "bg-surface-2 border-2 border-blue-electric shadow-[0_8px_40px_rgba(124,101,255,0.3)]"
                   : "glass-card"
               }`}
             >
@@ -110,7 +109,7 @@ const PricingSection = ({ fullPage = false }: { fullPage?: boolean }) => {
                   whileInView={{ scale: 1 }}
                   viewport={{ once: true }}
                   transition={{ delay: 0.5, type: "spring", stiffness: 300 }}
-                  className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-electric text-primary-foreground text-xs font-display font-semibold px-4 py-1 rounded-full"
+                  className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-blue-electric to-violet-pulse text-primary-foreground text-xs font-display font-semibold px-4 py-1 rounded-full"
                 >
                   Most Popular
                 </motion.div>
@@ -131,7 +130,7 @@ const PricingSection = ({ fullPage = false }: { fullPage?: boolean }) => {
                   to="/auth"
                   className={`block w-full text-center py-3 rounded-full font-semibold text-sm transition-all ${
                     plan.variant === "primary"
-                      ? "bg-blue-electric hover:bg-blue-bright text-primary-foreground hover:shadow-[0_0_30px_rgba(59,91,255,0.4)]"
+                      ? "bg-blue-electric hover:bg-blue-bright text-primary-foreground hover:shadow-[0_0_30px_rgba(124,101,255,0.4)]"
                       : plan.variant === "filled"
                       ? "bg-blue-electric/80 hover:bg-blue-electric text-primary-foreground"
                       : "border border-blue-border text-white-60 hover:text-foreground hover:border-foreground"

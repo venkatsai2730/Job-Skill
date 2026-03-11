@@ -13,14 +13,13 @@ const navLinks = [
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
-  const isLanding = location.pathname === "/";
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-border/60">
+    <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/[0.06]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-electric flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-electric to-violet-pulse flex items-center justify-center">
               <Shield className="w-5 h-5 text-primary-foreground" />
             </div>
             <span className="font-display font-bold text-lg text-foreground">JobSkill AI</span>
@@ -47,7 +46,7 @@ const Navbar = () => {
             </Link>
             <Link
               to="/auth"
-              className="bg-blue-electric hover:bg-blue-bright text-primary-foreground font-medium text-sm px-5 py-2.5 rounded-full transition-all hover:shadow-[0_0_30px_rgba(59,91,255,0.4)]"
+              className="bg-blue-electric hover:bg-blue-bright text-primary-foreground font-medium text-sm px-5 py-2.5 rounded-full transition-all hover:shadow-[0_0_30px_rgba(124,101,255,0.4)]"
             >
               Try for free →
             </Link>
@@ -56,6 +55,7 @@ const Navbar = () => {
           <button
             className="md:hidden text-white-60"
             onClick={() => setMobileOpen(!mobileOpen)}
+            aria-label="Toggle menu"
           >
             {mobileOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
@@ -68,7 +68,7 @@ const Navbar = () => {
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            className="md:hidden glass border-t border-border/60"
+            className="md:hidden glass border-t border-white/[0.06]"
           >
             <div className="px-4 py-4 space-y-3">
               {navLinks.map((link) => (

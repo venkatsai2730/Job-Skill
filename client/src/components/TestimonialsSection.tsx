@@ -37,7 +37,10 @@ const TestimonialsSection = () => {
   const row2 = testimonials.slice(3);
 
   return (
-    <section className="py-24 bg-page overflow-hidden">
+    <section className="py-24 bg-page overflow-hidden relative">
+      {/* Subtle gradient accent */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[1px] bg-gradient-to-r from-transparent via-violet-pulse/30 to-transparent" />
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
@@ -50,7 +53,7 @@ const TestimonialsSection = () => {
         <p className="text-white-60 text-lg">Join thousands who landed their dream roles.</p>
       </motion.div>
 
-      {/* Row 1 - scrolls left */}
+      {/* Row 1 */}
       <div className="relative mb-6">
         <div className="flex animate-marquee-left" style={{ width: "max-content" }}>
           {[...row1, ...row1, ...row1, ...row1].map((t, i) => (
@@ -59,7 +62,7 @@ const TestimonialsSection = () => {
         </div>
       </div>
 
-      {/* Row 2 - scrolls right */}
+      {/* Row 2 */}
       <div className="relative">
         <div className="flex animate-marquee-right" style={{ width: "max-content" }}>
           {[...row2, ...row2, ...row2, ...row2].map((t, i) => (

@@ -1,67 +1,163 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 
-const WELCOME_MESSAGE = {
+export type AIFeature = "chat" | "resume_pdf" | "resume_image" | "cover_letter" | "job_match" | "agent" | "screening" | "notification" | "code_gen";
+
+export interface ChatMessage {
+    id?: string;
+    role: "user" | "assistant";
+    content: string | any[];
+    provider?: string;
+    model?: string;
+    feature?: string;
+    created_at?: string;
+}
+
+export interface Conversation {
+    id: string;
+    title: string;
+    last_message_at: string;
+    created_at: string;
+}
+
+const WELCOME_MESSAGE: ChatMessage = {
     role: "assistant",
-    content: `Hi there! 👋 I'm your AI career coach powered by Llama 3.3 & Gemini.
+    content: `Hey there! 👋 I'm your AI career coach — powered by **Llama 4 Scout**, **Gemini 2.5 Pro**, **Maverick** & **Codestral**.
 
-I can help you with:
-• 📄 **Resume** — ATS optimization & fixes
-• 💼 **Jobs** — Find relevant openings & apply strategy  
-• 🧠 **Skill Gap** — What to learn for your target role
-• 🎯 **Interviews** — DSA, system design & HR prep
-• 🔗 **LinkedIn** — Profile optimization tips
+Here's what I can do:
 
-What would you like to work on today?`,
+📊 **Resume Audit** — ATS score & deep analysis
+💼 **Find Jobs** — Real-time from Greenhouse & Lever APIs
+✍️ **Cover Letter** — Tailored to any job
+📋 **Screening Q&A** — Auto-answer application questions
+🧠 **Skill Gap** — 2026 market roadmap
+🔗 **LinkedIn** — Profile optimization
+💻 **Code Help** — Powered by Codestral
+🎯 **Job Match** — AI scoring with Gemini 2.5 Pro
+
+What would you like to work on?`,
 };
 
 export function useChat() {
-    const [messages, setMessages] = useState<any[]>([WELCOME_MESSAGE]);
+    const { token } = useAuth();
+    const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [provider, setProvider] = useState<string | null>(null);
+    const [conversations, setConversations] = useState<Conversation[]>([]);
+    const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+    const [loadingHistory, setLoadingHistory] = useState(false);
 
-    const sendMessage = useCallback(async (content: string | any[]) => {
+    // Load conversation list
+    const loadConversations = useCallback(async () => {
+        if (!token) return;
+        try {
+            const data = await api.get<{ conversations: Conversation[] }>("/api/chat/conversations");
+            setConversations(data.conversations || []);
+        } catch { /* ignore if not logged in */ }
+    }, [token]);
+
+    useEffect(() => { loadConversations(); }, [loadConversations]);
+
+    // Load a specific conversation's messages
+    const loadConversation = useCallback(async (convId: string) => {
+        if (!token) return;
+        setLoadingHistory(true);
+        try {
+            const data = await api.get<{ messages: ChatMessage[] }>(`/api/chat/conversations/${convId}/messages`);
+            setMessages(data.messages.length > 0 ? data.messages : [WELCOME_MESSAGE]);
+            setActiveConversationId(convId);
+        } catch (err: any) {
+            setError("Failed to load conversation.");
+        } finally {
+            setLoadingHistory(false);
+        }
+    }, [token]);
+
+    // Send message (works with or without persistent history)
+    const sendMessage = useCallback(async (content: string | any[], feature: AIFeature = "chat") => {
         if (!content || isLoading) return;
-
         setError(null);
-        const userMsg = { role: "user", content };
 
-        // Optimistically add user message
+        const userMsg: ChatMessage = { role: "user", content };
         const updatedMessages = [...messages, userMsg];
         setMessages(updatedMessages);
         setIsLoading(true);
 
         try {
-            // Only send actual chat messages (exclude welcome)
-            const chatHistory = updatedMessages
-                .filter((m) => !(m.role === "assistant" && m.content && typeof m.content === 'string' && m.content.includes("👋")))
-                .map(m => ({
-                    role: m.role,
-                    content: m.content
-                }));
+            let result: any;
 
-            const data = await api.post<any>("/api/chat", { messages: chatHistory });
+            if (token && activeConversationId) {
+                // Persistent mode — use conversation endpoint
+                result = await api.post<any>(`/api/chat/conversations/${activeConversationId}/messages`, {
+                    content,
+                    feature,
+                });
+            } else if (token && !activeConversationId) {
+                // Create new conversation first
+                const convData = await api.post<{ conversation: Conversation }>("/api/chat/conversations", {
+                    title: typeof content === "string" ? content.substring(0, 60) : "New Chat",
+                });
+                const newConvId = convData.conversation?.id;
+                if (newConvId) {
+                    setActiveConversationId(newConvId);
+                    result = await api.post<any>(`/api/chat/conversations/${newConvId}/messages`, {
+                        content,
+                        feature,
+                    });
+                    loadConversations(); // refresh sidebar
+                }
+            }
 
-            setProvider(data.provider);
-            setMessages((prev) => [
+            if (!result) {
+                // Fallback: stateless mode
+                const chatHistory = updatedMessages
+                    .filter(m => !(m.role === "assistant" && typeof m.content === "string" && m.content.includes("👋")))
+                    .map(m => ({ role: m.role, content: m.content }));
+                result = await api.post<any>("/api/chat", { messages: chatHistory, feature });
+            }
+
+            setProvider(result.provider);
+            setMessages(prev => [
                 ...prev,
-                { role: "assistant", content: data.reply, provider: data.provider },
+                { role: "assistant", content: result.reply, provider: result.provider, model: result.model },
             ]);
         } catch (err: any) {
             setError(err.message || "Something went wrong.");
-            // Remove the user message on error so they can retry
-            setMessages(messages);
+            setMessages(messages); // rollback
         } finally {
             setIsLoading(false);
         }
-    }, [messages, isLoading]);
+    }, [messages, isLoading, token, activeConversationId, loadConversations]);
 
     const clearChat = useCallback(() => {
         setMessages([WELCOME_MESSAGE]);
         setError(null);
         setProvider(null);
+        setActiveConversationId(null);
     }, []);
 
-    return { messages, isLoading, error, provider, sendMessage, clearChat };
+    const deleteConversation = useCallback(async (convId: string) => {
+        if (!token) return;
+        try {
+            await api.delete(`/api/chat/conversations/${convId}`);
+            setConversations(prev => prev.filter(c => c.id !== convId));
+            if (activeConversationId === convId) clearChat();
+        } catch { /* ignore */ }
+    }, [token, activeConversationId, clearChat]);
+
+    const renameConversation = useCallback(async (convId: string, title: string) => {
+        if (!token) return;
+        try {
+            await api.patch(`/api/chat/conversations/${convId}`, { title });
+            setConversations(prev => prev.map(c => c.id === convId ? { ...c, title } : c));
+        } catch { /* ignore */ }
+    }, [token]);
+
+    return {
+        messages, isLoading, error, provider, sendMessage, clearChat,
+        conversations, activeConversationId, loadConversation,
+        deleteConversation, renameConversation, loadingHistory,
+    };
 }
