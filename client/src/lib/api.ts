@@ -30,15 +30,27 @@ class ApiClient {
             requestHeaders["Authorization"] = `Bearer ${token}`;
         }
 
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            method,
-            headers: requestHeaders,
-            body: body ? JSON.stringify(body) : undefined,
-        });
+        let response;
+        try {
+            response = await fetch(`${this.baseUrl}${endpoint}`, {
+                method,
+                headers: requestHeaders,
+                body: body ? JSON.stringify(body) : undefined,
+            });
+        } catch (error: any) {
+            if (error.message === "Failed to fetch") {
+                throw new Error("Backend server is unreachable. Please ensure it is running.");
+            }
+            throw error;
+        }
 
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                localStorage.removeItem("auth_token");
+                window.dispatchEvent(new Event("auth_error"));
+            }
             throw new Error(data.error || `Request failed with status ${response.status}`);
         }
 
@@ -57,8 +69,41 @@ class ApiClient {
         return this.request<T>(endpoint, { method: "PUT", body });
     }
 
+    async patch<T>(endpoint: string, body?: any): Promise<T> {
+        return this.request<T>(endpoint, { method: "PATCH", body });
+    }
+
     async delete<T>(endpoint: string): Promise<T> {
         return this.request<T>(endpoint, { method: "DELETE" });
+    }
+
+    async downloadBlob(endpoint: string, defaultFileName: string): Promise<void> {
+        const token = this.getToken();
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const response = await fetch(`${this.baseUrl}${endpoint}`, { headers });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || "Download failed");
+        }
+
+        const blob = await response.blob();
+        const disposition = response.headers.get("Content-Disposition");
+        let fileName = defaultFileName;
+        if (disposition) {
+            const match = disposition.match(/filename="?([^"]+)"?/);
+            if (match) fileName = match[1];
+        }
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
     }
 }
 

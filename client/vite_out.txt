@@ -1,0 +1,62 @@
+
+> jobskill-client@0.0.0 dev
+> vite
+
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m455[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.0.11:[1m5173[22m/[39m
+[2m[32m  ➜[39m[22m[2m  press [22m[1mh + enter[22m[2m to show help[22m
+[2m3:55:25 pm[22m [36m[1m[vite][22m[39m [32m.env changed, restarting server...[39m
+[2m3:55:25 pm[22m [36m[1m[vite][22m[39m [32m.env changed, restarting server...[39m
+[2m3:55:26 pm[22m [36m[1m[vite][22m[39m server restarted.
+[2m3:56:24 pm[22m [36m[1m[vite][22m[39m [32m.env changed, restarting server...[39m
+[2m3:56:24 pm[22m [36m[1m[vite][22m[39m server restarted.
+[2m4:13:11 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/contexts/AuthContext.tsx, /src/index.css[22m
+[2m4:13:11 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/contexts/AuthContext.tsx, /src/index.css[22m
+[2m4:13:12 pm[22m [36m[1m[vite][22m[39m [33mhmr invalidate [39m[2m/src/contexts/AuthContext.tsx[22m Could not Fast Refresh ("useAuth" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react-swc#consistent-components-exports
+[2m4:13:12 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/pages/AuthCallback.tsx, /src/pages/Chat.tsx, /src/components/DashboardLayout.tsx, /src/pages/Auth.tsx, /src/pages/DashboardHome.tsx, /src/pages/Resume.tsx, /src/pages/Settings.tsx, /src/components/ProtectedRoute.tsx[22m
+[2m5:19:38 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Chat.tsx, /src/index.css[22m
+[2m5:25:28 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m5:25:28 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m5:26:28 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m5:34:07 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mtailwind.config.ts[22m
+[2m5:34:35 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m5:41:46 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m5:43:45 pm[22m [36m[1m[vite][22m[39m [32m✨ new dependencies optimized: [33mpdfjs-dist, mammoth[32m[39m
+[2m5:43:45 pm[22m [36m[1m[vite][22m[39m [32m✨ optimized dependencies changed. reloading[39m
+[2m5:45:18 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m5:45:18 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m5:54:56 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/components/AIChat.tsx[22m
+[2m5:55:26 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m5:55:41 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m6:06:21 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m6:14:05 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m6:14:58 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m6:26:02 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m6:38:22 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/AuthCallback.tsx, /src/pages/Auth.tsx, /src/contexts/AuthContext.tsx, /src/pages/Resume.tsx, /src/pages/Settings.tsx, /src/components/AIChat.tsx[22m
+[2m6:38:23 pm[22m [36m[1m[vite][22m[39m [33mhmr invalidate [39m[2m/src/contexts/AuthContext.tsx[22m Could not Fast Refresh ("useAuth" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react-swc#consistent-components-exports
+[2m6:38:23 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/App.tsx, /src/pages/AuthCallback.tsx, /src/components/DashboardLayout.tsx, /src/pages/Auth.tsx, /src/pages/DashboardHome.tsx, /src/pages/Resume.tsx, /src/pages/Settings.tsx, /src/components/ProtectedRoute.tsx[22m
+[2m6:39:51 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/AIChat.tsx, /src/index.css[22m
+[2m6:40:53 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m6:40:57 pm[22m [36m[1m[vite][22m[39m [32m✨ new dependencies optimized: [33m@radix-ui/react-slot, @radix-ui/react-select, @radix-ui/react-label, @radix-ui/react-dialog[32m[39m
+[2m6:40:57 pm[22m [36m[1m[vite][22m[39m [32m✨ optimized dependencies changed. reloading[39m
+[2m6:44:07 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m6:46:52 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m7:22:49 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m7:22:49 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m7:25:47 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m7:25:47 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m7:30:00 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m7:30:00 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m7:33:37 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m7:33:37 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m7:56:31 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m7:56:31 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m8:04:21 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m8:04:21 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m10:45:51 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m10:45:51 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m10:49:47 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m
+[2m10:49:47 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/Jobs.tsx, /src/index.css[22m

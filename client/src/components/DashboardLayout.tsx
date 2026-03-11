@@ -66,9 +66,9 @@ const DashboardLayout = () => {
               {/* Credits */}
               <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-full bg-surface-2 border border-border/40">
                 <Gift className="w-4 h-4 text-blue-electric" />
-                <span className="text-sm font-medium text-foreground">3/5</span>
+                <span className="text-sm font-medium text-foreground">{user?.dailyCreditsUsed ?? 0}/{user?.dailyCreditsLimit ?? 5}</span>
                 <div className="w-14 h-1.5 bg-surface-3 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-electric rounded-full" style={{ width: "60%" }} />
+                  <div className="h-full bg-blue-electric rounded-full" style={{ width: `${((user?.dailyCreditsUsed ?? 0) / (user?.dailyCreditsLimit ?? 5)) * 100}%` }} />
                 </div>
               </div>
 

@@ -48,16 +48,11 @@ router.get("/", async (req: AuthRequest, res: Response) => {
 // PUT /api/profile
 router.put("/", async (req: AuthRequest, res: Response) => {
     try {
-        const { displayName, avatarUrl, jobTitle, location, website, linkedIn, bio } = req.body;
+        const { displayName, avatarUrl } = req.body;
 
         const updates: Record<string, any> = {};
         if (displayName !== undefined) updates.display_name = displayName;
         if (avatarUrl !== undefined) updates.avatar_url = avatarUrl;
-        if (jobTitle !== undefined) updates.job_title = jobTitle;
-        if (location !== undefined) updates.location = location;
-        if (website !== undefined) updates.website = website;
-        if (linkedIn !== undefined) updates.linkedin_url = linkedIn;
-        if (bio !== undefined) updates.bio = bio;
         updates.updated_at = new Date().toISOString();
 
         const { data, error } = await supabaseAdmin

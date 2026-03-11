@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Gift, TrendingUp, FileText, Briefcase, Target, Trophy, Flame, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 
 const MetricRing = ({ score, label, color = "blue" }: { score: number; label: string; color?: string }) => {
   const r = 44;
@@ -57,6 +58,9 @@ const achievements = [
 ];
 
 const DashboardHome = () => {
+  const { user } = useAuth();
+  const displayName = user?.fullName || user?.email?.split("@")[0] || "User";
+
   return (
     <div className="p-6 lg:p-10 space-y-8">
       {/* Welcome */}
@@ -65,7 +69,7 @@ const DashboardHome = () => {
         animate={{ opacity: 1, y: 0 }}
       >
         <h1 className="font-display text-3xl lg:text-4xl font-bold text-foreground mb-1">
-          Welcome back, Alex
+          Welcome back, {displayName}
         </h1>
         <p className="text-white-60 text-base lg:text-lg">Here are your latest career insights.</p>
       </motion.div>
@@ -109,7 +113,7 @@ const DashboardHome = () => {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
               {[
-                { label: "AI Chats", used: 3, total: 5 },
+                { label: "AI Chats", used: user?.dailyCreditsUsed || 0, total: user?.dailyCreditsLimit || 5 },
                 { label: "ATS Scans", used: 0, total: 1 },
                 { label: "Job Matches", used: 1, total: 2 },
                 { label: "LinkedIn", used: 0, total: 1 },
