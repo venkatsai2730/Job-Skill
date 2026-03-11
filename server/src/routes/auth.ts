@@ -96,127 +96,70 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 });
 
-// POST /api/auth/google — generate Google OAuth URL directly
+// POST /api/auth/google
 router.post("/google", async (req: Request, res: Response) => {
     try {
-        const clientId = process.env.GOOGLE_CLIENT_ID;
-        if (!clientId) {
-            res.status(500).json({ error: "Google OAuth not configured" });
+        const redirectTo = req.body.redirectTo || process.env.CLIENT_URL + "/dashboard";
+
+        const { data, error } = await supabaseAdmin.auth.signInWithOAuth({
+            provider: "google",
+            options: {
+                redirectTo,
+                queryParams: {
+                    prompt: "select_account",
+                },
+            },
+        });
+
+        if (error) {
+            res.status(400).json({ error: error.message });
             return;
         }
 
-        const redirectUri = process.env.CLIENT_URL + "/auth/callback";
-        const scope = encodeURIComponent("openid email profile");
-        const state = Math.random().toString(36).substring(7);
-
-        const googleAuthUrl =
-            `https://accounts.google.com/o/oauth2/v2/auth` +
-            `?client_id=${clientId}` +
-            `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-            `&response_type=code` +
-            `&scope=${scope}` +
-            `&access_type=offline` +
-            `&prompt=consent` +
-            `&state=${state}`;
-
-        res.json({ url: googleAuthUrl });
+        res.json({ url: data.url });
     } catch (error: any) {
         console.error("Google auth error:", error);
         res.status(500).json({ error: "Internal server error" });
     }
 });
 
-// POST /api/auth/google/callback — exchange code for tokens, create/find user
+// POST /api/auth/logout
+router.post("/logout", async (req: Request, res: Response) => {
+    try {
+        await supabaseAdmin.auth.signOut();
+        res.json({ message: "Signed out successfully" });
+    } catch (error: any) {
+        console.error("Logout error:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// POST /api/auth/google/callback
 router.post("/google/callback", async (req: Request, res: Response) => {
     try {
-        const { code } = req.body;
+        const { access_token, refresh_token } = req.body;
 
-        if (!code) {
-            res.status(400).json({ error: "Authorization code required" });
+        if (!access_token) {
+            res.status(400).json({ error: "Access token required" });
             return;
         }
 
-        const clientId = process.env.GOOGLE_CLIENT_ID!;
-        const clientSecret = process.env.GOOGLE_CLIENT_SECRET!;
-        const redirectUri = process.env.CLIENT_URL + "/auth/callback";
+        // Get user from Supabase session
+        const { data: { user }, error } = await supabaseAdmin.auth.getUser(access_token);
 
-        // Exchange authorization code for tokens
-        const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                code,
-                client_id: clientId,
-                client_secret: clientSecret,
-                redirect_uri: redirectUri,
-                grant_type: "authorization_code",
-            }),
-        });
-
-        const tokenData = await tokenResponse.json() as any;
-
-        if (tokenData.error) {
-            console.error("Google token error:", tokenData);
-            res.status(400).json({ error: tokenData.error_description || "Failed to exchange code" });
+        if (error || !user) {
+            res.status(401).json({ error: "Invalid Google session" });
             return;
         }
 
-        // Get user info from Google
-        const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-            headers: { Authorization: `Bearer ${tokenData.access_token}` },
-        });
-
-        const googleUser = await userInfoResponse.json() as any;
-
-        if (!googleUser.email) {
-            res.status(400).json({ error: "Could not get email from Google" });
-            return;
-        }
-
-        // Check if user exists in Supabase, or create them
-        const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
-        let userId: string;
-        const existingUser = existingUsers?.users?.find(u => u.email === googleUser.email);
-
-        if (existingUser) {
-            userId = existingUser.id;
-        } else {
-            // Create new user in Supabase (with a random secure password since they use Google)
-            const randomPassword = Math.random().toString(36).slice(-12) + "A1!";
-            const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
-                email: googleUser.email,
-                password: randomPassword,
-                email_confirm: true,
-                user_metadata: {
-                    full_name: googleUser.name || "",
-                    avatar_url: googleUser.picture || "",
-                    provider: "google",
-                },
-            });
-
-            if (createError) {
-                console.error("Create user error:", createError);
-                res.status(400).json({ error: createError.message });
-                return;
-            }
-            userId = newUser.user.id;
-
-            // Also create their profile
-            await supabaseAdmin.from("profiles").insert({
-                user_id: userId,
-                display_name: googleUser.name || "",
-                avatar_url: googleUser.picture || "",
-            });
-        }
-
-        const token = generateToken(userId, googleUser.email);
+        const token = generateToken(user.id, user.email!);
 
         res.json({
             token,
             user: {
-                id: userId,
-                email: googleUser.email,
-                fullName: googleUser.name || "",
+                id: user.id,
+                email: user.email,
+                fullName: user.user_metadata?.full_name || user.user_metadata?.name || "",
             },
         });
     } catch (error: any) {
@@ -260,6 +203,91 @@ router.get("/me", async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         res.status(403).json({ error: "Invalid or expired token" });
+    }
+});
+
+// POST /api/auth/forgot-password
+router.post("/forgot-password", async (req: Request, res: Response) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            res.status(400).json({ error: "Email is required" });
+            return;
+        }
+
+        const redirectTo = (process.env.CLIENT_URL || "http://localhost:5173") + "/auth";
+
+        await supabaseAdmin.auth.resetPasswordForEmail(email, {
+            redirectTo,
+        });
+
+        // Always return success to prevent email enumeration
+        res.json({ message: "If an account exists with this email, a password reset link has been sent." });
+    } catch (error: any) {
+        console.error("Forgot password error:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// POST /api/auth/change-password — requires JWT auth
+router.post("/change-password", async (req: Request, res: Response) => {
+    try {
+        const authHeader = req.headers.authorization;
+        const token = authHeader?.split(" ")[1];
+
+        if (!token) {
+            res.status(401).json({ error: "No token provided" });
+            return;
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+            userId: string;
+            email: string;
+        };
+
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            res.status(400).json({ error: "Current and new passwords are required" });
+            return;
+        }
+
+        if (newPassword.length < 6) {
+            res.status(400).json({ error: "New password must be at least 6 characters" });
+            return;
+        }
+
+        // Verify current password by attempting sign in
+        const { error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+            email: decoded.email,
+            password: currentPassword,
+        });
+
+        if (signInError) {
+            res.status(401).json({ error: "Current password is incorrect" });
+            return;
+        }
+
+        // Update password via admin API
+        const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+            decoded.userId,
+            { password: newPassword }
+        );
+
+        if (updateError) {
+            res.status(400).json({ error: updateError.message });
+            return;
+        }
+
+        res.json({ message: "Password updated successfully" });
+    } catch (error: any) {
+        if (error.name === "JsonWebTokenError" || error.name === "TokenExpiredError") {
+            res.status(403).json({ error: "Invalid or expired token" });
+            return;
+        }
+        console.error("Change password error:", error);
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { Shield, Mail, Lock, User, Eye, EyeOff, Star, Quote } from "lucide-react";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
@@ -15,7 +15,19 @@ const Auth = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { setAuth } = useAuth();
+  const { setAuth, user, loading: authLoading } = useAuth();
+
+  // If already authenticated, redirect to dashboard
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-page flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-blue-electric border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,14 +42,17 @@ const Auth = () => {
         toast.success("Welcome back! ✦");
         navigate("/dashboard");
       } else {
-        const data = await api.post<{ token: string; user: any }>("/api/auth/signup", {
+        await api.post<{ token: string; user: any }>("/api/auth/signup", {
           email,
           password,
           fullName: name,
         });
-        setAuth(data.token, data.user);
-        toast.success("Account created! Welcome ✦");
-        navigate("/dashboard");
+        // Do NOT auto-login — require explicit login with credentials
+        toast.success("Account created! Please sign in with your credentials.");
+        setName("");
+        setPassword("");
+        // Keep email so user doesn't have to re-type it
+        setIsLogin(true);
       }
     } catch (error: any) {
       toast.error(error.message || "Something went wrong");
@@ -48,7 +63,9 @@ const Auth = () => {
 
   const handleGoogleAuth = async () => {
     try {
-      const data = await api.post<{ url: string }>("/api/auth/google");
+      const data = await api.post<{ url: string }>("/api/auth/google", {
+        redirectTo: window.location.origin + "/auth/callback",
+      });
       if (data.url) {
         window.location.href = data.url;
       }
@@ -258,7 +275,22 @@ const Auth = () => {
 
               {isLogin && (
                 <div className="text-right">
-                  <button type="button" className="text-blue-electric text-xs hover:underline">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!email) {
+                        toast.error("Please enter your email address first");
+                        return;
+                      }
+                      try {
+                        const data = await api.post<{ message: string }>("/api/auth/forgot-password", { email });
+                        toast.success(data.message);
+                      } catch (error: any) {
+                        toast.error(error.message || "Failed to send reset email");
+                      }
+                    }}
+                    className="text-blue-electric text-xs hover:underline"
+                  >
                     Forgot password?
                   </button>
                 </div>

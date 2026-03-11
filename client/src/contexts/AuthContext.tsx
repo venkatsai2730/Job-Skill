@@ -6,6 +6,8 @@ interface User {
   email: string;
   fullName: string;
   plan?: string;
+  dailyCreditsUsed?: number;
+  dailyCreditsLimit?: number;
 }
 
 interface AuthContextType {
@@ -59,11 +61,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(newUser);
   };
 
-  const signOut = () => {
+  const signOut = async () => {
+    try {
+      await api.post("/api/auth/logout");
+    } catch (e) {
+      console.error("Failed to sign out from server", e);
+    }
     localStorage.removeItem("auth_token");
     setToken(null);
     setUser(null);
   };
+
+  useEffect(() => {
+    const handleAuthError = () => {
+      signOut();
+    };
+    window.addEventListener("auth_error", handleAuthError);
+    return () => window.removeEventListener("auth_error", handleAuthError);
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, token, loading, signOut, setAuth }}>
