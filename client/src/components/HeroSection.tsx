@@ -13,8 +13,16 @@ const stats = [
 
 const HeroSection = () => {
   return (
-    <section className="starfield min-h-screen pt-24 pb-16 px-4 overflow-hidden">
-      <div className="max-w-5xl mx-auto text-center">
+    <section className="starfield min-h-screen pt-24 pb-16 px-4 overflow-hidden relative">
+      {/* Animated gradient orbs */}
+      <div className="hero-orb hero-orb-1" />
+      <div className="hero-orb hero-orb-2" />
+      <div className="hero-orb hero-orb-3" />
+
+      {/* Particle grid overlay */}
+      <div className="absolute inset-0 particle-grid opacity-40 pointer-events-none" />
+
+      <div className="max-w-5xl mx-auto text-center relative z-10">
         {/* Trust badge */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -44,7 +52,7 @@ const HeroSection = () => {
         >
           <span className="font-extrabold text-foreground">Land your dream job</span>
           <br />
-          <span className="font-normal text-white-60">smarter, faster, better.</span>
+          <span className="font-normal text-gradient-blue">smarter, faster, better.</span>
         </motion.h1>
 
         {/* Subtext */}
@@ -66,19 +74,16 @@ const HeroSection = () => {
           transition={{ duration: 0.5, delay: 0.4 }}
           className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-3"
         >
-          <motion.div
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.97 }}
-          >
+          <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
             <Link
               to="/auth"
-              className="bg-blue-electric hover:bg-blue-bright text-primary-foreground font-semibold text-base px-8 py-3.5 rounded-full transition-all hover:shadow-[0_0_40px_rgba(59,91,255,0.4)] flex items-center gap-2"
+              className="bg-blue-electric hover:bg-blue-bright text-primary-foreground font-semibold text-base px-8 py-3.5 rounded-full transition-all hover:shadow-[0_0_40px_rgba(124,101,255,0.5)] flex items-center gap-2"
             >
               <span className="text-cyan-spark">✦</span> Build my Resume →
             </Link>
           </motion.div>
           <motion.button
-            whileHover={{ scale: 1.04, borderColor: "hsl(230, 25%, 14%)" }}
+            whileHover={{ scale: 1.04, borderColor: "hsl(210, 40%, 96%)" }}
             whileTap={{ scale: 0.97 }}
             className="border border-white-30 text-white-60 hover:text-foreground font-medium text-base px-8 py-3.5 rounded-full transition-all"
           >

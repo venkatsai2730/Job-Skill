@@ -46,9 +46,9 @@ const MetricRing = ({ score, label, color = "blue" }: { score: number; label: st
 };
 
 const quickActions = [
-  { icon: FileText, label: "Fix Resume", desc: "AI-powered resume optimization", path: "/dashboard/resume" },
-  { icon: Target, label: "Find Jobs", desc: "Match with top opportunities", path: "/dashboard/jobs" },
-  { icon: TrendingUp, label: "Skill Gap", desc: "Identify & close skill gaps", path: "/dashboard/chat" },
+  { icon: FileText, label: "Fix Resume", desc: "Gemini 2.5 Pro resume scoring", path: "/dashboard/resume" },
+  { icon: Target, label: "Find Jobs", desc: "Real-time from Greenhouse & Lever", path: "/dashboard/jobs" },
+  { icon: TrendingUp, label: "AI Coach", desc: "Llama 4 Scout career coaching", path: "/dashboard/chat" },
 ];
 
 const achievements = [
@@ -71,7 +71,7 @@ const DashboardHome = () => {
         <h1 className="font-display text-3xl lg:text-4xl font-bold text-foreground mb-1">
           Welcome back, {displayName}
         </h1>
-        <p className="text-white-60 text-base lg:text-lg">Here are your latest career insights.</p>
+        <p className="text-white-60 text-base lg:text-lg">Here are your latest career insights — powered by Llama 4, Gemini 2.5 Pro & Codestral.</p>
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
@@ -175,7 +175,7 @@ const DashboardHome = () => {
                 { action: "Saved Full Stack Developer role at Notion", time: "1d ago", type: "job", icon: "💼" },
                 { action: "Skills gap analysis: React advanced +12%", time: "2d ago", type: "skill", icon: "📈" },
               ].map((item, i) => (
-                <div key={i} className="flex items-center gap-4 py-2 border-b border-gray-100 last:border-0">
+                <div key={i} className="flex items-center gap-4 py-2 border-b border-white/[0.06] last:border-0">
                   <span className="text-xl">{item.icon}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-foreground text-base truncate">{item.action}</p>
@@ -276,7 +276,7 @@ const DashboardHome = () => {
             </p>
             <Link
               to="/pricing"
-              className="block text-center bg-white text-blue-electric font-semibold text-sm py-2.5 rounded-lg hover:bg-white/90 transition-colors"
+              className="block text-center bg-foreground text-page font-semibold text-sm py-2.5 rounded-lg hover:opacity-90 transition-colors"
             >
               Upgrade Now — $19/mo
             </Link>

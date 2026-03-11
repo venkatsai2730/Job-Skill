@@ -6,6 +6,9 @@ import profileRoutes from "./routes/profile.js";
 import resumeRoutes from "./routes/resume.js";
 import chatRoutes from "./routes/chat.js";
 import jobsRoutes from "./routes/jobs.js";
+import jobListingsRoutes from "./routes/jobListings.js";
+import notificationRoutes from "./routes/notifications.js";
+import { fetchAllJobs } from "./services/jobFetcher.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -23,11 +26,32 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/resume", resumeRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/jobs", jobsRoutes);
+app.use("/api/job-listings", jobListingsRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
+
+// ── Job Fetch Cron (every 5 minutes) ────────────────────────
+const JOB_FETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+let jobFetchTimer: ReturnType<typeof setInterval> | null = null;
+
+function startJobFetchCron() {
+    // Initial fetch after 30s delay (let server warm up)
+    setTimeout(() => {
+        fetchAllJobs().catch(err => console.warn("[Cron] Initial job fetch failed:", err.message));
+    }, 30000);
+
+    jobFetchTimer = setInterval(() => {
+        fetchAllJobs().catch(err => console.warn("[Cron] Job fetch failed:", err.message));
+    }, JOB_FETCH_INTERVAL);
+
+    console.log(`⏰ Job fetch cron started (every ${JOB_FETCH_INTERVAL / 60000} min)`);
+}
+
+startJobFetchCron();
 
 // Global Error Handling Middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

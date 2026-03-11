@@ -3,8 +3,7 @@
     "version": "1.0.0",
     "type": "module",
     "scripts": {
-        "kill-port": "powershell -Command \"try { (Get-NetTCPConnection -LocalPort 3001 -ErrorAction Stop).OwningProcess | ForEach-Object { taskkill /PID $_ /F } } catch { Write-Host 'Port 3001 is free' }\"",
-        "dev": "npm run kill-port && tsx watch src/index.ts",
+        "dev": "tsx watch src/index.ts",
         "build": "tsc",
         "start": "node dist/index.js"
     },

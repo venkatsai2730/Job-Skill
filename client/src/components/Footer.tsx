@@ -4,12 +4,12 @@ import { Link } from "react-router-dom";
 import ScrollReveal from "./ScrollReveal";
 
 const Footer = () => (
-  <footer className="bg-surface-1 border-t border-blue-muted/30 py-16 px-4">
+  <footer className="bg-surface-1 border-t border-white/[0.06] py-16 px-4">
     <div className="max-w-6xl mx-auto">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
         <ScrollReveal direction="up" className="col-span-2 md:col-span-1">
           <div className="flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-blue-electric flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-electric to-violet-pulse flex items-center justify-center">
               <Shield className="w-5 h-5 text-primary-foreground" />
             </div>
             <span className="font-display font-bold text-foreground">JobSkill AI</span>
@@ -64,7 +64,7 @@ const Footer = () => (
         whileInView={{ opacity: 1 }}
         viewport={{ once: true }}
         transition={{ delay: 0.4 }}
-        className="border-t border-blue-muted/30 pt-6 text-center"
+        className="border-t border-white/[0.06] pt-6 text-center"
       >
         <p className="text-white-30 text-xs">
           © 2025 JobSkill AI · 256-bit Encrypted · SOC2 Ready

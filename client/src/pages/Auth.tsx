@@ -82,7 +82,7 @@ const Auth = () => {
           className="absolute inset-0 pointer-events-none"
           style={{
             background:
-              "radial-gradient(ellipse at 30% 20%, hsl(243 80% 95% / 0.7) 0%, transparent 50%), radial-gradient(ellipse at 70% 20%, hsl(270 70% 95% / 0.5) 0%, transparent 50%), radial-gradient(ellipse at 50% 80%, hsl(195 80% 96% / 0.4) 0%, transparent 50%)",
+              "radial-gradient(ellipse at 30% 20%, hsl(250 89% 67% / 0.12) 0%, transparent 50%), radial-gradient(ellipse at 70% 20%, hsl(280 75% 68% / 0.1) 0%, transparent 50%), radial-gradient(ellipse at 50% 80%, hsl(180 85% 60% / 0.06) 0%, transparent 50%)",
           }}
         />
 
@@ -123,7 +123,7 @@ const Auth = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.3 }}
-              className="bg-white rounded-2xl p-7 border border-gray-200/60 shadow-[0_8px_30px_rgba(99,91,255,0.08),0_2px_8px_rgba(0,0,0,0.04)]"
+              className="bg-surface-1 rounded-2xl p-7 border border-white/[0.06] shadow-[0_8px_30px_rgba(124,101,255,0.1),0_2px_8px_rgba(0,0,0,0.2)]"
             >
               <Quote className="w-8 h-8 text-blue-electric/20 mb-4" />
               <p className="text-foreground text-base leading-relaxed mb-6">
@@ -157,7 +157,7 @@ const Auth = () => {
                 {["SK", "MJ", "PS", "DL"].map((initials, i) => (
                   <div
                     key={i}
-                    className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-[9px] font-bold text-white"
+                    className="w-8 h-8 rounded-full border-2 border-surface-1 flex items-center justify-center text-[9px] font-bold text-white"
                     style={{
                       background: [
                         "linear-gradient(135deg, #635bff, #7c6bff)",
@@ -193,7 +193,7 @@ const Auth = () => {
             initial={{ opacity: 0, y: 20, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.4, delay: 0.1 }}
-            className="bg-white rounded-2xl p-8 border border-gray-200/80 shadow-[0_8px_40px_rgba(99,91,255,0.08),0_2px_8px_rgba(0,0,0,0.04)] w-full max-w-md"
+            className="bg-surface-1 rounded-2xl p-8 border border-white/[0.06] shadow-[0_8px_40px_rgba(124,101,255,0.1),0_2px_8px_rgba(0,0,0,0.2)] w-full max-w-md"
           >
             <h1 className="font-display font-bold text-2xl text-foreground text-center mb-1">
               {isLogin ? "Welcome back" : "Create your account"}
@@ -207,7 +207,7 @@ const Auth = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={handleGoogleAuth}
-              className="w-full flex items-center justify-center gap-3 h-11 rounded-xl border border-gray-200 bg-surface-2 text-foreground text-sm font-medium hover:border-blue-electric/50 hover:bg-surface-3 transition-all mb-5"
+              className="w-full flex items-center justify-center gap-3 h-11 rounded-xl border border-white/[0.06] bg-surface-2 text-foreground text-sm font-medium hover:border-blue-electric/50 hover:bg-surface-3 transition-all mb-5"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
@@ -220,9 +220,9 @@ const Auth = () => {
 
             {/* Divider */}
             <div className="flex items-center gap-3 mb-5">
-              <div className="flex-1 h-px bg-gray-200" />
+              <div className="flex-1 h-px bg-white/[0.06]" />
               <span className="text-white-30 text-xs uppercase tracking-wider">or</span>
-              <div className="flex-1 h-px bg-gray-200" />
+              <div className="flex-1 h-px bg-white/[0.06]" />
             </div>
 
             {/* Form */}
@@ -236,7 +236,7 @@ const Auth = () => {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required={!isLogin}
-                    className="w-full h-11 pl-10 pr-4 rounded-xl bg-surface-2 border border-gray-200 text-foreground placeholder:text-white-30 text-sm focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all"
+                    className="w-full h-11 pl-10 pr-4 rounded-xl bg-surface-2 border border-white/[0.06] text-foreground placeholder:text-white-30 text-sm focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all"
                   />
                 </div>
               )}
@@ -249,7 +249,7 @@ const Auth = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full h-11 pl-10 pr-4 rounded-xl bg-surface-2 border border-gray-200 text-foreground placeholder:text-white-30 text-sm focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all"
+                  className="w-full h-11 pl-10 pr-4 rounded-xl bg-surface-2 border border-white/[0.06] text-foreground placeholder:text-white-30 text-sm focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all"
                 />
               </div>
 
@@ -262,7 +262,7 @@ const Auth = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   minLength={6}
-                  className="w-full h-11 pl-10 pr-11 rounded-xl bg-surface-2 border border-gray-200 text-foreground placeholder:text-white-30 text-sm focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all"
+                  className="w-full h-11 pl-10 pr-11 rounded-xl bg-surface-2 border border-white/[0.06] text-foreground placeholder:text-white-30 text-sm focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all"
                 />
                 <button
                   type="button"
