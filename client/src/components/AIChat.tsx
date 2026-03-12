@@ -23,22 +23,8 @@ const QUICK_PROMPTS = [
     { label: "Job Match", icon: "🎯", feature: "job_match" as AIFeature, text: "Score how well my profile matches a specific job. I'll paste the job description." },
 ];
 
-const MODEL_LABELS: Record<string, { label: string; color: string }> = {
-    groq: { label: "Llama 4 Scout", color: "text-orange-400 bg-orange-500/10 border-orange-500/20" },
-    gemini: { label: "Gemini 2.5 Pro", color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
-    mistral: { label: "Codestral", color: "text-purple-400 bg-purple-500/10 border-purple-500/20" },
-};
-
 function ModelBadge({ provider, model }: { provider?: string; model?: string }) {
-    if (!provider) return null;
-    const info = MODEL_LABELS[provider] || { label: provider, color: "text-white-40 bg-surface-3 border-white/10" };
-    const isMaverick = model?.includes("maverick");
-    return (
-        <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${info.color}`}>
-            <Sparkles className="w-2.5 h-2.5" />
-            {isMaverick ? "Llama 4 Maverick" : info.label}
-        </span>
-    );
+    return null;
 }
 
 function formatMarkdown(text: string) {
@@ -254,47 +240,11 @@ export default function AIChat() {
                     ))}
                 </div>
                 <div className="p-3 border-t border-white/[0.06]">
-                    <div className="text-[10px] text-white-30 space-y-1">
-                        <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> Llama 4 Scout — Chat, Vision</div>
-                        <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Gemini 2.5 Pro — Resume, Match</div>
-                        <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Maverick — Cover Letters</div>
-                        <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-purple-400" /> Codestral — Code Gen</div>
-                    </div>
                 </div>
             </div>
 
             {/* Main Chat Area */}
             <div className="flex-1 flex flex-col min-w-0">
-                {/* Header */}
-                <div className="bg-surface-1 border-b border-white/[0.06] px-4 py-3 flex items-center gap-3">
-                    <button onClick={() => setSidebarOpen(!sidebarOpen)}
-                        className="p-1.5 rounded-lg hover:bg-surface-2 text-white-40 hover:text-foreground transition-colors">
-                        {sidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                    </button>
-                    <div className="flex-1">
-                        <h1 className="text-base font-display font-bold text-foreground">AI Career Coach</h1>
-                        <p className="text-[11px] text-white-40">
-                            {activeFeature === "cover_letter" ? "Llama 4 Maverick · Groq" :
-                             activeFeature === "code_gen" ? "Codestral · Mistral" :
-                             activeFeature === "job_match" || activeFeature === "resume_pdf" ? "Gemini 2.5 Pro · Google" :
-                             "Llama 4 Scout · Groq"}
-                        </p>
-                    </div>
-                    <div className="hidden md:flex gap-1.5">
-                        {(["chat", "cover_letter", "code_gen", "job_match", "screening"] as AIFeature[]).map(f => {
-                            const fl = featureLabels[f];
-                            const Icon = fl?.icon || MessageSquare;
-                            return (
-                                <button key={f} onClick={() => setActiveFeature(f)}
-                                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all
-                                        ${activeFeature === f ? "bg-blue-electric/15 text-blue-electric border border-blue-electric/30" : "text-white-40 hover:text-white-60 hover:bg-surface-2 border border-transparent"}`}>
-                                    <Icon className="w-3 h-3" /> {fl?.label}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-
                 {/* Messages */}
                 <div className="flex-1 overflow-y-auto px-4 py-6 space-y-5 max-w-4xl mx-auto w-full">
                     {loadingHistory ? (
@@ -362,7 +312,7 @@ export default function AIChat() {
                             </button>
                         </div>
                         <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
-                            placeholder={activeFeature === "code_gen" ? "Describe the code you need..." : activeFeature === "cover_letter" ? "Paste job description for cover letter..." : "Ask your AI career coach... (Enter to send)"}
+                            placeholder={activeFeature === "code_gen" ? "Describe the code you need..." : activeFeature === "cover_letter" ? "Paste job description for cover letter..." : "Ask me anything... (Enter to send)"}
                             rows={1} disabled={isLoading}
                             className="flex-1 bg-transparent px-3 py-2 text-sm text-foreground focus:outline-none resize-none max-h-32 disabled:opacity-50 placeholder:text-white-30"
                             style={{ minHeight: "40px" }}
@@ -372,7 +322,7 @@ export default function AIChat() {
                             <Send className="w-4 h-4" />
                         </button>
                     </div>
-                    <p className="text-center text-[10px] text-white-30 mt-1.5">Enter to send · Shift+Enter for new line · Powered by Llama 4, Gemini 2.5 Pro & Codestral</p>
+                    <p className="text-center text-[10px] text-white-30 mt-1.5">Enter to send · Shift+Enter for new line</p>
                 </div>
             </div>
         </div>

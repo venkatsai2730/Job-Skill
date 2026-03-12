@@ -23,7 +23,7 @@ export interface Conversation {
 
 const WELCOME_MESSAGE: ChatMessage = {
     role: "assistant",
-    content: `Hey there! 👋 I'm your AI career coach — powered by **Llama 4 Scout**, **Gemini 2.5 Pro**, **Maverick** & **Codestral**.
+    content: `Hey there! 👋 I'm your AI career assistant.
 
 Here's what I can do:
 
@@ -33,8 +33,8 @@ Here's what I can do:
 📋 **Screening Q&A** — Auto-answer application questions
 🧠 **Skill Gap** — 2026 market roadmap
 🔗 **LinkedIn** — Profile optimization
-💻 **Code Help** — Powered by Codestral
-🎯 **Job Match** — AI scoring with Gemini 2.5 Pro
+💻 **Code Help** — Code generation & review
+🎯 **Job Match** — AI-powered scoring
 
 What would you like to work on?`,
 };
