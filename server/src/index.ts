@@ -8,6 +8,7 @@ import chatRoutes from "./routes/chat.js";
 import jobsRoutes from "./routes/jobs.js";
 import jobListingsRoutes from "./routes/jobListings.js";
 import notificationRoutes from "./routes/notifications.js";
+import linkedinRoutes from "./routes/linkedin.js";
 import { fetchAllJobs } from "./services/jobFetcher.js";
 
 const app = express();
@@ -28,6 +29,7 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/jobs", jobsRoutes);
 app.use("/api/job-listings", jobListingsRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/linkedin", linkedinRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {

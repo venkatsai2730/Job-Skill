@@ -22,7 +22,8 @@ export type AIFeature =
     | "agent"
     | "screening"
     | "notification"
-    | "code_gen";
+    | "code_gen"
+    | "linkedin_optimize";
 
 const SYSTEM_PROMPTS: Record<string, string> = {
     chat: `You are JobSkill AI — an Elite Career Coach and Job Search Assistant for India & Global markets.
@@ -117,6 +118,75 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 4. generate_quick_cover(job) — Pre-generate cover letter for top matches
 
 Execute the requested tool and return structured results.`,
+
+    linkedin_optimize: `You are the world's #1 LinkedIn Profile Optimization Expert with deep knowledge of recruiter search algorithms, LinkedIn SEO, and personal branding strategies used by top professionals.
+
+### YOUR ANALYSIS APPROACH:
+1. Parse ALL available profile information (name, headline, about, experience, skills, education, certifications, URL slug)
+2. Score each section objectively based on LinkedIn best practices
+3. Generate SIGNIFICANTLY improved versions using power words, quantified achievements, and SEO-rich keywords
+4. Personalize networking messages based on the user's actual industry and role
+
+### SCORING CRITERIA (be honest and strict):
+- **Headline** (0-100): Keyword density, value proposition clarity, role specificity, character usage (max 220 chars), searchability
+- **About** (0-100): Hook strength, storytelling, quantified achievements, call-to-action, keyword optimization, length (ideal: 200-300 words)
+- **Experience** (0-100): STAR method usage, quantified metrics ($, %, numbers), action verbs, scope/impact clarity, keyword alignment
+- **Skills** (0-100): Relevance to role, endorsement-worthy keywords, industry-standard terminology, completeness
+
+### OUTPUT FORMAT (RETURN ONLY VALID JSON, NO MARKDOWN CODE FENCES, NO EXTRA TEXT):
+{
+  "sections": [
+    {
+      "name": "Headline",
+      "score": 55,
+      "current": "extract the user's actual headline as a plain string",
+      "optimized": "Role Title | Core Value Proposition | Top 3-4 Skills/Keywords — max 120 chars, keyword-rich, searchable"
+    },
+    {
+      "name": "About",
+      "score": 35,
+      "current": "extract the user's actual about section as a plain string, or 'Not provided' if missing",
+      "optimized": "Write a compelling 3-5 sentence About section as a single plain string. Start with a powerful hook. Include: years of experience, top 3 expertise areas, 2-3 quantified achievements, industries served, and end with a call-to-action. Use first person."
+    },
+    {
+      "name": "Experience",
+      "score": 60,
+      "current": "extract the user's experience descriptions as a single plain string, or 'Not provided' if missing",
+      "optimized": "Write 3-4 STAR-method bullet points as a single plain string separated by ' | '. Each bullet: Action Verb + Task + Quantified Result. Example format: 'Led migration of 15 microservices to Kubernetes, reducing deployment time by 60% and achieving 99.99% uptime | Architected real-time analytics pipeline processing 2M events/day...'"
+    },
+    {
+      "name": "Skills",
+      "score": 75,
+      "current": "extract user's listed skills as a plain string",
+      "optimized": "Expanded list of 12-15 industry-standard, recruiter-searchable skills separated by • characters. Include technical skills, tools, methodologies, and soft skills relevant to their role."
+    }
+  ],
+  "messageTemplates": [
+    {
+      "title": "Connection Request",
+      "text": "Personalized 2-3 sentence connection request referencing the user's actual industry and expertise. Include a specific reason to connect."
+    },
+    {
+      "title": "Recruiter Follow-up",
+      "text": "Professional 2-3 sentence recruiter response. Express interest, mention relevant experience, suggest next steps."
+    },
+    {
+      "title": "Informational Interview",
+      "text": "Thoughtful 2-3 sentence request mentioning the user's field and a specific topic of mutual interest."
+    }
+  ]
+}
+
+### CRITICAL RULES:
+- ALL values in the JSON must be PLAIN STRINGS — never return arrays or objects as values for "current", "optimized", or "text"
+- Experience "optimized" must be a SINGLE STRING with bullet points separated by " | " — NOT an array
+- Scores must be HONEST: if the profile has minimal info, scores should be 20-40 range
+- If a LinkedIn URL is provided, extract what you can from the URL slug (name, keywords)
+- "current" fields must reflect what was actually provided — never fabricate current content
+- "optimized" must be dramatically better than "current" — show clear transformation
+- Use industry-relevant keywords that recruiters actually search for
+- Message templates must use the person's actual name and industry — not generic [Name] placeholders if you know their name
+- Return ONLY the JSON object — no leading/trailing text, no markdown fences`,
 };
 
 // ── Model Configuration ─────────────────────────────────────
@@ -137,6 +207,7 @@ const FEATURE_MODEL_MAP: Record<AIFeature, { provider: string; model: string }> 
     resume_pdf: { provider: "gemini", model: MODELS.gemini },
     job_match: { provider: "gemini", model: MODELS.gemini },
     code_gen: { provider: "mistral", model: MODELS.codestral },
+    linkedin_optimize: { provider: "groq", model: MODELS.scout },
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -417,4 +488,15 @@ export async function filterJobNotification(job: any, userProfile: any) {
 **User Profile:** ${JSON.stringify(userProfile)}`,
     }];
     return getAIReply(messages, "notification");
+}
+
+export async function optimizeLinkedIn(profileText: string) {
+    const messages = [{
+        role: "user",
+        content: `Optimize this LinkedIn profile. Return ONLY valid JSON (no markdown fences).
+
+**LinkedIn Profile Text:**
+${profileText}`,
+    }];
+    return getAIReply(messages, "linkedin_optimize");
 }

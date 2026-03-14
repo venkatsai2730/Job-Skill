@@ -1,4 +1,6 @@
 import { Star, MapPin, DollarSign, Clock, Bot, ExternalLink, Filter, ChevronDown } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 
 const STATS = [
   { icon: "📋", label: "Total", value: "24" },
@@ -25,6 +27,8 @@ const COLUMNS = [
 ];
 
 const Jobs = () => {
+  const navigate = useNavigate();
+
   return (
     <div className="p-6 md:p-10 max-w-[1600px] mx-auto min-h-screen">
       {/* Header */}
@@ -96,12 +100,40 @@ const Jobs = () => {
                       </div>
                     </div>
                     <div className="flex justify-between items-center border-t border-white/[0.06] pt-4 mt-1">
-                      <button className="flex items-center gap-1.5 text-blue-electric font-semibold text-[13px] hover:underline outline-none">
+                      <button 
+                        onClick={() => {
+                          const prompt = `Act as my AI interview coach. I am preparing for an interview for the **${job.role}** role at **${job.company}**. Ask me a typical interview question for this role, and then evaluate my answer.`;
+                          navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`);
+                        }}
+                        className="flex items-center gap-1.5 text-blue-electric font-semibold text-[13px] hover:underline outline-none"
+                      >
                         <Bot className="w-4 h-4" /> AI Coach
                       </button>
-                      <button className="flex items-center gap-1.5 text-white-40 font-medium text-[13px] hover:text-white-60 group/jd outline-none transition-colors">
-                        <ExternalLink className="w-3.5 h-3.5 transition-transform group-hover/jd:-translate-y-0.5 group-hover/jd:translate-x-0.5" /> View JD
-                      </button>
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <button className="flex items-center gap-1.5 text-white-40 font-medium text-[13px] hover:text-white-60 group/jd outline-none transition-colors">
+                            <ExternalLink className="w-3.5 h-3.5 transition-transform group-hover/jd:-translate-y-0.5 group-hover/jd:translate-x-0.5" /> View JD
+                          </button>
+                        </DialogTrigger>
+                        <DialogContent className="bg-surface-1 border-white/[0.06] text-white sm:max-w-[600px]">
+                          <DialogHeader>
+                            <DialogTitle className="text-xl font-display text-white">{job.role} at {job.company}</DialogTitle>
+                            <DialogDescription className="text-white-60 mt-2">
+                              This is the job description for the {job.role} position at {job.company}. They are looking for candidates in {job.location} with a compensation range of {job.salary}.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="mt-4 space-y-4 text-sm text-white-80">
+                            <p><strong>About the role:</strong><br/>We are looking for an experienced professional to join our team. You will be responsible for building scalable solutions and working closely with cross-functional teams.</p>
+                            <p><strong>Requirements:</strong></p>
+                            <ul className="list-disc pl-5 space-y-1">
+                              <li>Experience relevant to the {job.role} position</li>
+                              <li>Strong problem-solving and analytical skills</li>
+                              <li>Excellent communication and teamwork abilities</li>
+                              <li>History of delivering high-quality results</li>
+                            </ul>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
                     </div>
                   </div>
                 ))}

@@ -112,28 +112,37 @@ async function storeJobs(jobs: RawJob[]): Promise<number> {
         const salary = extractSalary(job.description || "");
         const experience = extractExperience(job.description || "");
 
-        // Upsert by job_url to deduplicate
-        const { error } = await supabaseAdmin
-            .from("job_listings")
-            .upsert(
-                {
-                    title: job.title,
-                    company: job.company,
-                    location: job.location,
-                    skills,
-                    experience_min: experience.min,
-                    experience_max: experience.max,
-                    salary_min: salary.min,
-                    salary_max: salary.max,
-                    job_url: job.job_url,
-                    source: job.source,
-                    description: job.description || "",
-                    posted_at: job.posted_at || new Date().toISOString(),
-                },
-                { onConflict: "job_url" }
-            );
+        try {
+            // Upsert by job_url to deduplicate
+            const { error } = await supabaseAdmin
+                .from("job_listings")
+                .upsert(
+                    {
+                        title: job.title,
+                        company: job.company,
+                        location: job.location,
+                        skills,
+                        experience_min: experience.min,
+                        experience_max: experience.max,
+                        salary_min: salary.min,
+                        salary_max: salary.max,
+                        job_url: job.job_url,
+                        source: job.source,
+                        description: job.description || "",
+                        posted_at: job.posted_at || new Date().toISOString(),
+                    },
+                    { onConflict: "job_url" }
+                );
 
-        if (!error) stored++;
+            if (!error) stored++;
+        } catch (err: any) {
+            // Supabase unreachable — log once and skip remaining
+            if (err.message?.includes("fetch failed") || err.cause?.code === "ENOTFOUND") {
+                console.warn("[JobFetcher] Supabase unreachable — skipping job storage. Check SUPABASE_URL in .env");
+                return stored;
+            }
+            // Other errors — just skip this job
+        }
     }
     return stored;
 }
@@ -152,10 +161,19 @@ export async function fetchAllJobs(): Promise<{ total: number; stored: number }>
     allJobs.push(...ghJobs.flat(), ...leverJobs.flat());
 
     console.log(`[JobFetcher] Fetched ${allJobs.length} total jobs`);
-    const stored = await storeJobs(allJobs);
-    console.log(`[JobFetcher] Stored ${stored} new/updated jobs`);
 
-    return { total: allJobs.length, stored };
+    try {
+        const stored = await storeJobs(allJobs);
+        console.log(`[JobFetcher] Stored ${stored} new/updated jobs`);
+        return { total: allJobs.length, stored };
+    } catch (err: any) {
+        if (err.message?.includes("fetch failed") || err.cause?.code === "ENOTFOUND") {
+            console.warn("[JobFetcher] ⚠️ Supabase unreachable — cannot store jobs. Verify SUPABASE_URL in .env is correct and the project is active.");
+        } else {
+            console.warn("[JobFetcher] Store failed:", err.message);
+        }
+        return { total: allJobs.length, stored: 0 };
+    }
 }
 
 // ── Search jobs from DB ─────────────────────────────────────
