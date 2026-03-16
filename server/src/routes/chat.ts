@@ -10,6 +10,7 @@ import {
     type AIFeature,
 } from "../services/chatService.js";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
+import { supabaseAdmin } from "../config/supabase.js";
 import {
     createConversation,
     getUserConversations,
@@ -87,7 +88,8 @@ router.post("/conversations", authenticateToken, async (req: AuthRequest, res: R
 // GET /api/chat/conversations/:id/messages — get messages for a conversation
 router.get("/conversations/:id/messages", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
-        const messages = await getConversationMessages(req.params.id);
+        const id = req.params.id as string;
+        const messages = await getConversationMessages(id);
         res.json({ messages });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -107,14 +109,14 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
 
         // Save user message
         await addMessage({
-            conversation_id: conversationId,
+            conversation_id: conversationId as string,
             role: "user",
             content: typeof content === "string" ? content : JSON.stringify(content),
             feature,
         });
 
         // Get conversation history
-        const history = await getConversationMessages(conversationId);
+        const history = await getConversationMessages(conversationId as string);
         const messages = history.map(m => ({
             role: m.role,
             content: m.content,
@@ -122,11 +124,89 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
 
         // Get AI reply
         const aiFeature: AIFeature = feature || "chat";
-        const result = await getAIReply(messages, aiFeature);
+        
+        // Dynamically inject user's latest resume context if available
+        let resumeContext = "";
+        let parsedData: any = null;
+        if (aiFeature === "chat") {
+            try {
+                const { data: resumeRow, error } = await supabaseAdmin
+                    .from("resumes")
+                    .select("parsed_data")
+                    .eq("user_id", req.user!.userId)
+                    .order("created_at", { ascending: false })
+                    .limit(1)
+                    .single();
+
+                if (!error && resumeRow && resumeRow.parsed_data) {
+                    parsedData = resumeRow.parsed_data;
+                    resumeContext = parsedData.rawText || JSON.stringify(parsedData.sections);
+                    if (resumeContext) {
+                        messages.unshift({
+                            role: "user",
+                            content: `[SYSTEM CONTEXT - DO NOT ACKNOWLEDGE UNLESS ASKED]\n\nUser's Current Resume Data:\n${resumeContext}\n\n[END CONTEXT]`
+                        });
+                    }
+                }
+            } catch (err) {
+                console.warn("[Chat] Failed to inject resume context:", err);
+            }
+        }
+
+        // ==========================================
+        // PHASE 5: COMMAND INTENT DETECTION
+        // ==========================================
+        let result: { reply: string; dataPayload?: any; provider?: string; model?: string; tokens?: number };
+
+        const lowercaseContent = typeof content === "string" ? content.toLowerCase() : "";
+        const isScoreIntent = lowercaseContent.includes("score my resume") || lowercaseContent.includes("ats score");
+        const isLatexIntent = lowercaseContent.includes("give me latex") || lowercaseContent.includes("generate latex");
+        const isCreateIntent = lowercaseContent.includes("create resume for") || lowercaseContent.includes("write me a resume for");
+
+        if (isScoreIntent && resumeContext) {
+            // Hijack chat: run the score endpoint manually
+            const scoreResultRaw = await scoreResume(resumeContext);
+            let scoreData: any = {};
+            try {
+                const jsonMatch = scoreResultRaw.reply.match(/\{[\s\S]*\}/);
+                scoreData = JSON.parse(jsonMatch ? jsonMatch[0] : scoreResultRaw.reply);
+            } catch (e) {
+                console.error("Failed to parse scoreResult JSON", e);
+            }
+            
+            result = {
+                reply: `I analyzed your resume. Your current ATS score is **${scoreData.overall_score || "N/A"}/100**. I've attached your full ATS analysis below.`,
+                dataPayload: { type: "score", data: scoreData }
+            };
+        } else if (isLatexIntent && parsedData) {
+            // Hijack chat: return LaTeX payload
+            const prompt = `Convert the following resume into a complete, professional LaTeX document using a modern template. Return ONLY the raw LaTeX code inside a \`\`\`latex ... \`\`\` block. No explanations.\nResume Data: ${JSON.stringify(parsedData.sections)}`;
+            const mistralResult = await generateCode(prompt, "latex");
+            
+            const latexMatch = mistralResult.reply.match(/```(?:latex)?\n([\s\S]*?)```/i);
+            const texPayload = latexMatch ? latexMatch[1].trim() : mistralResult.reply.replace(/```latex|```/gi, "").trim();
+
+            result = {
+                reply: "I generated the LaTeX source code for your resume using Codestral! You can copy it or compile it directly below.",
+                dataPayload: { type: "latex", data: texPayload }
+            };
+        } else if (isCreateIntent && resumeContext) {
+            // Hijack chat: extract company name
+             const companyMatch = lowercaseContent.match(/(?:for|at) ([a-zA-Z0-9\s]+)/);
+             const companyName = companyMatch ? companyMatch[1].trim() : "the target company";
+             const coverLetterResult = await generateCoverLetter(resumeContext, "General software engineering role", companyName, "professional");
+             
+             result = {
+                 reply: `I created targeted content for ${companyName}. Based on your background, here is a custom summary and cover letter draft: \n\n${coverLetterResult.reply}`,
+             };
+        } else {
+            // Standard generic fallback
+            result = await getAIReply(messages, aiFeature);
+        }
 
         // Save AI reply
         await addMessage({
-            conversation_id: conversationId,
+            conversation_id: conversationId as string,
             role: "assistant",
             content: result.reply,
             provider: result.provider,
@@ -138,7 +218,7 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
         // Auto-title if first message
         if (history.length <= 1) {
             const title = generateTitle(typeof content === "string" ? content : "New Chat");
-            await renameConversation(conversationId, req.user!.userId, title);
+            await renameConversation(conversationId as string, req.user!.userId, title);
         }
 
         res.json(result);
@@ -151,7 +231,7 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
 // DELETE /api/chat/conversations/:id
 router.delete("/conversations/:id", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
-        await deleteConversation(req.params.id, req.user!.userId);
+        await deleteConversation(req.params.id as string, req.user!.userId);
         res.json({ message: "Conversation deleted." });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -162,7 +242,7 @@ router.delete("/conversations/:id", authenticateToken, async (req: AuthRequest, 
 router.patch("/conversations/:id", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
         const { title } = req.body;
-        await renameConversation(req.params.id, req.user!.userId, title);
+        await renameConversation(req.params.id as string, req.user!.userId, title);
         res.json({ message: "Renamed." });
     } catch (err: any) {
         res.status(500).json({ error: err.message });

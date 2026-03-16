@@ -44,7 +44,7 @@ async function fetchGreenhouseJobs(company: string): Promise<RawJob[]> {
 async function fetchLeverJobs(company: string): Promise<RawJob[]> {
     try {
         const res = await fetch(`https://api.lever.co/v0/postings/${company}?mode=json`, {
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(15000),
         });
         if (!res.ok) return [];
         const data = await res.json();

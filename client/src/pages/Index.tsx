@@ -1,3 +1,4 @@
+import { Helmet } from "react-helmet-async";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
@@ -12,6 +13,7 @@ import Footer from "../components/Footer";
 import PageTransition from "../components/PageTransition";
 
 const CTASection = () => (
+// ... (unchanged)
   <section className="py-28 px-4 relative overflow-hidden">
     <div className="hero-orb hero-orb-1" style={{ opacity: 0.15 }} />
     <div className="hero-orb hero-orb-2" style={{ opacity: 0.1 }} />
@@ -54,6 +56,12 @@ const CTASection = () => (
 
 const Index = () => (
   <PageTransition>
+    <Helmet>
+      <title>JobSkill | AI Resume Builder & Career Copilot</title>
+      <meta name="description" content="Generate ATS-optimized resumes, prepare for interviews, and land your dream job with JobSkill AI." />
+      <meta property="og:title" content="JobSkill | AI Career Copilot" />
+      <meta property="og:description" content="Turn your experience into an ATS-optimized resume instantly." />
+    </Helmet>
     <div className="min-h-screen bg-page">
       <Navbar />
       <HeroSection />

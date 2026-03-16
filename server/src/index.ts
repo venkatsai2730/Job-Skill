@@ -9,6 +9,13 @@ import jobsRoutes from "./routes/jobs.js";
 import jobListingsRoutes from "./routes/jobListings.js";
 import notificationRoutes from "./routes/notifications.js";
 import linkedinRoutes from "./routes/linkedin.js";
+import resumeRewriteRoutes from "./routes/resume-rewrite.js";
+import templatesRoutes from "./routes/templates.js";
+import usersRoutes from "./routes/users.js";
+import coverLetterRoutes from "./routes/cover-letter.js";
+import interviewRoutes from "./routes/interview.js";
+import applicationsRoutes from "./routes/applications.js";
+import chatbotRoutes from "./routes/chatbot.js";
 import { fetchAllJobs } from "./services/jobFetcher.js";
 
 const app = express();
@@ -30,6 +37,13 @@ app.use("/api/jobs", jobsRoutes);
 app.use("/api/job-listings", jobListingsRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/linkedin", linkedinRoutes);
+app.use("/api/resume-rewrite", resumeRewriteRoutes);
+app.use("/api/templates", templatesRoutes);
+app.use("/api/users", usersRoutes);
+app.use("/api/cover-letter", coverLetterRoutes);
+app.use("/api/interview", interviewRoutes);
+app.use("/api/applications", applicationsRoutes);
+app.use("/api/chatbot", chatbotRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {

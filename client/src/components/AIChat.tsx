@@ -42,6 +42,8 @@ function formatMarkdown(text: string) {
 
 function MessageBubble({ message }: { message: any }) {
     const isUser = message.role === "user";
+    const payload = message.dataPayload;
+    
     return (
         <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"} group`}>
             {!isUser && (
@@ -52,6 +54,7 @@ function MessageBubble({ message }: { message: any }) {
             <div className={`max-w-[80%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${isUser
                 ? "bg-blue-electric text-white rounded-br-md shadow-lg shadow-blue-electric/20"
                 : "bg-surface-1 text-white-90 border border-white/[0.06] rounded-bl-md"}`}>
+                
                 {isUser ? (
                     <div>
                         {Array.isArray(message.content) ? message.content.map((part: any, idx: number) => (
@@ -62,8 +65,52 @@ function MessageBubble({ message }: { message: any }) {
                         )) : <p>{message.content}</p>}
                     </div>
                 ) : (
-                    <div dangerouslySetInnerHTML={{ __html: formatMarkdown(String(message.content)) }}
-                        className="prose prose-sm prose-invert max-w-none [&_li]:text-white-80" />
+                    <div className="space-y-4">
+                        <div dangerouslySetInnerHTML={{ __html: formatMarkdown(String(message.content)) }}
+                            className="prose prose-sm prose-invert max-w-none [&_li]:text-white-80" />
+                            
+                        {/* PHASE 5 INTENT RENDERING */}
+                        {payload && payload.type === "score" && payload.data && (
+                            <div className="bg-surface-2 border border-blue-electric/20 rounded-xl p-4 mt-3 flex flex-col gap-3 shadow-lg shadow-blue-electric/5">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-white-60 text-xs uppercase tracking-wider font-semibold">Live ATS Score</span>
+                                    <span className={`text-xl font-display font-bold ${payload.data.ats_score > 75 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                        {payload.data.ats_score}<span className="text-xs text-white-40">/100</span>
+                                    </span>
+                                </div>
+                                {payload.data.issues?.length > 0 && (
+                                     <div className="space-y-1.5 mt-1 border-t border-white/5 pt-3">
+                                         <p className="text-[10px] text-white-40 uppercase tracking-widest">Detected Issues</p>
+                                         {payload.data.issues.slice(0, 3).map((issue: string, idx: number) => (
+                                             <div key={idx} className="flex gap-2 text-xs">
+                                                 <span className="text-amber-400 shrink-0">⚠️</span>
+                                                 <span className="text-white-80">{issue}</span>
+                                             </div>
+                                         ))}
+                                     </div>
+                                )}
+                            </div>
+                        )}
+                        
+                        {payload && payload.type === "latex" && payload.data && (
+                            <div className="bg-surface-2 border border-white/10 rounded-xl p-4 mt-3">
+                                <div className="flex items-center justify-between mb-2">
+                                     <span className="text-white-60 text-xs font-semibold uppercase">LaTeX Source</span>
+                                     <button 
+                                        onClick={() => navigator.clipboard.writeText(payload.data)}
+                                        className="text-white-40 hover:text-white bg-surface-3 px-2 py-1 rounded text-[10px] transition-colors"
+                                     >
+                                         Copy Code
+                                     </button>
+                                </div>
+                                <div className="max-h-48 overflow-y-auto rounded bg-surface-3 p-3">
+                                    <pre className="text-[10px] text-blue-300 font-mono">
+                                        <code>{payload.data}</code>
+                                    </pre>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 )}
                 {message.provider && (
                     <div className="mt-2 flex justify-end">
