@@ -21,12 +21,19 @@ router.post("/signup", async (req: Request, res: Response) => {
             return;
         }
 
+        const generateReferralCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
+        const refCode = generateReferralCode();
+
         // Create user via Supabase Admin (skips email verification)
         const { data, error } = await supabaseAdmin.auth.admin.createUser({
             email,
             password,
             email_confirm: true, // Auto-confirm — no verification email
-            user_metadata: { full_name: fullName || "" },
+            user_metadata: { 
+                full_name: fullName || "",
+                referral_code: refCode,
+                referred_by: req.body.referredBy || null 
+            },
         });
 
         if (error) {
