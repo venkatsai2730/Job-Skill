@@ -77,12 +77,16 @@ class ApiClient {
         return this.request<T>(endpoint, { method: "DELETE" });
     }
 
-    async downloadBlob(endpoint: string, defaultFileName: string): Promise<void> {
+    async downloadBlob(endpoint: string, defaultFileName: string, method: string = "GET", body?: any): Promise<void> {
         const token = this.getToken();
         const headers: Record<string, string> = {};
         if (token) headers["Authorization"] = `Bearer ${token}`;
+        if (body) headers["Content-Type"] = "application/json";
 
-        const response = await fetch(`${this.baseUrl}${endpoint}`, { headers });
+        const fetchOptions: RequestInit = { method, headers };
+        if (body) fetchOptions.body = JSON.stringify(body);
+
+        const response = await fetch(`${this.baseUrl}${endpoint}`, fetchOptions);
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
             throw new Error(err.error || "Download failed");

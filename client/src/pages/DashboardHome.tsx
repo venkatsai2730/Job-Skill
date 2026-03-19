@@ -1,13 +1,18 @@
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Gift, TrendingUp, FileText, Briefcase, Target, Trophy, Flame, Zap } from "lucide-react";
+import { Gift, TrendingUp, FileText, Briefcase, Target, Trophy, Flame, Zap, ArrowUpRight, ArrowDownRight, Minus, Share2, Users, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTracking } from "@/hooks/useTracking";
+import { api } from "@/lib/api";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 const MetricRing = ({ score, label, color = "blue" }: { score: number; label: string; color?: string }) => {
+// ...
   const r = 44;
   const c = 2 * Math.PI * r;
   const offset = c - (score / 100) * c;
-
+// ...
   return (
     <div className="flex flex-col items-center">
       <svg width="110" height="110" viewBox="0 0 110 110">
@@ -59,7 +64,52 @@ const achievements = [
 
 const DashboardHome = () => {
   const { user } = useAuth();
+  const { track } = useTracking();
   const displayName = user?.fullName || user?.email?.split("@")[0] || "User";
+
+  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [stats, setStats] = useState({ current: 0, delta: 0, count: 0 });
+  const [referralData, setReferralData] = useState<{ referralCode?: string, inviteLink?: string, inviteCount?: number } | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  useEffect(() => {
+    track("dashboard_viewed");
+    
+    async function fetchHistory() {
+      try {
+        const res = await api.get<{ history: any[] }>("/api/resume/history");
+        const list = res.history || [];
+        
+        // Map to chart format
+        const chartData = list.map((item, i) => ({
+          name: new Date(item.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+          score: item.atsScore || 0,
+          rawDate: item.createdAt,
+        }));
+        setHistoryData(chartData);
+
+        // Calc delta
+        if (list.length > 0) {
+          const first = list[0].atsScore || 0;
+          const current = list[list.length - 1].atsScore || 0;
+          setStats({
+            current,
+            delta: current - first,
+            count: list.length
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load history:", err);
+      }
+    }
+    fetchHistory();
+    
+    // Fetch referral stats
+    api.get<{ referralCode?: string, inviteLink?: string, inviteCount?: number }>("/api/users/referral")
+      .then(res => setReferralData(res))
+      .catch(err => console.error("Failed to load referral data:", err));
+// eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="p-6 lg:p-10 space-y-8">
@@ -135,27 +185,71 @@ const DashboardHome = () => {
             <p className="text-white-30 text-sm mt-4">✦ Resets in 4h 23m · Always free, every day</p>
           </motion.div>
 
-          {/* This week */}
+          {/* Phase 7: Score Progress & Improvement */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
             className="glass-card p-7"
           >
-            <h3 className="font-display font-semibold text-foreground text-lg mb-5">This Week</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
-              {[
-                { label: "Chats", value: "12" },
-                { label: "Resumes", value: "3" },
-                { label: "Jobs Applied", value: "8" },
-                { label: "Interviews", value: "1 🎉" },
-              ].map((stat) => (
-                <div key={stat.label} className="text-center">
-                  <p className="font-mono font-bold text-3xl text-blue-electric">{stat.value}</p>
-                  <p className="text-white-60 text-sm mt-1">{stat.label}</p>
-                </div>
-              ))}
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="font-display font-semibold text-foreground text-lg">Score Progression</h3>
+              <div className="flex items-center gap-3">
+                 {stats.delta !== 0 && (
+                   <div className={`flex items-center gap-1 text-sm font-semibold px-2.5 py-1 rounded-full ${stats.delta > 0 ? "text-emerald-400 bg-emerald-400/10" : "text-rose-400 bg-rose-400/10"}`}>
+                      {stats.delta > 0 ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+                      {Math.abs(stats.delta)} pts
+                   </div>
+                 )}
+                 <span className="text-white-40 text-sm">{stats.count} versions</span>
+              </div>
             </div>
+            
+            {historyData.length > 1 ? (
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={historyData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                    <XAxis 
+                      dataKey="name" 
+                      stroke="rgba(255,255,255,0.2)" 
+                      fontSize={12} 
+                      tickLine={false} 
+                      axisLine={false} 
+                    />
+                    <YAxis 
+                      stroke="rgba(255,255,255,0.2)" 
+                      fontSize={12} 
+                      tickLine={false} 
+                      axisLine={false} 
+                      domain={['auto', 100]}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'rgba(10, 15, 30, 0.9)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                      itemStyle={{ color: '#fff' }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="score" 
+                      stroke="url(#colorScore)" 
+                      strokeWidth={3} 
+                      dot={{ fill: 'hsl(var(--blue-electric))', r: 4, strokeWidth: 2, stroke: '#111' }} 
+                      activeDot={{ r: 6, fill: '#fff' }} 
+                    />
+                    <defs>
+                      <linearGradient id="colorScore" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="hsl(var(--cyan-spark))" />
+                        <stop offset="100%" stopColor="hsl(var(--blue-electric))" />
+                      </linearGradient>
+                    </defs>
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+                <div className="h-48 w-full border border-white/[0.05] border-dashed rounded-xl flex items-center justify-center flex-col gap-2 opacity-60">
+                    <TrendingUp className="w-6 h-6 text-white-40" />
+                    <p className="text-sm text-white-40">Upload multiple versions to see your progression trend</p>
+                </div>
+            )}
           </motion.div>
 
           {/* Recent Activity */}
@@ -185,6 +279,61 @@ const DashboardHome = () => {
               ))}
             </div>
           </motion.div>
+
+          {/* Referral Card */}
+          {referralData?.inviteLink && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              className="relative p-7 rounded-2xl overflow-hidden glass-card bg-gradient-to-r from-surface-1 to-blue-electric/5"
+            >
+              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-electric/10 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+              
+              <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Users className="w-5 h-5 text-blue-electric" />
+                    <h3 className="font-display font-semibold text-foreground text-lg">Invite Friends, Get Pro</h3>
+                  </div>
+                  <p className="text-white-60 text-sm leading-relaxed mb-4">
+                    Share your link. When 3 friends sign up, you unlock a <strong>Free Month of Pro</strong> (Unlimited AI chats & ATS Scans).
+                  </p>
+                  
+                  <div className="flex items-center gap-3">
+                    <div className="flex flex-1 items-center bg-surface-2 border border-white/[0.1] rounded-lg p-2.5">
+                      <span className="text-white-60 text-sm truncate select-all">{referralData.inviteLink}</span>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(referralData.inviteLink!);
+                        setCopiedLink(true);
+                        setTimeout(() => setCopiedLink(false), 2000);
+                      }}
+                      className="px-4 py-2.5 bg-blue-electric hover:bg-blue-bright text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0"
+                    >
+                      {copiedLink ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+                      {copiedLink ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="md:w-px md:h-24 bg-white/[0.1] hidden md:block" />
+
+                <div className="flex flex-col items-center justify-center p-4 bg-surface-2 rounded-xl border border-white/[0.05] min-w-[120px]">
+                  <span className="text-3xl font-display font-bold text-foreground mb-1">{referralData.inviteCount || 0}</span>
+                  <span className="text-white-60 text-xs uppercase tracking-wider font-medium">Friends Joined</span>
+                  <div className="w-full h-1.5 bg-surface-3 rounded-full mt-3 overflow-hidden">
+                    <div 
+                      className="h-full bg-blue-electric transition-all" 
+                      style={{ width: `${Math.min(((referralData.inviteCount || 0) / 3) * 100, 100)}%` }} 
+                    />
+                  </div>
+                  <span className="text-white-30 text-[10px] mt-1.5">{3 - (referralData.inviteCount || 0)} more to unlock Pro</span>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </div>
 
         {/* Right sidebar */}

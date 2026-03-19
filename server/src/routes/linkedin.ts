@@ -1,6 +1,8 @@
 import { Router, Response } from "express";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
-import { optimizeLinkedIn } from "../services/chatService.js";
+import { getAIReply, inferSemanticSkills, optimizeLinkedIn } from "../services/chatService.js";
+import { computeAdvancedATS, ParsedSections } from "../lib/advanced-scorer.js";
+import { normalizeSynonyms } from "../lib/synonym-map.js";
 
 const router = Router();
 
@@ -31,7 +33,6 @@ async function fetchLinkedInProfile(url: string): Promise<string | null> {
         const data = await res.json();
         if (!data.results || data.results.length === 0) return null;
 
-        // Combine all raw content and snippets from matching results
         const profileData = data.results
             .map((r: any) => {
                 const parts: string[] = [];
@@ -61,7 +62,88 @@ function extractNameFromUrl(url: string): string {
     return match[1]
         .replace(/-\w{5,}$/, "") // remove trailing ID hash
         .replace(/-/g, " ")
-        .replace(/\b\w/g, c => c.toUpperCase()); // Title case
+        .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ── Helper: Build minimal ParsedSections from LinkedIn text ─
+function buildLinkedInSections(text: string): ParsedSections {
+    const lines = text.split(/\r?\n/).filter(Boolean);
+
+    let summary = "";
+    const skillItems: string[] = [];
+    const bullets: string[] = [];
+
+    for (const line of lines) {
+        const l = line.trim();
+        if (!l) continue;
+        if (l.length < 40 && /[,|•·]/.test(l)) {
+            skillItems.push(...l.split(/[,|•·]/).map(s => s.trim()).filter(Boolean));
+        } else if (l.length > 60 && !summary) {
+            summary = l;
+        } else if (l.length > 20) {
+            bullets.push(l);
+        }
+    }
+
+    return {
+        summary,
+        experience: bullets.length > 0 ? [{
+            title: "LinkedIn Profile",
+            company: "",
+            dates: "",
+            bullets: bullets.slice(0, 20),
+        }] : [],
+        education: [],
+        skills: skillItems.length > 0 ? [{ category: "Skills", items: skillItems }] : [],
+        projects: [],
+    };
+}
+
+// ── Helper: Generate sync tips comparing LinkedIn vs Resume ─
+function generateSyncTips(
+    linkedinKeywords: string[],
+    resumeKeywords: string[],
+    linkedinText: string,
+    resumeScore: number,
+    linkedinScore: number
+): string[] {
+    const tips: string[] = [];
+    const liSet = new Set(linkedinKeywords.map(k => k.toLowerCase()));
+    const resSet = new Set(resumeKeywords.map(k => k.toLowerCase()));
+
+    // Skills in resume but missing from LinkedIn
+    const missingFromLinkedIn = resumeKeywords.filter(k => !liSet.has(k.toLowerCase()));
+    if (missingFromLinkedIn.length > 0) {
+        tips.push(`Add ${missingFromLinkedIn.length} missing skills to LinkedIn: ${missingFromLinkedIn.slice(0, 5).join(", ")}${missingFromLinkedIn.length > 5 ? "…" : ""}`);
+    }
+
+    // Skills on LinkedIn but missing from resume
+    const missingFromResume = linkedinKeywords.filter(k => !resSet.has(k.toLowerCase()));
+    if (missingFromResume.length > 0) {
+        tips.push(`Your LinkedIn has ${missingFromResume.length} skills not on your resume: ${missingFromResume.slice(0, 5).join(", ")}`);
+    }
+
+    // Score comparison tip
+    if (linkedinScore < resumeScore - 10) {
+        tips.push(`Your LinkedIn score (${linkedinScore}) lags behind your resume (${resumeScore}). Add more keywords and quantified achievements.`);
+    } else if (linkedinScore > resumeScore + 10) {
+        tips.push(`Your LinkedIn (${linkedinScore}) outperforms your resume (${resumeScore}). Update your resume to match!`);
+    } else {
+        tips.push(`Your LinkedIn (${linkedinScore}) and resume (${resumeScore}) scores are well aligned ✓`);
+    }
+
+    // Headline tip
+    const liLower = linkedinText.toLowerCase();
+    if (!liLower.includes("senior") && !liLower.includes("lead") && !liLower.includes("manager") && !liLower.includes("engineer") && !liLower.includes("developer")) {
+        tips.push("Add your job title to your LinkedIn headline for recruiter discoverability");
+    }
+
+    // Metrics tip
+    if (!/\d+[%+kKmM]/.test(linkedinText) && !/\d{2,}/.test(linkedinText)) {
+        tips.push("Add quantified achievements (numbers, percentages) to your LinkedIn About section");
+    }
+
+    return tips;
 }
 
 // POST /api/linkedin/optimize
@@ -77,7 +159,6 @@ router.post("/optimize", authenticateToken, async (req: AuthRequest, res: Respon
         const input = profileText.trim();
         let enrichedText = input;
 
-        // If user provided a LinkedIn URL, try to fetch actual profile data
         if (isLinkedInUrl(input)) {
             const name = extractNameFromUrl(input);
             console.log(`[LinkedIn] Detected URL. Extracted name: "${name}". Fetching via Tavily...`);
@@ -95,13 +176,10 @@ router.post("/optimize", authenticateToken, async (req: AuthRequest, res: Respon
 
         const result = await optimizeLinkedIn(enrichedText);
 
-        // Try to parse the AI reply as JSON
         let parsed;
         try {
             let raw = result.reply;
-            // Remove markdown fences if the AI wraps it
             raw = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-            // Remove any leading/trailing text outside the JSON
             const jsonStart = raw.indexOf("{");
             const jsonEnd = raw.lastIndexOf("}");
             if (jsonStart !== -1 && jsonEnd !== -1) {
@@ -109,12 +187,10 @@ router.post("/optimize", authenticateToken, async (req: AuthRequest, res: Respon
             }
             parsed = JSON.parse(raw);
         } catch {
-            // If JSON parse fails, return raw reply
             res.json({ raw: result.reply, provider: result.provider, model: result.model });
             return;
         }
 
-        // Ensure all section values are strings (flatten any arrays/objects)
         if (parsed.sections && Array.isArray(parsed.sections)) {
             parsed.sections = parsed.sections.map((s: any) => ({
                 name: String(s.name || "Unknown"),
@@ -136,6 +212,43 @@ router.post("/optimize", authenticateToken, async (req: AuthRequest, res: Respon
     }
 });
 
+// ── POST /api/linkedin/score ────────────────────────────────
+// Lightweight ATS scoring for LinkedIn profile text + sync tips
+router.post("/score", authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+        const { profileText, resumeKeywords, resumeScore } = req.body;
+
+        if (!profileText || typeof profileText !== "string" || profileText.trim().length < 20) {
+            res.status(400).json({ error: "profileText is required (min 20 chars)" });
+            return;
+        }
+
+        const normalized = normalizeSynonyms(profileText);
+        const sections = buildLinkedInSections(normalized);
+        const ats = computeAdvancedATS(sections, profileText, req.user?.userId, { isPdf: false });
+
+        // Semantic skill inference for LinkedIn
+        const semanticSkills = await inferSemanticSkills(profileText);
+        ats.inferredSkills = Array.from(new Set([...ats.inferredSkills, ...semanticSkills]));
+
+        const syncTips = generateSyncTips(
+            ats.keywords.found,
+            Array.isArray(resumeKeywords) ? resumeKeywords : [],
+            profileText,
+            typeof resumeScore === "number" ? resumeScore : 0,
+            ats.score
+        );
+
+        res.json({
+            linkedinAts: ats,
+            syncTips,
+        });
+    } catch (err: any) {
+        console.error("[LinkedIn Score] Error:", err);
+        res.status(500).json({ error: "Failed to score LinkedIn profile" });
+    }
+});
+
 // ── Helper: Flatten any value to a plain string ─────────────
 function flattenToString(val: any): string {
     if (!val) return "";
@@ -144,7 +257,6 @@ function flattenToString(val: any): string {
         return val.map(v => {
             if (typeof v === "string") return `• ${v}`;
             if (typeof v === "object" && v !== null) {
-                // Handle objects like { title, description } or { role, detail }
                 return Object.values(v).filter(Boolean).map(String).join(" — ");
             }
             return String(v);
