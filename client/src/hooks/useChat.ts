@@ -11,6 +11,7 @@ export interface ChatMessage {
     provider?: string;
     model?: string;
     feature?: string;
+    dataPayload?: any; // NEW for Phase 5 Intents
     created_at?: string;
 }
 
@@ -121,7 +122,7 @@ export function useChat() {
             setProvider(result.provider);
             setMessages(prev => [
                 ...prev,
-                { role: "assistant", content: result.reply, provider: result.provider, model: result.model },
+                { role: "assistant", content: result.reply, provider: result.provider, model: result.model, dataPayload: result.dataPayload },
             ]);
         } catch (err: any) {
             setError(err.message || "Something went wrong.");

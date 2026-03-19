@@ -1,3 +1,4 @@
+import { Helmet } from "react-helmet-async";
 import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { Shield, Mail, Lock, User, Eye, EyeOff, Star, Quote } from "lucide-react";
@@ -76,6 +77,10 @@ const Auth = () => {
 
   return (
     <PageTransition>
+      <Helmet>
+        <title>{isLogin ? "Sign In - JobSkill" : "Create Account - JobSkill"}</title>
+        <meta name="description" content="Sign in or create an account to start building ATS-friendly resumes and tracking your job applications with AI." />
+      </Helmet>
       <div className="min-h-screen bg-page flex relative overflow-hidden">
         {/* Gradient bg */}
         <div

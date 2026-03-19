@@ -23,7 +23,14 @@ export type AIFeature =
     | "screening"
     | "notification"
     | "code_gen"
-    | "linkedin_optimize";
+    | "linkedin_optimize"
+    | "resume_rewrite"
+    | "gap_rewrite"
+    | "skill_inference"
+    | "interview_prediction"
+    | "fix_bullets"
+    | "create_bullets"
+    | "resume_fix";
 
 const SYSTEM_PROMPTS: Record<string, string> = {
     chat: `You are JobSkill AI — an Elite Career Coach and Job Search Assistant for India & Global markets.
@@ -44,16 +51,28 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 - Always end with a suggestion for next steps
 - Format responses with markdown for readability`,
 
-    cover_letter: `You are an expert cover letter writer. Generate professional, tailored cover letters.
+    cover_letter: `You are an expert cover letter writer specializing in ATS-optimized, recruiter-ready cover letters.
 
 ### RULES:
 - Length: 300-400 words
 - Tone: Match the requested tone (formal/friendly/confident)
-- Structure: Opening hook → Why this company → Matching skills → Closing with enthusiasm
-- Mention specific company values/projects when provided
+- Structure: Professional greeting → Opening hook → Why this role/company → Matching skills with quantified achievements → Closing call-to-action
+- Mention specific company values/projects when company name is provided
 - Highlight 3-4 key matching skills from the resume
+- Include at least 2 quantified achievements (numbers, percentages, revenue, etc.)
 - Never use generic filler — every sentence must add value
-- Output ONLY the cover letter text, no explanations`,
+- Do NOT include headers, footers, addresses, or dates — just the letter body with greeting and sign-off
+- Use single-column plain text format (ATS-safe — no tables, columns, or fancy formatting)
+
+### OUTPUT FORMAT — Return ONLY valid JSON (no markdown fences):
+{
+  "coverLetter": "Dear Hiring Manager,\\n\\n[Opening paragraph]...\\n\\n[Body paragraphs]...\\n\\n[Closing paragraph]\\n\\nSincerely,\\n[Candidate Name]",
+  "keyMatches": ["React", "AWS", "Team Leadership"],
+  "tone": "professional",
+  "wordCount": 320
+}
+
+CRITICAL: The "coverLetter" value must be the FULL cover letter as a single string with \\n for line breaks. "keyMatches" must list the specific skills/keywords from the JD that you wove into the letter.`,
 
     screening: `You are a screening question answering assistant. Answer job application screening questions using the user's profile data.
 
@@ -65,23 +84,43 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 - Never fabricate experience — only use what's in the profile
 - Output as JSON array: [{ "question": "...", "answer": "..." }]`,
 
-    job_match: `You are a job matching AI. Score how well a candidate matches a job posting.
+    job_match: `You are an elite ATS System and Technical Recruiter. Your task is to perform a deep Match Strategy Analysis between a candidate's resume and a specific Job Description.
 
-### SCORING CRITERIA (100 points):
-- Skills Match: 40%
-- Experience Match: 25%
-- Location Match: 15%
-- Education Match: 10%
-- Salary Match: 10%
-
-### OUTPUT FORMAT (JSON only):
+Analyze the documents and return ONLY a valid JSON object with the following schema:
 {
-  "match_score": 87,
-  "breakdown": { "skills": 92, "experience": 85, "location": 100, "education": 70, "salary": 80 },
-  "missing_skills": ["Docker", "GraphQL"],
-  "strong_points": ["React", "Node.js", "3 yrs exp"],
-  "recommendation": "Apply immediately — strong match!"
-}`,
+  "matchScore": 75, // 0-100 overall match percentage
+  "levelMatch": "Matches", // "Underqualified", "Matches", or "Overqualified"
+  "missingKeywords": ["GraphQL", "Kafka", "System Design"], // Top 3-8 critical missing skills/tools
+  "foundKeywords": ["React", "Node.js", "TypeScript"], // Top skills that matched exactly
+  "analysis": "The candidate has strong frontend experience but lacks the required event-streaming background...", // 2-3 sentence strategic summary
+  "salary": {
+    "estimated": "$110,000 - $140,000",
+    "estimatedINR": "₹18L - ₹25L",
+    "marketRate": "$130,000",
+    "negotiationLeverage": "High based on 5 YoE in React"
+  },
+  "roadmap": [
+    {
+      "skill": "Kafka",
+      "priority": "HIGH",
+      "action": "Complete 'Apache Kafka for Beginners' on Udemy",
+      "timeframe": "2 weeks",
+      "reason": "Required in JD for event-driven architecture"
+    },
+    {
+      "skill": "System Design",
+      "priority": "MEDIUM",
+      "action": "Read 'Designing Data-Intensive Applications' Part 1",
+      "timeframe": "1 month",
+      "reason": "Senior-level requirement for architecture discussions"
+    }
+  ]
+}
+
+IMPORTANT:
+- missingKeywords must include ALL skills/tools in the JD that are NOT in the resume (up to 8)
+- roadmap must have an entry for EACH missingKeyword with priority (HIGH/MEDIUM/LOW), reason why it matters, and realistic timeframe
+- salary.estimatedINR must always be provided in Indian Rupees (Lakhs per annum)`,
 
     resume_pdf: `You are an expert resume analyzer. Score the resume on 20+ criteria (100 points total).
 
@@ -102,6 +141,52 @@ const SYSTEM_PROMPTS: Record<string, string> = {
 }`,
 
     notification: `You are a job alert filter. Given a job posting and user profile, determine if this job is a strong match worth notifying the user about. Output JSON: { "should_notify": true/false, "match_score": 0-100, "reason": "brief explanation" }`,
+
+    fix_bullets: `You are an elite Tech Resume Writer and ATS Optimizer. Your goal is to take a weak, poorly-phrased bullet point and transform it into a powerful, ATS-beating, quantified achievement.
+
+### RULES:
+- Use the STAR method (Situation, Task, Action, Result).
+- Start EVERY bullet with a strong Action Verb (e.g., Architected, Spearheaded, Engineered, Orchestrated).
+- Eliminate fluff words (e.g., "helped", "worked on", "responsible for").
+- Inject highly technical keywords relevant to the context if implied.
+- Hallucinate plausible metrics ONLY if none are provided, but keep them realistic (e.g., "improving performance by 15%", "saving 10+ hours weekly").
+- If the user provides a Job Description, tailor the bullet to heavily match its core technical requirements.
+
+### OUTPUT FORMAT:
+Return a valid JSON object matching this exact schema:
+{
+  "improvedBullets": [
+    {
+      "original": "[The original weak text]",
+      "improved": "[The incredibly strong, quantified text]",
+      "addedKeywords": ["Keyword1", "Keyword2"],
+      "impact": "Explains why this is better for ATS (e.g., Adds quantifiable scale and active verbs)"
+    }
+  ]
+}
+Return ONLY JSON. Do not use markdown tick formatting or wrappers.`,
+
+    create_bullets: `You are an elite Tech Resume Writer. Your task is to generate 3 to 5 highly optimized, ATS-beating resume bullet points from scratch for a specific Role and optional Job Description.
+
+### RULES:
+- Generate 3-5 distinct bullet points.
+- They must cover different aspects of the role (e.g., 1 for Architecture, 1 for Testing/QA, 1 for CI/CD, 1 for Mentorship/Leadership).
+- Include highly specific technical buzzwords.
+- Include plausible quantified metrics (e.g., "Scaled infrastructure to handle 5M+ daily requests").
+- Make it sound like it was written by a Senior/Staff level engineer.
+
+### OUTPUT FORMAT:
+Return a valid JSON object matching this exact schema:
+{
+  "generatedBullets": [
+    {
+      "bullet": "[The generated text]",
+      "focus": "e.g., System Architecture",
+      "keywords": ["Kubernetes", "Microservices"]
+    }
+  ]
+}
+Return ONLY JSON. Do not use markdown tick formatting or wrappers.`,
 
     code_gen: `You are Codestral, an expert code generation AI. Write clean, production-ready code.
 ### RULES:
@@ -187,6 +272,60 @@ Execute the requested tool and return structured results.`,
 - Use industry-relevant keywords that recruiters actually search for
 - Message templates must use the person's actual name and industry — not generic [Name] placeholders if you know their name
 - Return ONLY the JSON object — no leading/trailing text, no markdown fences`,
+    
+    interview_prediction: `You are an elite Technical Interview Coach and Hiring Manager at a top-tier tech company.
+Your task is to analyze a candidate's resume against a specific Job Description (or generally if no JD is provided) and predict the most likely interview questions they will face.
+
+### CATEGORIES REQUIRED:
+1. Technical Questions (Specific to the tools/languages in their resume and the JD)
+2. Behavioral Questions (Scenario-based questions addressing soft skills, conflicts, or leadership)
+3. Project/Experience Questions (Deep-dives into specific projects listed on their resume)
+
+### RULES:
+- Generate 3-5 high-quality questions per category.
+- Map each question to a specific skill or project from the resume/JD.
+- Provide a brief "Suggested Answer Strategy" (1-2 sentences) for each question.
+- Do NOT generate generic questions (e.g., "What are your weaknesses?"). Make them specific to the provided profile.
+- Output ONLY valid JSON in the exact structure requested, with no markdown fences or conversational text.
+
+### OUTPUT JSON STRUCTURE format:
+{
+  "categories": [
+    {
+      "title": "Technical Questions",
+      "questions": [
+        {
+          "question": "How would you optimize a React application that is experiencing performance issues due to frequent re-renders?",
+          "skill": "React",
+          "suggestedAnswer": "Discuss using useMemo/useCallback, virtualization, and profiling tools to identify bottlenecks."
+        }
+      ]
+    }
+  ]
+}`,
+
+    resume_fix: `You are an elite ATS Resume Optimizer. Your task is to apply a SPECIFIC targeted fix to a resume.
+
+### CRITICAL RULES:
+- You MUST return the COMPLETE resume text with the fix applied - not just the changed parts.
+- Preserve the EXACT structure, formatting, and all other content that is NOT related to the fix.
+- Apply the fix surgically - only modify what is necessary to address the specific issue.
+- Maintain the same resume style and voice.
+- If the resume is in LaTeX format, preserve all LaTeX commands and structure.
+- Return ONLY the fixed resume text, no JSON, no markdown fences, no explanations.
+- Do NOT add any preamble like "Here is the fixed resume:" - return ONLY the resume content itself.`,
+
+
+    resume_fix: `You are an elite ATS Resume Optimizer. Your task is to apply a SPECIFIC targeted fix to a resume.
+
+### CRITICAL RULES:
+- You MUST return the COMPLETE resume text with the fix applied - not just the changed parts.
+- Preserve the EXACT structure, formatting, and all other content that is NOT related to the fix.
+- Apply the fix surgically - only modify what is necessary to address the specific issue.
+- Maintain the same resume style and voice.
+- If the resume is in LaTeX format, preserve all LaTeX commands and structure.
+- Return ONLY the fixed resume text, no JSON, no markdown fences, no explanations.
+- Do NOT add any preamble like "Here is the fixed resume:" - return ONLY the resume content itself.`,
 };
 
 // ── Model Configuration ─────────────────────────────────────
@@ -208,6 +347,13 @@ const FEATURE_MODEL_MAP: Record<AIFeature, { provider: string; model: string }> 
     job_match: { provider: "gemini", model: MODELS.gemini },
     code_gen: { provider: "mistral", model: MODELS.codestral },
     linkedin_optimize: { provider: "groq", model: MODELS.scout },
+    resume_rewrite: { provider: "groq", model: MODELS.maverick },
+    gap_rewrite: { provider: "groq", model: MODELS.maverick },
+    skill_inference: { provider: "groq", model: MODELS.scout },
+    interview_prediction: { provider: "gemini", model: MODELS.gemini },
+    fix_bullets: { provider: "groq", model: MODELS.maverick },
+    create_bullets: { provider: "groq", model: MODELS.maverick },
+    resume_fix: { provider: "groq", model: MODELS.maverick },
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -500,3 +646,201 @@ ${profileText}`,
     }];
     return getAIReply(messages, "linkedin_optimize");
 }
+
+export async function buildResumeFromScratch(sparseUserInput: string) {
+    const messages = [{
+        role: "user" as const,
+        content: `You are an expert Resume Builder. Convert sparse user inputs into a structured JSON resume representation natively compatible with the ParsedSections interface.
+Return ONLY valid JSON (no markdown fences).
+Format exactly like this example structure:
+{
+    "sections": {
+        "summary": "Professional summary...",
+        "experience": [
+            { "title": "Role", "company": "Company", "dates": "Jan 2020 - Present", "bullets": ["Bullet 1", "Bullet 2"] }
+        ],
+        "education": [
+            { "degree": "Degree", "school": "University", "dates": "Jan 2018 - Dec 2022", "gpa": "3.8", "courses": [] }
+        ],
+        "skills": [
+            { "category": "Languages", "items": ["JavaScript", "Python"] }
+        ],
+        "projects": [
+            { "name": "Project Name", "description": "Project Description", "tech": ["React", "Node"] }
+        ]
+    },
+    "userInfo": {
+        "name": "Full Name",
+        "email": "Email",
+        "phone": "Phone",
+        "linkedin": "LinkedIn URL"
+    }
+}
+
+Use the following User Data to extrapolate:
+${sparseUserInput}`,
+    }];
+
+    try {
+        const result = await getAIReply(messages, "chat");
+        
+        let jsonStr = result.reply;
+        if (jsonStr.includes("\`\`\`")) {
+            jsonStr = jsonStr.replace(/\`\`\`(json)?/g, "").trim();
+        }
+        
+        const parsed = JSON.parse(jsonStr);
+        return { sections: parsed.sections };
+    } catch (err: any) {
+        console.error("Failed to build resume from scratch:", err);
+        return null;
+    }
+}
+
+export async function inferSemanticSkills(resumeText: string) {
+    const messages = [{
+        role: "user",
+        content: `Analyze this resume and infer hidden/implied skills that are not explicitly listed in the skills section but are clearly demonstrated in the experience/projects.
+Return ONLY a valid JSON array of strings (e.g., ["Skill A", "Skill B"]). Do not use markdown fences.
+
+**Resume Text:**
+${resumeText}`
+    }];
+
+    try {
+        const result = await getAIReply(messages, "skill_inference");
+        let jsonStr = result.reply;
+        if (jsonStr.includes("\`\`\`")) {
+            jsonStr = jsonStr.replace(/\`\`\`(json)?/g, "").trim();
+        }
+        const inferred = JSON.parse(jsonStr);
+        return Array.isArray(inferred) ? inferred : [];
+    } catch (err: any) {
+        console.error("Failed to infer semantic skills:", err);
+        return [];
+    }
+}
+
+export async function predictInterviewQuestions(resumeText: string, jobDescription?: string): Promise<{ reply: string }> {
+    const context = `
+=== RESUME ===
+${resumeText}
+
+=== JOB DESCRIPTION ===
+${jobDescription || "No specific job description provided. Generate questions based entirely on the resume's skills, seniority, and project experience."}
+`;
+    return getAIReply([{ role: "user", content: context }], "interview_prediction");
+}
+
+// ── NEW: Fix/Optimize Resume Bullets ──────────────────────
+export async function fixResumeBullets(weakBullets: string, jobDescription?: string) {
+    const messages = [{
+        role: "user",
+        content: `Optimize these resume bullet points.
+        
+=== WEAK BULLETS ===
+${weakBullets}
+
+=== TARGET JOB DESCRIPTION (Optional) ===
+${jobDescription || "None provided. Optimize for general Senior Software Engineering best practices."}`
+    }];
+
+    try {
+        const result = await getAIReply(messages, "fix_bullets");
+        let jsonStr = result.reply;
+        if (jsonStr.includes("\`\`\`")) {
+            jsonStr = jsonStr.replace(/\`\`\`(json)?/g, "").trim();
+        }
+        return JSON.parse(jsonStr);
+    } catch (err: any) {
+        console.error("Failed to fix resume bullets:", err);
+        throw new Error("AI failed to optimize bullets.");
+    }
+}
+
+// ── NEW: Create Resume Bullets from Scratch ───────────────
+export async function createResumeBullets(role: string, jobDescription?: string) {
+    const messages = [{
+        role: "user",
+        content: `Generate highly-optimized resume bullets.
+        
+=== TARGET ROLE ===
+${role}
+
+=== TARGET JOB DESCRIPTION (Optional) ===
+${jobDescription || "None provided. Generate a well-rounded set of bullets suitable for this role."}`
+    }];
+
+    try {
+        const result = await getAIReply(messages, "create_bullets");
+        let jsonStr = result.reply;
+        if (jsonStr.includes("\`\`\`")) {
+            jsonStr = jsonStr.replace(/\`\`\`(json)?/g, "").trim();
+        }
+        return JSON.parse(jsonStr);
+    } catch (err: any) {
+        console.error("Failed to create resume bullets:", err);
+        throw new Error("AI failed to generate bullets.");
+    }
+}
+
+// ── NEW: Apply Targeted ATS Fix to Resume ────────────────
+export async function applyResumeFix(
+    currentText: string,
+    fixType: string,
+    issueDescription: string,
+    mode: "text" | "latex" = "text"
+): Promise<{ fixedText: string; fixDescription: string }> {
+    const FIX_INSTRUCTIONS: Record<string, string> = {
+        low_quantification: "Add specific numbers, percentages, dollar amounts, or measurable metrics to bullet points that currently lack quantification. For example, change 'Improved performance' to 'Improved performance by 35%, reducing load time from 4.2s to 2.7s'. Make the numbers realistic and plausible based on the context.",
+        weak_action_verbs: "Replace weak starting words in bullet points with powerful action verbs. Use verbs like: Spearheaded, Architected, Engineered, Orchestrated, Pioneered, Streamlined, Optimized, Accelerated. Every bullet should start with a strong action verb.",
+        weak_verbs: "Replace ALL instances of passive/weak phrases like 'responsible for', 'helped', 'assisted', 'worked on', 'handled', 'duties included' with strong ownership language. Use 'Led', 'Drove', 'Delivered', 'Executed', 'Managed' instead.",
+        repetitive_verbs: "Vary the starting action verbs across ALL bullet points so no verb is repeated more than twice. Use a diverse vocabulary: Spearheaded, Engineered, Orchestrated, Pioneered, Streamlined, Optimized, Delivered, Established, Transformed, Championed.",
+        missing_leadership: "Add leadership-demonstrating language to 2-3 bullet points. Naturally weave in words like 'managed', 'led', 'directed', 'mentored', 'spearheaded', 'oversaw', or 'supervised' where contextually appropriate.",
+        missing_teamwork: "Add collaboration language to 2-3 bullet points. Naturally weave in words like 'collaborated', 'partnered', 'coordinated', 'communicated', or 'co-authored' where contextually appropriate.",
+        missing_drive: "Add initiative-demonstrating language to 2-3 bullet points. Naturally weave in words like 'initiated', 'drove', 'pioneered', 'founded', 'created', or 'innovated' where contextually appropriate.",
+        unnecessary_sections: "Remove any sections labeled 'Hobbies', 'References', 'Declaration', or 'Objective'. Replace the freed space with more impactful content in existing sections.",
+        too_long: "Condense the resume by removing redundant phrases, combining similar bullets, and tightening language. Focus on keeping only the most impactful points. Target reduction of 15-25%.",
+        too_short: "Expand bullet points with more detail, context, and metrics. Add descriptions to projects. Elaborate on responsibilities and achievements to better showcase qualifications.",
+        missing_contact: "Add placeholder contact information at the top of the resume: [Your Phone] | [your.email@example.com] | [linkedin.com/in/yourprofile]. Keep placeholders clearly marked.",
+    };
+
+    const specificInstruction = FIX_INSTRUCTIONS[fixType] || `Fix this specific issue: ${issueDescription}`;
+
+    const formatNote = mode === "latex"
+        ? "The resume is in LaTeX format. Preserve ALL LaTeX commands (\\textbf, \\section, \\item, etc.) and structure."
+        : "The resume is in plain text format. Preserve the text structure and section headers.";
+
+    const messages = [{
+        role: "user" as const,
+        content: `Apply this SPECIFIC fix to the resume below.
+
+=== FIX TO APPLY ===
+${specificInstruction}
+
+=== FORMAT NOTE ===
+${formatNote}
+
+=== CURRENT RESUME ===
+${currentText}
+
+Return ONLY the complete fixed resume text. No explanations, no JSON, no markdown fences.`,
+    }];
+
+    try {
+        const result = await getAIReply(messages, "resume_fix");
+        let fixedText = result.reply.trim();
+        // Strip any accidental markdown fences
+        if (fixedText.startsWith("```")) {
+            fixedText = fixedText.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
+        }
+        return {
+            fixedText,
+            fixDescription: `Applied fix: ${specificInstruction.split(".")[0]}.`,
+        };
+    } catch (err: any) {
+        console.error("Failed to apply resume fix:", err);
+        throw new Error("AI failed to apply the fix. Please try again.");
+    }
+}
+
