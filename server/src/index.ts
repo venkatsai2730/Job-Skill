@@ -9,7 +9,8 @@ import jobsRoutes from "./routes/jobs.js";
 import jobListingsRoutes from "./routes/jobListings.js";
 import notificationRoutes from "./routes/notifications.js";
 import linkedinRoutes from "./routes/linkedin.js";
-import { fetchAllJobs } from "./services/jobFetcher.js";
+import geocodeRoutes from "./routes/geocode.js";
+import { fetchAtsJobs, fetchRssJobs, fetchScraperJobs, autoExpireJobs } from "./services/jobFetcher.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -30,27 +31,49 @@ app.use("/api/jobs", jobsRoutes);
 app.use("/api/job-listings", jobListingsRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/linkedin", linkedinRoutes);
+app.use("/api/geocode", geocodeRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// ── Job Fetch Cron (every 5 minutes) ────────────────────────
-const JOB_FETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
-let jobFetchTimer: ReturnType<typeof setInterval> | null = null;
+// ── Job Fetch Cron (Staggered Intervals) ────────────────────
+const ATS_INTERVAL = 5 * 60 * 1000;      // 5 minutes
+const RSS_INTERVAL = 15 * 60 * 1000;     // 15 minutes
+const SCRAPER_INTERVAL = 30 * 60 * 1000; // 30 minutes
+const EXPIRY_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 
 function startJobFetchCron() {
-    // Initial fetch after 30s delay (let server warm up)
+    // Initial fetch after a short delay to let server start
     setTimeout(() => {
-        fetchAllJobs().catch(err => console.warn("[Cron] Initial job fetch failed:", err.message));
+        fetchAtsJobs().catch(err => console.warn("[Cron] Initial ATS fetch failed:", err.message));
+        fetchRssJobs().catch(err => console.warn("[Cron] Initial RSS fetch failed:", err.message));
+        // We delay scraper slightly more to avoid CPU spike
+        setTimeout(() => fetchScraperJobs().catch(e => console.warn("[Cron] Scraper failed", e.message)), 10000);
+        
+        // Run expiry check on startup
+        autoExpireJobs().catch(e => console.warn("[Cron] Expiry failed", e.message));
     }, 30000);
 
-    jobFetchTimer = setInterval(() => {
-        fetchAllJobs().catch(err => console.warn("[Cron] Job fetch failed:", err.message));
-    }, JOB_FETCH_INTERVAL);
+    // Set intervals
+    setInterval(() => {
+        fetchAtsJobs().catch(err => console.warn("[Cron] ATS fetch failed:", err.message));
+    }, ATS_INTERVAL);
 
-    console.log(`⏰ Job fetch cron started (every ${JOB_FETCH_INTERVAL / 60000} min)`);
+    setInterval(() => {
+        fetchRssJobs().catch(err => console.warn("[Cron] RSS fetch failed:", err.message));
+    }, RSS_INTERVAL);
+
+    setInterval(() => {
+        fetchScraperJobs().catch(err => console.warn("[Cron] Scraper fetch failed:", err.message));
+    }, SCRAPER_INTERVAL);
+
+    setInterval(() => {
+        autoExpireJobs().catch(err => console.warn("[Cron] Expiry failed:", err.message));
+    }, EXPIRY_INTERVAL);
+
+    console.log(`⏰ Cron started: ATS (5m), RSS (15m), Scraper (30m), Expiry (24h)`);
 }
 
 startJobFetchCron();
