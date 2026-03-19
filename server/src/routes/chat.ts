@@ -87,7 +87,7 @@ router.post("/conversations", authenticateToken, async (req: AuthRequest, res: R
 // GET /api/chat/conversations/:id/messages — get messages for a conversation
 router.get("/conversations/:id/messages", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
-        const messages = await getConversationMessages(req.params.id);
+        const messages = await getConversationMessages(req.params.id as any as string);
         res.json({ messages });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -98,7 +98,7 @@ router.get("/conversations/:id/messages", authenticateToken, async (req: AuthReq
 router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async (req: AuthRequest, res: Response) => {
     try {
         const { content, feature } = req.body;
-        const conversationId = req.params.id;
+        const conversationId = req.params.id as any as string;
 
         if (!content) {
             res.status(400).json({ error: "Content is required." });
@@ -107,10 +107,10 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
 
         // Save user message
         await addMessage({
-            conversation_id: conversationId,
+            conversation_id: conversationId as any,
             role: "user",
             content: typeof content === "string" ? content : JSON.stringify(content),
-            feature,
+            feature: feature as any,
         });
 
         // Get conversation history
@@ -126,19 +126,19 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
 
         // Save AI reply
         await addMessage({
-            conversation_id: conversationId,
+            conversation_id: conversationId as any,
             role: "assistant",
             content: result.reply,
             provider: result.provider,
             model: result.model,
-            feature: aiFeature,
+            feature: aiFeature as any,
             tokens: result.tokens,
         });
 
         // Auto-title if first message
         if (history.length <= 1) {
             const title = generateTitle(typeof content === "string" ? content : "New Chat");
-            await renameConversation(conversationId, req.user!.userId, title);
+            await renameConversation(conversationId as any as string, req.user!.userId, title);
         }
 
         res.json(result);
@@ -151,7 +151,7 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
 // DELETE /api/chat/conversations/:id
 router.delete("/conversations/:id", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
-        await deleteConversation(req.params.id, req.user!.userId);
+        await deleteConversation(req.params.id as any as string, req.user!.userId);
         res.json({ message: "Conversation deleted." });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
@@ -162,7 +162,7 @@ router.delete("/conversations/:id", authenticateToken, async (req: AuthRequest, 
 router.patch("/conversations/:id", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
         const { title } = req.body;
-        await renameConversation(req.params.id, req.user!.userId, title);
+        await renameConversation(req.params.id as any as string, req.user!.userId, title as any);
         res.json({ message: "Renamed." });
     } catch (err: any) {
         res.status(500).json({ error: err.message });

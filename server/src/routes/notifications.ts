@@ -37,7 +37,7 @@ router.get("/unread-count", async (req: AuthRequest, res: Response) => {
 // PATCH /api/notifications/:id/read
 router.patch("/:id/read", async (req: AuthRequest, res: Response) => {
     try {
-        await markAsRead(req.params.id, req.user!.userId);
+        await markAsRead(req.params.id as any as string, req.user!.userId);
         res.json({ message: "Marked as read." });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
