@@ -13,14 +13,14 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 const QUICK_PROMPTS = [
-    { label: "Resume Audit", icon: "📊", feature: "chat" as AIFeature, text: "Perform a full Resume Audit. Give me an ATS score, identify all errors, and provide the top 3 critical fixes." },
-    { label: "Find Jobs", icon: "💼", feature: "chat" as AIFeature, text: "Analyze my experience and recommend 5 job roles I should apply for right now with reasons." },
-    { label: "Cover Letter", icon: "✍️", feature: "cover_letter" as AIFeature, text: "Generate a professional cover letter for my most recent job application." },
-    { label: "Screening Q&A", icon: "📋", feature: "screening" as AIFeature, text: "Help me answer common screening questions: years of experience, why this company, expected CTC, notice period." },
-    { label: "LinkedIn", icon: "🔗", feature: "chat" as AIFeature, text: "Create a professional LinkedIn Headline and About section based on my resume." },
-    { label: "Skill Gap", icon: "🧠", feature: "chat" as AIFeature, text: "Compare my skills against 2026 market demands and give me a 3-step learning roadmap." },
-    { label: "Code Help", icon: "💻", feature: "code_gen" as AIFeature, text: "I need help with a coding problem. Let me describe it..." },
-    { label: "Job Match", icon: "🎯", feature: "job_match" as AIFeature, text: "Score how well my profile matches a specific job. I'll paste the job description." },
+    { label: "Score Resume", icon: "📊", feature: "chat" as AIFeature, text: "/score" },
+    { label: "Find Jobs", icon: "💼", feature: "chat" as AIFeature, text: "/jobs" },
+    { label: "Fix Bullets", icon: "🔧", feature: "chat" as AIFeature, text: "/fix" },
+    { label: "Cover Letter", icon: "✍️", feature: "cover_letter" as AIFeature, text: "/cover" },
+    { label: "Interview Prep", icon: "🎤", feature: "chat" as AIFeature, text: "/prep" },
+    { label: "Skill Gaps", icon: "🧠", feature: "chat" as AIFeature, text: "/skills" },
+    { label: "LinkedIn", icon: "🔗", feature: "chat" as AIFeature, text: "/linkedin" },
+    { label: "All Commands", icon: "📋", feature: "chat" as AIFeature, text: "/help" },
 ];
 
 function ModelBadge({ provider, model }: { provider?: string; model?: string }) {
@@ -48,7 +48,7 @@ function MessageBubble({ message }: { message: any }) {
         <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"} group`}>
             {!isUser && (
                 <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-pulse to-blue-electric flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-1 shadow-lg shadow-violet-pulse/20">
-                    JS
+                    ✦
                 </div>
             )}
             <div className={`max-w-[80%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${isUser
@@ -129,7 +129,7 @@ function TypingIndicator() {
             <div className="bg-surface-1 border border-white/[0.06] rounded-2xl rounded-bl-md px-5 py-3.5">
                 <div className="flex gap-1.5 items-center h-5">
                     {[0, 1, 2].map(i => <div key={i} className="w-2 h-2 bg-blue-electric rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
-                    <span className="text-white-40 text-xs ml-2">Thinking...</span>
+                    <span className="text-white-40 text-xs ml-2">Aria is thinking...</span>
                 </div>
             </div>
         </div>

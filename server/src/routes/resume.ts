@@ -427,17 +427,34 @@ router.post("/upload", async (req: AuthRequest, res: Response) => {
         // We no longer delete the old resume.
         // It remains in storage and in the database to preserve history.
 
-        // Upload to Supabase Storage
-        const { error: uploadError } = await supabaseAdmin.storage
-            .from("resumes")
-            .upload(storagePath, fileBuffer, {
-                contentType: "application/pdf",
-                upsert: true,
-            });
+        // Upload to Supabase Storage with Retry Logic
+        let uploadError = null;
+        let uploadSuccess = false;
 
-        if (uploadError) {
-            console.error("Storage upload error:", uploadError);
-            res.status(400).json({ error: uploadError.message });
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            const { error } = await supabaseAdmin.storage
+                .from("resumes")
+                .upload(storagePath, fileBuffer, {
+                    contentType: "application/pdf",
+                    upsert: true,
+                });
+
+            if (!error) {
+                uploadSuccess = true;
+                break;
+            }
+
+            uploadError = error;
+            console.warn(`[Resume] Storage upload attempt ${attempt} failed:`, error.message);
+
+            if (attempt < 3) {
+                await new Promise(r => setTimeout(r, 1500 * attempt)); // Exponential backoff: 1.5s, 3s
+            }
+        }
+
+        if (!uploadSuccess) {
+            console.error("[Resume] Final storage upload error:", uploadError);
+            res.status(400).json({ error: uploadError?.message || "Upload failed after retries due to database timeout." });
             return;
         }
 

@@ -33,23 +33,44 @@ export type AIFeature =
     | "resume_fix";
 
 const SYSTEM_PROMPTS: Record<string, string> = {
-    chat: `You are JobSkill AI — an Elite Career Coach and Job Search Assistant for India & Global markets.
+    chat: `You are an expert AI Career Coach inside JobSkill AI named Aria.
+You have direct access to the user's resume, their ATS score,
+all score breakdowns, and the job database.
 
-### CORE CAPABILITIES:
-1. **📊 Resume Audit**: Deep scan, ATS score (0-100), Top 3 Critical Fixes
-2. **📄 ATS Check**: Readability analysis, missing keywords
-3. **💼 Find Jobs**: Recommend 3-5 roles with "Why you fit" and "Where to apply"
-4. **🔗 LinkedIn**: Custom Headline and About section
-5. **🧠 Skill Gap**: Compare skills vs 2026 market, 3-step roadmap
-6. **✍️ Cover Letter**: Generate tailored cover letters
-7. **📋 Screening Q&A**: Answer common screening questions
-8. **💻 Code Help**: Technical interview prep and code review
+You can take the following ACTIONS using slash commands.
+When a user asks you to do something, call the correct action.
 
-### RULES:
-- USE THE DATA provided in chat history — never say "I don't have your resume" if text is present
+AVAILABLE ACTIONS:
+  /score          — Re-run ATS scorer and show detailed breakdown
+  /fix [issue_id] — Generate specific fix for a penalty issue
+  /rewrite [section] — Rewrite a resume section (summary/experience/projects)
+  /bullets [job_title] — Generate 3 strong quantified bullets for a role
+  /match [job_id] — Check how well user's resume matches a specific job
+  /apply [job_id] — Auto-tailor resume for a specific job posting
+  /jobs [role]    — Search and rank jobs matching user's profile
+  /compare        — Compare user score against peers/industry average
+  /interview [role] — Generate 10 likely interview questions
+  /roadmap        — Create personalised 30-day job search roadmap
+
+RESPONSE RULES:
+1. Always be specific. Never say "add more details" — show the EXACT text to add.
+2. When fixing bullets: show OLD → NEW with explanation.
+3. When showing scores: show the number, what it means, and what ONE thing would improve it most.
+4. Keep responses under 300 words unless generating content.
+5. Use the user's real resume content in every response.
+6. Never make up job data — only reference jobs from the DB.
+
+PERSONALITY:
+- Direct and honest: tell them what is actually wrong
+- Encouraging: show what they COULD score after fixes
+- Specific: give exact text, not generic advice
+- Indian context aware: know IIT/NIT/IIIT tier, Indian job market, Indian salary ranges, Indian company names
+
+RULES:
+- USE THE DATA provided in chat history — never say "I don't have your resume" if resume text is present
 - Be PERSONAL — address user by name if found in resume
-- Always end with a suggestion for next steps
-- Format responses with markdown for readability`,
+- Format responses with markdown for readability
+- For off-topic queries: gently redirect to career context`,
 
     cover_letter: `You are an expert cover letter writer specializing in ATS-optimized, recruiter-ready cover letters.
 
@@ -315,17 +336,6 @@ Your task is to analyze a candidate's resume against a specific Job Description 
 - Return ONLY the fixed resume text, no JSON, no markdown fences, no explanations.
 - Do NOT add any preamble like "Here is the fixed resume:" - return ONLY the resume content itself.`,
 
-
-    resume_fix: `You are an elite ATS Resume Optimizer. Your task is to apply a SPECIFIC targeted fix to a resume.
-
-### CRITICAL RULES:
-- You MUST return the COMPLETE resume text with the fix applied - not just the changed parts.
-- Preserve the EXACT structure, formatting, and all other content that is NOT related to the fix.
-- Apply the fix surgically - only modify what is necessary to address the specific issue.
-- Maintain the same resume style and voice.
-- If the resume is in LaTeX format, preserve all LaTeX commands and structure.
-- Return ONLY the fixed resume text, no JSON, no markdown fences, no explanations.
-- Do NOT add any preamble like "Here is the fixed resume:" - return ONLY the resume content itself.`,
 };
 
 // ── Model Configuration ─────────────────────────────────────
@@ -383,31 +393,60 @@ async function callGroq(messages: any[], model: string, systemPrompt: string, ma
         return { role: m.role, content: String(m.content) };
     });
 
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-            model,
-            messages: [{ role: "system", content: systemPrompt }, ...cleanMessages],
-            max_tokens: maxTokens,
-            temperature: 0.4,
-            stream: false,
-        }),
-    });
+    const maxRetries = 3;
+    const baseDelayMs = 8000;
 
-    if (!res.ok) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                model,
+                messages: [{ role: "system", content: systemPrompt }, ...cleanMessages],
+                max_tokens: maxTokens,
+                temperature: 0.4,
+                stream: false,
+            }),
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            return {
+                reply: data.choices[0].message.content,
+                provider: "groq",
+                model,
+                tokens: data.usage?.total_tokens || 0,
+            };
+        }
+
+        // Handle rate limiting with retry
+        if (res.status === 429 && attempt < maxRetries - 1) {
+            const delay = baseDelayMs * Math.pow(2, attempt);
+            console.log(`[Groq Chat] Rate limited. Waiting ${delay / 1000}s before retry ${attempt + 1}`);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+        }
+
+        // Non-429 error or final retry exhausted
         const err = await res.json().catch(() => ({}));
+        if (attempt < maxRetries - 1 && res.status >= 500) {
+            // Server error: retry
+            await new Promise(r => setTimeout(r, baseDelayMs));
+            continue;
+        }
+
         throw new Error(`Groq (${model}): ${err.error?.message || res.status}`);
     }
-    const data = await res.json();
+
+    // Fallback: should not reach here, but just in case
     return {
-        reply: data.choices[0].message.content,
+        reply: "I'm having trouble processing that right now. Try again in a moment, or use a slash command like /score or /jobs.",
         provider: "groq",
         model,
-        tokens: data.usage?.total_tokens || 0,
+        tokens: 0,
     };
 }
 

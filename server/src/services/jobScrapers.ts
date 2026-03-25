@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-// Job Scrapers — Freshersworld, Apna.co, NCS Gov Portal
+// Job Scrapers — Freshersworld, Apna.co
+// NOTE: NCS Government Portal scraper has been removed (no gov/PSU jobs)
 // ═══════════════════════════════════════════════════════════════
 
 import * as cheerio from "cheerio";
@@ -109,49 +110,6 @@ export async function fetchApnaJobs(): Promise<RawJob[]> {
         return jobs;
     } catch (err: any) {
         console.warn("[Scraper] Apna.co failed:", err.message);
-        return [];
-    }
-}
-
-// ── NCS Government Portal Scraper ───────────────────────────
-export async function fetchNCSGovJobs(): Promise<RawJob[]> {
-    try {
-        const url = "https://www.ncs.gov.in/jobseeker/Jobs";
-        const res = await fetch(url, {
-            signal: AbortSignal.timeout(25000),
-            headers: HEADERS,
-        });
-        if (!res.ok) return [];
-
-        const html = await res.text();
-        const $ = cheerio.load(html);
-        const jobs: RawJob[] = [];
-
-        $(".job-card, .job-listing, .job-row, tr.job-item, .card").each((_: any, el: any) => {
-            const title = $(el).find(".job-title, h3, h4, .title, td:first-child").first().text().trim();
-            const department = $(el).find(".department, .company, td:nth-child(2)").first().text().trim();
-            const location = $(el).find(".location, td:nth-child(3)").first().text().trim() || "India";
-            const link = $(el).find("a").attr("href");
-            const job_url = link?.startsWith("http") ? link : link ? `https://www.ncs.gov.in${link}` : "";
-
-            if (title && job_url) {
-                jobs.push({
-                    title,
-                    company: department || "Government of India",
-                    location,
-                    job_url,
-                    source: "scrape",
-                    posted_at: new Date().toISOString(),
-                    description: `NCS Government Portal Listing. Apply at NCS.`,
-                    category: "Government / PSU",
-                });
-            }
-        });
-
-        await new Promise(r => setTimeout(r, 2000));
-        return jobs;
-    } catch (err: any) {
-        console.warn("[Scraper] NCS Gov Portal failed:", err.message);
         return [];
     }
 }
