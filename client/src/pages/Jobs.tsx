@@ -183,6 +183,7 @@ export default function Jobs() {
   const [skills, setSkills] = useState("");
   const [preferredLocation, setPreferredLocation] = useState("");
   const [userSkills, setUserSkills] = useState<string[]>([]);
+  const [feedSubTab, setFeedSubTab] = useState<"for-you" | "browse" | "remote">("for-you");
 
   const [geoLocation, setGeoLocation] = useState<GeoLocation | null>(null);
   const [geoStatus, setGeoStatus] = useState<"detecting" | "detected" | "denied" | "idle">("idle");
@@ -409,6 +410,22 @@ export default function Jobs() {
 
         {/* FEED CONTENT */}
         <TabsContent value="feed" className="flex-1 mt-0 outline-none flex flex-col">
+          {/* Sub-tabs: For You / Browse All / Remote */}
+          <div className="flex items-center gap-2 mb-5">
+            {(["for-you", "browse", "remote"] as const).map(tab => {
+              const labels = { "for-you": "✨ For You", "browse": "📋 Browse All", "remote": "🌍 Remote" };
+              return (
+                <button key={tab} onClick={() => setFeedSubTab(tab)}
+                  className={`px-4 py-2 rounded-full text-[13px] font-semibold transition-all border ${
+                    feedSubTab === tab
+                      ? "bg-blue-electric/15 text-blue-electric border-blue-electric/30"
+                      : "bg-surface-1 text-white-60 border-white/[0.06] hover:bg-surface-2 hover:text-foreground"
+                  }`}>
+                  {labels[tab]}
+                </button>
+              );
+            })}
+          </div>
           {/* Location Detection Banner */}
           {geoStatus === "detected" && geoLocation && (
             <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-[13px] font-medium">
@@ -481,16 +498,23 @@ export default function Jobs() {
               {/* Category Sections */}
               {page === 1 && !search && (
                 <div className="mb-4">
-                  <CategorySection title="💻 Tech Jobs Near You" jobs={techJobs} onSeeAll={() => { setSearch("developer"); handleApplyFilters(); }} />
-                  <CategorySection title="🎓 Fresher & Internship" jobs={fresherJobs} onSeeAll={() => { setExperience("1"); handleApplyFilters(); }} />
-                  <CategorySection title="🌍 Remote Worldwide" jobs={remoteJobs} onSeeAll={() => { setLocation("Remote"); handleApplyFilters(); }} />
-                  <CategorySection title="🏢 Top Companies Hiring" jobs={topCompanyJobs} onSeeAll={() => { setSearch(""); handleApplyFilters(); }} />
+                  <CategorySection title="💻 Tech Jobs Near You" jobs={techJobs} onSeeAll={() => { setSearch("developer"); fetchFeedJobs(true, 1, undefined, undefined, undefined, { query: "developer" }); }} />
+                  <CategorySection title="🎓 Fresher & Internship" jobs={fresherJobs} onSeeAll={() => { setExperience("1"); fetchFeedJobs(true, 1, undefined, undefined, undefined, { experience: "1" }); }} />
+                  <CategorySection title="🌍 Remote Worldwide" jobs={remoteJobs} onSeeAll={() => { setLocation("Remote"); fetchFeedJobs(true, 1, undefined, undefined, undefined, { location: "Remote" }); }} />
+                  <CategorySection title="🏢 Top Companies Hiring" jobs={topCompanyJobs} onSeeAll={() => { setSearch(""); fetchFeedJobs(true, 1, undefined, undefined, undefined, { query: "" }); }} />
                 </div>
               )}
 
               {/* Main Job Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {feedJobs.map((job) => (
+                {(feedSubTab === "for-you"
+                  ? feedJobs.filter(j => (j.match_score || 0) > 0).length > 0
+                    ? feedJobs.filter(j => (j.match_score || 0) > 0)
+                    : feedJobs
+                  : feedSubTab === "remote"
+                    ? feedJobs.filter(j => (j.location || "").toLowerCase().includes("remote"))
+                    : feedJobs
+                ).map((job) => (
                   <div key={job.id} className="glass-card-hover p-5 flex flex-col group relative">
                     {/* Top badges row */}
                     <div className="absolute top-4 right-4 flex items-center gap-1.5">

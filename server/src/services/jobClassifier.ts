@@ -10,7 +10,12 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 let rateLimitedUntil = 0;                // timestamp when cooldown expires
 const RATE_LIMIT_COOLDOWN = 5 * 60 * 1000; // 5 minutes cooldown after a 429
 let aiCallsThisCycle = 0;               // counter per fetch cycle
-const MAX_AI_CALLS_PER_CYCLE = 20;      // max AI calls per cron cycle
+const MAX_AI_CALLS_PER_CYCLE = 25;      // max AI calls per cron cycle (Groq free = 30/min)
+let aiCallsInBatch = 0;                  // batch counter
+const BATCH_SIZE = 10;
+const BATCH_PAUSE_MS = 5000;             // 5s pause between batches
+const INTER_CALL_DELAY_MS = 2500;        // 2.5s between AI calls
+const BACKOFF_BASE_MS = 10000;           // 10s initial backoff for rate limit
 
 /** Call this at the START of each cron cycle to reset the counter */
 export function resetAICallCounter() {
@@ -51,10 +56,18 @@ export async function classifySeniorityWithAI(description: string): Promise<Seni
     }
 
     try {
-        // Throttle: small delay before each AI call
-        await new Promise(r => setTimeout(r, 2000));
+        // Throttle: delay before each AI call
+        await new Promise(r => setTimeout(r, INTER_CALL_DELAY_MS));
 
         aiCallsThisCycle++;
+        aiCallsInBatch++;
+
+        // Batch pause: after every BATCH_SIZE calls, take a longer break
+        if (aiCallsInBatch >= BATCH_SIZE) {
+            console.log(`[AI-Classify] Batch of ${BATCH_SIZE} AI calls complete. Pausing ${BATCH_PAUSE_MS / 1000}s...`);
+            await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
+            aiCallsInBatch = 0;
+        }
 
         const truncated = description.substring(0, 4000);
         const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -153,4 +166,37 @@ export function classifySeniorityFromTitle(text: string): SeniorityResult {
 
     // Default: unknown with low confidence
     return { experience_min: null, experience_max: null, seniority: "unknown", confidence_score: 40 };
+}
+
+/**
+ * Rule-based job role classification fallback.
+ * Used when Groq is unavailable, rate-limited, or fails.
+ */
+export function classifyRoleWithRules(title: string, description: string): {
+    classified_role: string;
+    is_remote: boolean;
+    is_internship: boolean;
+    method: 'rules' | 'ai';
+} {
+    const text = `${title} ${description}`.toLowerCase();
+    const isRemote = /remote|work from home|wfh|anywhere/i.test(text);
+    const isIntern = /intern|internship|trainee/i.test(title);
+
+    const role =
+        /data\s+(engineer|pipeline|etl)/i.test(text)   ? 'Data Engineering' :
+        /machine\s+learning|ml\s+engineer|ai\s+engineer/i.test(text) ? 'ML Engineering' :
+        /data\s+sci/i.test(text)                         ? 'Data Science'     :
+        /backend|node\.?js|django|spring/i.test(text)    ? 'Backend'          :
+        /frontend|react|vue|angular/i.test(text)         ? 'Frontend'         :
+        /full.?stack/i.test(text)                        ? 'Full Stack'       :
+        /devops|kubernetes|docker|terraform/i.test(text) ? 'DevOps'           :
+        /android|ios|flutter|react\s+native/i.test(text) ? 'Mobile'          :
+                                                           'Software Engineer';
+
+    return {
+        classified_role: role,
+        is_remote: isRemote,
+        is_internship: isIntern,
+        method: 'rules',
+    };
 }

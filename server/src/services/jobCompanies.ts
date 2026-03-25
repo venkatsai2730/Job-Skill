@@ -1,123 +1,144 @@
 // ═══════════════════════════════════════════════════════════════
 // Company Lists & Location Maps for Job Fetcher
+// Complete list covering Indian unicorns, global MNCs, startups
 // ═══════════════════════════════════════════════════════════════
 
 export const GREENHOUSE_COMPANIES = [
-    // Indian Unicorns
-    "swiggy", "zomato", "oyo", "paytm", "cred", "groww", "zepto", "meesho",
-    "nykaa", "razorpay", "lenskart", "mamaearth", "boat", "cars24", "spinny",
-    "dealshare", "udaan", "moglix", "ofbusiness", "delhivery", "blackbuck",
-    "porter", "shiprocket", "blinkit", "curefit", "urbancompany",
+    // ── Indian Unicorns & Startups ──
+    "swiggy", "zomato", "oyo", "razorpay", "meesho",
+    "nykaa", "cars24", "spinny", "udaan", "moglix",
+    "delhivery", "blackbuck", "porter", "shiprocket",
+    "blinkit", "curefit", "urbancompany", "khatabook",
+    "okcredit", "leadsquared", "betterplace", "springworks",
+    "infoedge", "justdial", "indiamart", "policybazaar",
+    "bankbazaar", "sharechat", "dailyhunt", "dream11",
+    "mpl", "gamezop", "perpule", "superops",
+    "licious", "wakefit", "pepperfry", "urbanladder",
+    "paytm", "lenskart", "mamaearth", "boat",
+    "dealshare", "ofbusiness",
 
-    // Global MNCs India Office
-    "google", "microsoft", "amazon", "flipkart", "samsung", "ibm",
-    "accenture", "deloitte", "ey", "pwc", "capgemini",
+    // ── Global MNCs with India offices ──
+    "microsoft", "google", "amazon", "oracle", "sap",
+    "qualcomm", "intel", "cisco", "vmware", "broadcom",
+    "cognizant", "mphasis", "hexaware", "persistent",
+    "zensar", "cyient", "ltimindtree", "kpit", "mastech",
+    "kellton", "sonata", "sasken", "rubrik", "cohesity",
+    "snowflake", "confluent", "nutanix", "arcesium",
+    "deshaw", "tanium", "informatica", "qualtrics",
+    "flipkart", "samsung", "ibm", "accenture", "deloitte",
+    "ey", "pwc", "capgemini", "microfocus", "dxc",
+    "mindtree", "pagerduty", "cloudera", "grab",
 
-    // Famous Startups / Unicorns
-    "airbnb", "pinterest", "discord", "figma", "notion", "brex", "ramp",
-    // Enterprise Tech
-    "twilio", "datadog", "okta", "plaid", "gusto", "robinhood", "coinbase", "kraken",
-    // Cloud / DevTools
-    "hashicorp", "docker", "vercel", "cloudflare", "gitlab", "postman", "apollographql",
-    // AI / Forward edge
-    "openai", "anthropic", "scaleai", "huggingface",
-    // Hyderabad/India presence
-    "rubrik", "cohesity", "confluent", "snowflake", "nutanix", "arcesium", "deshaw",
-    "tanium", "informatica", "qualtrics", "pagerduty", "cloudera", "grab",
-    // Well known consumer
-    "reddit", "doordash", "instacart", "lyft", "spotify", "duolingo",
+    // ── Global Startups/Tech ──
+    "airbnb", "pinterest", "discord", "figma", "notion",
+    "brex", "ramp", "twilio", "datadog", "okta", "plaid",
+    "hashicorp", "docker", "vercel", "cloudflare", "gitlab",
+    "postman", "openai", "anthropic", "scaleai", "huggingface",
+    "reddit", "doordash", "lyft", "spotify", "duolingo",
+    "stripe", "shopify", "atlassian", "canva", "webflow",
+    "gusto", "robinhood", "coinbase", "kraken", "apollographql",
+    "instacart",
 
-    // Problem 4B — MNCs with strong Hyderabad/Bangalore presence
-    "oracle", "sap", "qualcomm", "intel", "cisco", "vmware", "broadcom",
-    "microfocus", "dxc", "cognizant", "mindtree", "mphasis", "hexaware",
-    "persistent", "zensar", "cyient", "ltimindtree", "kpit", "mastech",
-    "kellton", "sonata", "sasken", "infobeam", "infoedge", "justdial",
-    "indiamart", "policybazaar", "bankbazaar", "sharechat", "dailyhunt",
-    "verse", "dream11", "mpl", "sportsbuzz", "gamezop",
-
-    // Problem 6 — Indian Series A/B Startups
-    "khatabook", "okcredit", "jupiter-money", "fi-money", "niyo", "epifi",
+    // ── Indian Series A/B & FinTech ──
+    "jupiter-money", "fi-money", "niyo", "epifi",
     "open-financial", "paymatrix", "recko", "decentro", "setu", "hyperface",
-    "perpule", "superops", "chargebee", "freshteam", "leadsquared",
-    "capillarytech", "betterplace", "springworks", "darwinbox", "keka",
-    "greythr", "zoho", "freshworks", "hasura", "clevertap", "moengage",
-    "webengage", "netcore", "wigzo", "haptik", "gupshup", "kaleyra",
-    "exotel", "ozonetel", "knowlarity", "servetel", "milkbasket",
-    "bigbasket", "jiomart", "nature-basket", "limeroad", "snapdeal",
-    "shopclues", "pepperfry", "urban-ladder", "wakefit", "sleepy-owl", "mcaffeine",
+    "chargebee", "freshteam", "capillarytech",
+    "darwinbox", "keka", "greythr", "zoho", "freshworks",
+    "hasura", "clevertap", "moengage", "webengage", "netcore",
+    "wigzo", "haptik", "gupshup", "kaleyra", "exotel",
+    "ozonetel", "knowlarity", "servetel",
 
-    // HealthTech India
+    // ── Indian E-Commerce & Consumer ──
+    "milkbasket", "bigbasket", "jiomart", "nature-basket",
+    "limeroad", "snapdeal", "shopclues", "sleepy-owl", "mcaffeine",
+
+    // ── Indian HealthTech ──
     "practo", "1mg", "pharmeasy", "netmeds", "cure-fit", "mfine",
     "niramai", "innovaccer", "doceree", "pristyncare", "fortis", "manipal",
 ];
 
 export const LEVER_COMPANIES = [
-    // Indian Tech
-    "cred", "groww", "zepto", "phonepe", "jupiter", "slice", "bharatpe",
-    "freshworks", "postman", "browserstack", "hasura", "clevertap", "moengage",
-    "webengage", "capillary", "setu", "decentro", "hyperface", "signzy",
+    // ── Indian Tech ──
+    "cred", "groww", "zepto", "phonepe", "jupiter",
+    "slice", "bharatpe", "freshworks", "browserstack",
+    "hasura", "clevertap", "moengage", "webengage",
     "cashfree", "juspay", "instamojo", "gojek",
-    // Finance/Payments
-    "revolut",
-    // Dev Tools & SaaS
-    "retool", "linear", "mux", "fivetran", "segment", "amplitude", "miro",
-    // Big names
-    "netflix", "yelp", "eventbrite", "quora", "glassdoor", "atlassian",
-    "canva", "squarespace", "webflow", "shopify",
+    "chargebee", "cleartax", "darwinbox", "keka",
+    "zoho", "netcore", "exotel", "kaleyra",
+    "postman", "capillary", "setu", "decentro", "hyperface", "signzy",
 
-    // Problem 6 — EdTech India
+    // ── Indian EdTech ──
     "physicswallah", "unacademy", "byju", "vedantu", "toppr", "extramarks",
     "doubtnut", "embibe", "testbook", "gradeup", "adda247", "mahendras",
+
+    // ── Global Companies ──
+    "revolut", "retool", "linear", "mux", "fivetran",
+    "segment", "amplitude", "miro", "netflix", "atlassian",
+    "canva", "squarespace", "shopify", "intercom",
+    "yelp", "eventbrite", "quora", "glassdoor", "webflow",
 ];
 
 export const ASHBY_COMPANIES = [
-    // Global Tech
-    "openai", "notion", "snowflake", "deel", "vanta",
-    "airwallex", "confluent", "kraken", "deliveroo",
-    // India Focused
+    // ── India Focused ──
+    "unacademy", "byju", "physicswallah", "vedantu",
+    "scaler", "upgrad", "toppr", "testbook",
+    "practo", "1mg", "pharmeasy", "innovaccer",
+    "pristyncare", "ather", "ola", "rapido",
+    "dunzo", "yulu", "decentro", "hyperface", "signzy",
     "darwinbox", "keka", "zoho", "freshworks",
     "chargebee", "cleartax", "licious", "blackbuck",
-    "delhivery", "udaan", "vedantu", "unacademy",
-    "byju", "physicswallah", "scaler", "upgrad",
-    // Startups Using Ashby in India
-    "setu", "hyperface", "decentro", "cashfree",
-    "signzy", "syntizen", "yulu", "ather", "ola",
-    "rapido", "porter", "dunzo",
+    "delhivery", "udaan", "porter",
+    "setu", "syntizen", "cashfree", "cure-fit",
 
-    // Problem 6 — EdTech/HealthTech
-    "practo", "1mg", "pharmeasy", "cure-fit", "innovaccer",
+    // ── Global ──
+    "openai", "notion", "snowflake", "deel", "vanta",
+    "airwallex", "confluent", "deliveroo",
+    "kraken",
 ];
 
 // ── JSearch Cron Queries ────────────────────────────────────
 export const JSEARCH_CRON_QUERIES = [
-    // Original global queries
+    // Global queries
     { query: "software engineer", location: "India" },
     { query: "developer", location: "India" },
     { query: "software engineer", location: "United States" },
     { query: "developer", location: "United Kingdom" },
     { query: "software engineer", location: "Remote" },
-    { query: "data analyst", location: "India" },
-    { query: "designer", location: "India" },
-    { query: "product manager", location: "India" },
 
-    // Problem 4A — India metro city queries
+    // India metro city queries
     { query: "software developer", location: "Hyderabad" },
     { query: "software developer", location: "Bangalore" },
     { query: "software developer", location: "Pune" },
     { query: "software developer", location: "Chennai" },
     { query: "software developer", location: "Mumbai" },
     { query: "software developer", location: "Delhi NCR" },
-    { query: "software developer", location: "Noida" },
-    { query: "fresher developer", location: "Hyderabad" },
-    { query: "fresher developer", location: "Bangalore" },
-    { query: "entry level", location: "India" },
-    { query: "0-2 years experience", location: "India" },
+
+    // Fresher/Entry level India
     { query: "junior developer", location: "India" },
-    { query: "trainee engineer", location: "India" },
+    { query: "fresher engineer", location: "India" },
     { query: "associate engineer", location: "India" },
+    { query: "trainee developer", location: "India" },
+    { query: "0-2 years experience developer", location: "India" },
+
+    // Tech role queries
+    { query: "react developer", location: "India" },
+    { query: "node developer", location: "India" },
+    { query: "python developer", location: "India" },
+    { query: "java developer", location: "India" },
+
+    // Non-tech / cross-functional
+    { query: "data analyst", location: "India" },
+    { query: "product designer", location: "India" },
+    { query: "product manager", location: "India" },
+    { query: "devops engineer", location: "India" },
+    { query: "qa engineer", location: "India" },
+    { query: "ui ux designer", location: "India" },
+    { query: "sales", location: "India" },
+    { query: "operations manager", location: "India" },
+    { query: "marketing manager", location: "India" },
 ];
 
-// ── Problem 4C — Indian State to Nearest Metro Map ──────────
+// ── Indian State to Nearest Metro Map ──────────────────────
 export const INDIAN_STATE_TO_NEAREST_METRO: Record<string, string> = {
     "telangana": "Hyderabad",
     "andhra pradesh": "Hyderabad",
@@ -150,6 +171,12 @@ export const SKILL_PATTERNS = [
     "sap abap", "sap fico", "sap mm", "sap sd", "oracle erp", "salesforce",
     "upi", "payment gateway", "bbps", "aadhaar api", "digilocker", "npci",
     "customer service", "voice process", "non-voice", "data entry", "back office", "kyc",
+
+    // Additional skills for non-tech roles
+    "figma", "sketch", "adobe xd", "photoshop", "illustrator",
+    "product management", "agile", "scrum", "jira", "confluence",
+    "salesforce", "hubspot", "google analytics", "seo", "sem",
+    "excel", "power bi", "tableau", "looker",
 ];
 
 // ── Seniority allowed per experience range ──────────────────

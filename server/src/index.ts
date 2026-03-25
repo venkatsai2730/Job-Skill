@@ -10,6 +10,7 @@ import jobListingsRoutes from "./routes/jobListings.js";
 import notificationRoutes from "./routes/notifications.js";
 import linkedinRoutes from "./routes/linkedin.js";
 import geocodeRoutes from "./routes/geocode.js";
+import chatbotRoutes from "./routes/chatbot.js";
 import { fetchAtsJobs, fetchRssJobs, fetchScraperJobs, fetchJSearchCronJobs, autoExpireJobs, verifyTopJobs } from "./services/jobFetcher.js";
 
 const app = express();
@@ -32,6 +33,7 @@ app.use("/api/job-listings", jobListingsRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/linkedin", linkedinRoutes);
 app.use("/api/geocode", geocodeRoutes);
+app.use("/api/chatbot", chatbotRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {

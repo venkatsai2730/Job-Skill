@@ -13,7 +13,7 @@ import {
     SENIORITY_FOR_EXPERIENCE,
 } from "./jobCompanies.js";
 import { classifySeniorityWithAI, classifySeniorityFromTitle, resetAICallCounter } from "./jobClassifier.js";
-import { fetchFreshersWorldJobs, fetchApnaJobs, fetchNCSGovJobs } from "./jobScrapers.js";
+import { fetchFreshersWorldJobs, fetchApnaJobs } from "./jobScrapers.js";
 
 // ── Types ───────────────────────────────────────────────────
 interface RawJob {
@@ -113,7 +113,14 @@ async function fetchJSearchJobs(query: string, location: string, page = 1, numPa
             headers: { "x-rapidapi-key": JSEARCH_API_KEY, "x-rapidapi-host": JSEARCH_HOST },
             signal: AbortSignal.timeout(25000),
         });
-        if (res.status === 429 || !res.ok) return [];
+        if (res.status === 429) {
+            console.warn(`[JobFetcher] JSearch API rate limited (429)`);
+            throw new Error("JSEARCH_RATE_LIMITED");
+        }
+        if (!res.ok) {
+            console.warn(`[JobFetcher] JSearch API error: ${res.status}`);
+            return [];
+        }
         const data = await res.json();
         return (data.data || []).map((j: any) => ({
             title: j.job_title || "",
@@ -125,6 +132,7 @@ async function fetchJSearchJobs(query: string, location: string, page = 1, numPa
             description: (j.job_description || "").substring(0, 15000),
         }));
     } catch (err: any) {
+        if (err.message === "JSEARCH_RATE_LIMITED") throw err; // Bubble up
         if (err.name !== "AbortError") console.warn("[JobFetcher] JSearch error:", err.message);
         return [];
     }
@@ -538,26 +546,72 @@ export async function fetchRssJobs(): Promise<{ total: number; stored: number }>
 }
 
 export async function fetchScraperJobs(): Promise<{ total: number; stored: number }> {
-    console.log(`[JobFetcher] Scraper Cron: Fetching Internshala + Freshersworld + Apna + NCS...`);
-    const [internshala, freshersworld, apna, ncs] = await Promise.all([
-        fetchInternshalaJobs(), fetchFreshersWorldJobs(), fetchApnaJobs(), fetchNCSGovJobs(),
+    console.log(`[JobFetcher] Scraper Cron: Fetching Internshala + Freshersworld + Apna...`);
+    const [internshala, freshersworld, apna] = await Promise.all([
+        fetchInternshalaJobs(), fetchFreshersWorldJobs(), fetchApnaJobs(),
     ]);
-    const allJobs = [...internshala, ...freshersworld, ...apna, ...ncs];
+    const allJobs = [...internshala, ...freshersworld, ...apna];
     console.log(`[JobFetcher] Scraper Fetched ${allJobs.length} jobs`);
     const stored = await storeJobs(allJobs);
     return { total: allJobs.length, stored };
 }
 
-// JSearch cron — runs sequentially to respect rate limits
+// JSearch cron — batched with rate limit protection
+const JSEARCH_BATCH_SIZE = 5;
+const JSEARCH_DELAY_MS = 15000;      // 15s between requests
+const JSEARCH_BATCH_PAUSE_MS = 30000; // 30s between batches
+const JSEARCH_MAX_RETRIES = 3;
+
 export async function fetchJSearchCronJobs(): Promise<{ total: number; stored: number }> {
     if (!JSEARCH_API_KEY) { console.log("[JobFetcher] JSearch API key not set — skipping"); return { total: 0, stored: 0 }; }
     let allJobs: RawJob[] = [];
-    for (const q of JSEARCH_CRON_QUERIES) {
-        const jobs = await fetchJSearchJobs(q.query, q.location, 1, 1);
-        allJobs.push(...jobs);
-        await new Promise(r => setTimeout(r, 500));
+    const failed: string[] = [];
+    let stopEarly = false;
+
+    for (let i = 0; i < JSEARCH_CRON_QUERIES.length && !stopEarly; i += JSEARCH_BATCH_SIZE) {
+        const batch = JSEARCH_CRON_QUERIES.slice(i, i + JSEARCH_BATCH_SIZE);
+
+        for (const q of batch) {
+            if (stopEarly) break;
+            let attempt = 0;
+            let succeeded = false;
+
+            while (attempt < JSEARCH_MAX_RETRIES && !succeeded) {
+                try {
+                    const jobs = await fetchJSearchJobs(q.query, q.location, 1, 1);
+                    allJobs.push(...jobs);
+                    succeeded = true;
+                    await new Promise(r => setTimeout(r, JSEARCH_DELAY_MS));
+                } catch (err: any) {
+                    if (err.message === "JSEARCH_RATE_LIMITED") {
+                        attempt++;
+                        if (attempt >= JSEARCH_MAX_RETRIES) {
+                            console.warn(`[JobFetcher] JSearch rate limited 3x for "${q.query}". Stopping batch.`);
+                            failed.push(q.query);
+                            stopEarly = true;
+                        } else {
+                            const backoff = JSEARCH_DELAY_MS * Math.pow(2, attempt);
+                            console.log(`[JobFetcher] JSearch rate limited on "${q.query}". Retry ${attempt}/${JSEARCH_MAX_RETRIES} in ${backoff / 1000}s`);
+                            await new Promise(r => setTimeout(r, backoff));
+                        }
+                    } else {
+                        console.error(`[JobFetcher] JSearch error for "${q.query}": ${err.message}`);
+                        failed.push(q.query);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Pause between batches
+        if (i + JSEARCH_BATCH_SIZE < JSEARCH_CRON_QUERIES.length && !stopEarly) {
+            console.log(`[JobFetcher] JSearch batch complete. Sleeping 30s before next batch...`);
+            await new Promise(r => setTimeout(r, JSEARCH_BATCH_PAUSE_MS));
+        }
     }
-    console.log(`[JobFetcher] JSearch fetched ${allJobs.length} jobs`);
+
+    console.log(`[JobFetcher] JSearch fetched ${allJobs.length} jobs. Failed queries: ${failed.length}`);
+    if (failed.length > 0) console.log(`[JobFetcher] JSearch failed: ${failed.join(', ')}`);
     const stored = await storeJobs(allJobs);
     return { total: allJobs.length, stored };
 }
@@ -879,15 +933,23 @@ export async function searchJobs(filters: {
     });
 
     // ── Company Interleaving (before pagination) ──
-    // Skip interleaving when resume matching is active — it would destroy score-based ordering
-    if (!hasUserProfile) {
-        jobs = interleaveByCompany(jobs, 2);
-    }
+    // Always apply interleaving, but preserve score-based ordering when resume matching
+    jobs = interleaveByCompany(jobs, 2);
 
     // Pagination
     const from = (page - 1) * limit;
     const to = from + limit;
-    const paginated = jobs.slice(from, to);
+    let paginated = jobs.slice(from, to);
+
+    // HARD RULE: Enforce max 2 jobs from same company per page
+    const companyPageCount = new Map<string, number>();
+    paginated = paginated.filter(job => {
+        const key = (job.company || "").toLowerCase();
+        const count = companyPageCount.get(key) || 0;
+        if (count >= 2) return false;
+        companyPageCount.set(key, count + 1);
+        return true;
+    });
 
     return { data: paginated, total: jobs.length };
 }
