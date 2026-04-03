@@ -5,7 +5,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { ShareScoreModal } from "@/components/ShareScoreModal";
+import { ScorePanel } from "@/components/ScorePanel";
 import { ResumeChatbot } from "@/components/ResumeChatbot";
+import { ResumePDFViewer } from "@/components/ResumePDFViewer";
 
 interface CourseLink { platform: string; title: string; url: string; duration: string; isFree: boolean; }
 interface LearningRec { skill: string; courses: CourseLink[]; salaryImpactINR: string; salaryImpactUSD: string; }
@@ -81,18 +83,9 @@ const Resume = () => {
   const [gapResult, setGapResult] = useState<GapAnalysisResult | null>(null);
   const [learningRecs, setLearningRecs] = useState<LearningRec[]>([]);
 
-  // ── Live Inline Editor State ──
-  const [editorTab, setEditorTab] = useState<"text" | "latex" | "preview">("preview");
-  const [editMode, setEditMode] = useState(false);
-  const [editText, setEditText] = useState("");
-  const [editLatex, setEditLatex] = useState("");
-  const [rescoring, setRescoring] = useState(false);
-  const [lastSynced, setLastSynced] = useState(true);
-  const [baseScore, setBaseScore] = useState<number | null>(null);
-  const rescoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ── Auto-Fix State ──
-  const [fixingIssueId, setFixingIssueId] = useState<string | null>(null);
+  // ── PDF Viewer State ──
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [zoom, setZoom] = useState<number>(1.0);
 
   // ── Create from Scratch State ──
   const [showCreateFlow, setShowCreateFlow] = useState(false);
@@ -171,8 +164,28 @@ const Resume = () => {
     }
   };
 
-  // Cleanup timer on unmount
-  useEffect(() => { return () => { if (rescoreTimerRef.current) clearTimeout(rescoreTimerRef.current); }; }, []);
+  // Cleanup PDF URL on unmount
+  useEffect(() => {
+    return () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); };
+  }, [pdfUrl]);
+
+  // Fetch PDF blob if we have a saved resume but no local file yet
+  useEffect(() => {
+    if (resumeFile && token && !pdfUrl) {
+      const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:3001";
+      fetch(`${baseUrl}/api/resume/download/pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to load PDF blob");
+        return res.blob();
+      })
+      .then(blob => {
+        setPdfUrl(URL.createObjectURL(blob));
+      })
+      .catch(console.error);
+    }
+  }, [resumeFile, token, pdfUrl]);
 
   useEffect(() => {
     if (!token) return;
@@ -196,8 +209,7 @@ const Resume = () => {
 
   const handleTabClick = (section: string) => {
     setActiveSection(section);
-    const el = document.getElementById(sectionRefs[section]);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("pdf-viewer-container")?.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const uploadFile = useCallback(async (file: File) => {
@@ -218,6 +230,8 @@ const Resume = () => {
 
       const meta = await api.post<{ resume: { file_name: string; storage_path: string }; parsed: ParsedData | null }>("/api/resume/upload", { fileName: file.name, fileData });
       setResumeFile(meta.resume);
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+      setPdfUrl(URL.createObjectURL(file));
 
       // Run sequence steps
       let step = 0;
@@ -273,35 +287,18 @@ const Resume = () => {
   const handleDownloadPDF = async () => {
     setDownloading("pdf");
     try {
-      if (editorTab === "latex" && editLatex) {
-        // Compile the current LaTeX
-        const response = await fetch("http://localhost:3001/api/resume/compile-latex", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ latexContent: editLatex })
-        });
-        if (!response.ok) throw new Error("Compilation failed");
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = (resumeFile?.file_name || "Resume").replace(/\.pdf$/i, "") + ".pdf";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-        toast.success("PDF compiled and downloaded ✦");
-      } else if (resumeFile) {
+      if (resumeFile) {
         // Download original
         await api.downloadBlob("/api/resume/download/pdf", resumeFile.file_name || "resume.pdf");
         toast.success("PDF downloaded ✦");
       } else {
         toast.error("Nothing to download.");
       }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to download PDF");
+    } finally {
+      setDownloading(null);
     }
-    catch (err: any) { toast.error(err.message || "PDF download failed."); }
-    finally { setDownloading(null); }
   };
 
   const handleDownloadDOCX = async () => {
@@ -329,74 +326,6 @@ const Resume = () => {
   const hasParsed = !!parsed && !!sections;
   const bulletStrength = (text: string): "good" | "medium" => /\d/.test(text) ? "good" : "medium";
 
-  // Reconstruct raw text from parsed sections for initial editor content
-  const buildRawText = useCallback((s: ParsedSections): string => {
-    const parts: string[] = [];
-    if (s.summary) parts.push("SUMMARY\n" + s.summary);
-    if (s.experience.length > 0) {
-      parts.push("EXPERIENCE");
-      s.experience.forEach(e => {
-        parts.push(`${e.title} | ${e.company} | ${e.dates}`);
-        e.bullets.forEach(b => parts.push(`• ${b}`));
-      });
-    }
-    if (s.education.length > 0) {
-      parts.push("EDUCATION");
-      s.education.forEach(e => {
-        parts.push(`${e.degree} | ${e.school} | ${e.dates}${e.gpa ? " | GPA: " + e.gpa : ""}`);
-        if (e.courses.length > 0) parts.push("Courses: " + e.courses.join(", "));
-      });
-    }
-    if (s.skills.length > 0) {
-      parts.push("SKILLS");
-      s.skills.forEach(g => parts.push(`${g.category}: ${g.items.join(", ")}`));
-    }
-    if (s.projects.length > 0) {
-      parts.push("PROJECTS");
-      s.projects.forEach(p => {
-        parts.push(`${p.name}${p.tech.length > 0 ? " [" + p.tech.join(", ") + "]" : ""}`);
-        if (p.description) parts.push(p.description);
-      });
-    }
-    return parts.join("\n");
-  }, []);
-
-  // Toggle edit mode
-  const toggleEditMode = useCallback(() => {
-    if (!editMode && sections) {
-      setEditText(buildRawText(sections));
-      setBaseScore(atsScore);
-    }
-    setEditMode(prev => !prev);
-  }, [editMode, sections, atsScore, buildRawText]);
-
-  const handleAIFix = async (issue: any) => {
-    if (!issue.fixId) return;
-    setFixingIssueId(issue.fixId);
-    try {
-      const currentText = editText || parsed?.rawText || "";
-      const result = await api.post<{ fixedText: string; fixDescription: string }>("/api/resume/ai-fix", {
-        fixType: issue.fixId,
-        issueDescription: issue.text,
-        currentText,
-        editorMode: editorTab
-      });
-
-      if (editorTab === "latex") {
-        setEditLatex(result.fixedText);
-      } else {
-        setEditText(result.fixedText);
-        handleEditChange(result.fixedText);
-      }
-      toast.success(result.fixDescription || "Fix applied to editor!");
-
-    } catch (err: any) {
-      toast.error(err.message || "Failed to apply AI fix");
-    } finally {
-      setFixingIssueId(null);
-    }
-  };
-
   const handleCreateSubmit = async () => {
     setCreateLoading(true);
     try {
@@ -405,8 +334,8 @@ const Resume = () => {
         templateType: "IT"
       });
       setParsed({ sections: result.sections, ats: { score: 75, label: "Good", issues: [], atsRisk: "LOW", abVariant: "variant_a", inferredSkills: [] } });
-      setEditLatex(result.latex);
-      setEditorTab("latex");
+      // Note: With the PDF viewer update, Latex generation is backend-only. 
+      // The user would typically click "Export DOCX" or "PDF" to get the result.
       toast.success("Resume generated successfully!");
       setShowCreateFlow(false);
     } catch (err: any) {
@@ -415,38 +344,6 @@ const Resume = () => {
       setCreateLoading(false);
     }
   };
-
-  // Sync text editor on first load
-  useEffect(() => {
-    if (editorTab === "text" && !editText && sections) {
-      setEditText(buildRawText(sections));
-      setBaseScore(atsScore);
-    }
-  }, [editorTab, editText, sections, atsScore, buildRawText]);
-
-  const handleLatexChange = useCallback((text: string) => {
-    setEditLatex(text);
-  }, []);
-
-  // Debounced rescore — fires 2s after user stops typing
-  const handleEditChange = useCallback((text: string) => {
-    setEditText(text);
-    setLastSynced(false);
-    if (rescoreTimerRef.current) clearTimeout(rescoreTimerRef.current);
-    rescoreTimerRef.current = setTimeout(async () => {
-      if (text.trim().length < 20) {
-        setLastSynced(true);
-        return;
-      }
-      setRescoring(true);
-      try {
-        const result = await api.post<{ sections: ParsedSections; ats: ATSResult }>("/api/resume/rescore", { rawText: text, isPdf: false });
-        setParsed({ sections: result.sections, ats: result.ats });
-        setLastSynced(true);
-      } catch { /* silently ignore rescore errors during typing */ }
-      finally { setRescoring(false); }
-    }, 1000); // Reduced to 1s for snappier feel
-  }, []);
 
   if (showScoringSequence) {
     return (
@@ -535,15 +432,27 @@ const Resume = () => {
       {/* Center - editor */}
       <div className="flex-1 p-6 lg:p-8 overflow-y-auto bg-surface-2">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-3xl mx-auto space-y-8">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between shrink-0 mb-6">
             <h2 className="font-display font-bold text-2xl text-foreground">Resume Editor</h2>
             <div className="flex items-center gap-3">
               {hasParsed && <span className="flex items-center gap-1.5 text-success text-sm"><div className="w-2 h-2 rounded-full bg-success" /> Parsed</span>}
-              {hasParsed && (
-                <div className="flex bg-surface-3/50 p-1 rounded-lg border border-white/[0.06]">
-                  <button onClick={() => setEditorTab("text")} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${editorTab === "text" ? "bg-surface-2 text-foreground shadow-sm" : "text-white-60 hover:text-white-80"}`}>📝 Text</button>
-                  <button onClick={() => setEditorTab("latex")} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${editorTab === "latex" ? "bg-surface-2 text-foreground shadow-sm" : "text-white-60 hover:text-white-80"}`}>{"</>"} LaTeX</button>
-                  <button onClick={() => setEditorTab("preview")} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${editorTab === "preview" ? "bg-surface-2 text-foreground shadow-sm" : "text-white-60 hover:text-white-80"}`}>👁 Preview</button>
+              {hasParsed && pdfUrl && (
+                <div className="flex bg-surface-3/50 p-1 rounded-lg border border-white/[0.06] items-center">
+                  <button 
+                    onClick={() => setZoom(z => Math.max(0.6, z - 0.1))}
+                    className="w-7 h-7 flex flex-col items-center justify-center rounded text-white-60 hover:text-white hover:bg-surface-2 transition-colors focus:outline-none"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <span className="text-white-60 text-xs font-medium w-12 text-center pointer-events-none select-none">
+                    {Math.round(zoom * 100)}%
+                  </span>
+                  <button 
+                    onClick={() => setZoom(z => Math.min(2.0, z + 0.1))}
+                    className="w-7 h-7 flex flex-col items-center justify-center rounded text-white-60 hover:text-white hover:bg-surface-2 transition-colors focus:outline-none"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
                 </div>
               )}
             </div>
@@ -583,205 +492,11 @@ const Resume = () => {
             </div>
           )}
 
-          {/* ── LIVE INLINE EDITOR ── */}
-          {(editorTab === "text" || editorTab === "latex") && hasParsed && (
-            <div className="relative group bg-surface-1 border border-white/[0.12] rounded-xl shadow-2xl overflow-hidden mt-6 mb-8">
-              <div className="flex items-center justify-between p-3 border-b border-white/[0.06] bg-surface-2/50">
-                <div className="flex items-center gap-2">
-                  <p className="text-white-60 text-xs uppercase tracking-wider font-semibold">{editorTab === "text" ? "Live Editor" : "LaTeX Editor"}</p>
-                  <div className="h-1.5 w-1.5 rounded-full bg-blue-electric animate-pulse" />
-                </div>
-                {editorTab === "text" && (
-                  <div className="flex items-center gap-2">
-                    <AnimatePresence mode="wait">
-                      {rescoring ? (
-                        <motion.span
-                          key="scoring"
-                          initial={{ opacity: 0, x: 5 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -5 }}
-                          className="flex items-center gap-1.5 text-blue-electric text-xs font-medium"
-                        >
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing edits…
-                        </motion.span>
-                      ) : lastSynced ? (
-                        <motion.span
-                          key="synced"
-                          initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
-                          className="flex items-center gap-1 text-emerald-400 text-xs font-medium"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Score Synced
-                        </motion.span>
-                      ) : (
-                        <span className="text-white-30 text-xs italic">Typing…</span>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                )}
-              </div>
-
-              {editorTab === "text" ? (
-                <textarea
-                  value={editText}
-                  onChange={(e) => handleEditChange(e.target.value)}
-                  className="w-full min-h-[600px] bg-transparent p-6 text-foreground text-sm font-mono leading-relaxed resize-y focus:outline-none placeholder:text-white-20"
-                  placeholder="Edit your resume content here..."
-                  spellCheck={true}
-                />
-              ) : (
-                <textarea
-                  value={editLatex}
-                  onChange={(e) => handleLatexChange(e.target.value)}
-                  className="w-full min-h-[600px] bg-[#0d1117] text-[#c9d1d9] p-6 text-sm font-mono leading-relaxed resize-y focus:outline-none placeholder:text-white-20"
-                  placeholder="Paste or write your LaTeX code here... 
-Note: Backend compilation is required to preview the fully rendered PDF."
-                  spellCheck={false}
-                />
-              )}
-
-              <div className="absolute bottom-4 right-4 text-[10px] text-white-20 pointer-events-none group-hover:text-white-40 transition-colors uppercase tracking-widest font-mono">
-                {editorTab === "text" ? editText.length : editLatex.length} characters
-              </div>
-            </div>
-          )}
-
-          {hasParsed && sections && editorTab === "preview" && (
-            <>
-              {/* Summary */}
-              <div id="section-summary">
-                <div className="flex items-center gap-2.5 mb-3">
-                  <div className="w-1 h-6 bg-blue-electric rounded-full" />
-                  <h3 className="font-display font-semibold text-foreground text-lg">Summary</h3>
-                </div>
-                <div className="bg-surface-1 border border-white/[0.06] rounded-xl p-5 text-foreground text-base leading-relaxed shadow-sm">
-                  {sections.summary || <span className="text-white-30 italic">No summary section detected in your resume</span>}
-                </div>
-              </div>
-
-              {/* Experience */}
-              <div id="section-experience">
-                <div className="flex items-center gap-2.5 mb-3">
-                  <div className="w-1 h-6 bg-blue-electric rounded-full" />
-                  <h3 className="font-display font-semibold text-foreground text-lg">Experience</h3>
-                </div>
-                {sections.experience.length > 0 ? (
-                  <div className="space-y-4">
-                    {sections.experience.map((exp, idx) => (
-                      <div key={idx} className="bg-surface-1 border border-white/[0.06] rounded-xl p-5 shadow-sm">
-                        <div className="flex justify-between items-start mb-3">
-                          <div>
-                            <p className="text-foreground font-semibold text-base">{exp.title}</p>
-                            <p className="text-white-60 text-sm">{exp.company}{exp.company && exp.dates ? " · " : ""}{exp.dates}</p>
-                          </div>
-                          {exp.dates && exp.dates.toLowerCase().includes("present") && (
-                            <span className="bg-emerald-500/10 text-emerald-400 text-xs px-2.5 py-1 rounded-full font-medium border border-emerald-500/20">Current</span>
-                          )}
-                        </div>
-                        {exp.bullets.length > 0 && (
-                          <ul className="space-y-2.5">
-                            {exp.bullets.map((bullet, i) => (
-                              <li key={i} className="flex gap-2.5 text-base text-foreground">
-                                <div className={`w-2 h-2 rounded-full mt-2 shrink-0 ${bulletStrength(bullet) === "good" ? "bg-emerald-400" : "bg-amber-400"}`} />
-                                {bullet}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="bg-surface-1 border border-white/[0.06] rounded-xl p-5 shadow-sm text-white-30 italic">No experience section detected</div>
-                )}
-              </div>
-
-              {/* Education */}
-              <div id="section-education">
-                <div className="flex items-center gap-2.5 mb-3">
-                  <div className="w-1 h-6 bg-blue-electric rounded-full" />
-                  <GraduationCap className="w-5 h-5 text-blue-electric" />
-                  <h3 className="font-display font-semibold text-foreground text-lg">Education</h3>
-                </div>
-                {sections.education.length > 0 ? (
-                  <div className="space-y-4">
-                    {sections.education.map((edu, idx) => (
-                      <div key={idx} className="bg-surface-1 border border-white/[0.06] rounded-xl p-5 shadow-sm">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <p className="text-foreground font-semibold text-base">{edu.degree}</p>
-                            <p className="text-white-60 text-sm">{edu.school}{edu.school && edu.dates ? " · " : ""}{edu.dates}</p>
-                          </div>
-                          {edu.gpa && <span className="bg-blue-electric/10 text-blue-electric text-xs px-2.5 py-1 rounded-full font-medium border border-blue-electric/20">GPA: {edu.gpa}</span>}
-                        </div>
-                        {edu.courses.length > 0 && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <span className="text-white-60 text-sm">Relevant coursework:</span>
-                            {edu.courses.map((course) => (
-                              <span key={course} className="bg-surface-2 text-foreground text-xs px-2.5 py-1 rounded-full">{course}</span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="bg-surface-1 border border-white/[0.06] rounded-xl p-5 shadow-sm text-white-30 italic">No education section detected</div>
-                )}
-              </div>
-
-              {/* Skills */}
-              <div id="section-skills">
-                <div className="flex items-center gap-2.5 mb-3">
-                  <div className="w-1 h-6 bg-blue-electric rounded-full" />
-                  <Code2 className="w-5 h-5 text-blue-electric" />
-                  <h3 className="font-display font-semibold text-foreground text-lg">Skills</h3>
-                </div>
-                {sections.skills.length > 0 ? (
-                  <div className="bg-surface-1 border border-white/[0.06] rounded-xl p-5 shadow-sm">
-                    <div className="space-y-4">
-                      {sections.skills.map((group) => (
-                        <div key={group.category}>
-                          <p className="text-white-60 text-sm font-medium mb-2">{group.category}</p>
-                          <div className="flex flex-wrap gap-2">
-                            {group.items.map((skill) => (
-                              <span key={skill} className="bg-blue-electric/10 text-blue-electric text-sm px-3 py-1.5 rounded-lg font-medium border border-blue-electric/20">{skill}</span>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-surface-1 border border-white/[0.06] rounded-xl p-5 shadow-sm text-white-30 italic">No skills section detected</div>
-                )}
-              </div>
-
-              {/* Projects */}
-              <div id="section-projects">
-                <div className="flex items-center gap-2.5 mb-3">
-                  <div className="w-1 h-6 bg-blue-electric rounded-full" />
-                  <FolderOpen className="w-5 h-5 text-blue-electric" />
-                  <h3 className="font-display font-semibold text-foreground text-lg">Projects</h3>
-                </div>
-                {sections.projects.length > 0 ? (
-                  <div className="space-y-4">
-                    {sections.projects.map((proj, idx) => (
-                      <div key={idx} className="bg-surface-1 border border-white/[0.06] rounded-xl p-5 shadow-sm">
-                        <p className="text-foreground font-semibold text-base mb-2">{proj.name}</p>
-                        {proj.description && <p className="text-white-60 text-sm mb-3">{proj.description}</p>}
-                        {proj.tech.length > 0 && (
-                          <div className="flex gap-2">
-                            {proj.tech.map((t) => (
-                              <span key={t} className="bg-surface-2 text-foreground text-xs px-2.5 py-1 rounded-full">{t}</span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="bg-surface-1 border border-white/[0.06] rounded-xl p-5 shadow-sm text-white-30 italic">No projects section detected</div>
-                )}
-              </div>
-            </>
+          {/* ── LIVE PDF VIEWER ── */}
+          {hasParsed && pdfUrl && !loadingParsed && (
+             <div className="flex-1 w-full bg-surface-1 rounded-xl shadow-xl overflow-hidden border border-white/[0.06] mb-8 min-h-[600px] flex text-foreground">
+                <ResumePDFViewer fileUrl={pdfUrl} zoom={zoom} />
+             </div>
           )}
         </motion.div>
       </div>
@@ -818,175 +533,13 @@ Note: Backend compilation is required to preview the fully rendered PDF."
           </div>
         )}
 
-        {/* Action Buttons */}
         {hasParsed && (
-          <div className="flex gap-2 mb-6 print:hidden">
-            <button
-              onClick={() => setShowShareModal(true)}
-              className="flex-[2] bg-blue-electric hover:bg-blue-bright text-white text-sm py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5"
-            >
-              <Share2 className="w-4 h-4" /> Share Score
-            </button>
-            <button
-              onClick={() => window.print()}
-              className="flex-1 bg-surface-2 hover:bg-surface-3 border border-white/[0.1] text-foreground text-sm py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5"
-            >
-              <Download className="w-4 h-4" /> Export
-            </button>
-          </div>
-        )}
-
-        <div className="text-center mb-6">
-          <h3 className="font-display font-semibold text-foreground text-base mb-3">✦ ATS Score</h3>
-          {hasParsed ? (
-            <>
-              <svg width="120" height="120" viewBox="0 0 120 120" className="mx-auto">
-                <circle cx="60" cy="60" r={r + 8} fill="none" stroke="hsl(var(--surface-3))" strokeWidth="7" />
-                <motion.circle cx="60" cy="60" r={r + 8} fill="none" stroke="url(#ats-gradient)" strokeWidth="7" strokeLinecap="round"
-                  strokeDasharray={2 * Math.PI * (r + 8)}
-                  initial={{ strokeDashoffset: 2 * Math.PI * (r + 8) }}
-                  animate={{ strokeDashoffset: 2 * Math.PI * (r + 8) - (atsScore / 100) * 2 * Math.PI * (r + 8) }}
-                  transition={{ duration: 1.5, ease: "easeOut" }}
-                  style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
-                />
-                <defs>
-                  <linearGradient id="ats-gradient">
-                    <stop offset="0%" stopColor="hsl(var(--blue-electric))" />
-                    <stop offset="100%" stopColor="hsl(var(--cyan-spark))" />
-                  </linearGradient>
-                </defs>
-                <text x="60" y="56" textAnchor="middle" className="fill-foreground font-mono font-bold text-3xl">{atsScore}</text>
-                <text x="60" y="72" textAnchor="middle" className="fill-white-60 font-body text-sm">{atsLabel}</text>
-              </svg>
-              {/* Score Delta Pill */}
-              <AnimatePresence>
-                {editMode && baseScore !== null && atsScore !== baseScore && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 15, scale: 0.5 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -15, scale: 0.5 }}
-                    whileHover={{ scale: 1.05 }}
-                    className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold mt-4 shadow-lg border-2 ${atsScore > baseScore
-                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-emerald-500/5"
-                        : "bg-rose-500/10 text-rose-400 border-rose-500/20 shadow-rose-500/5"
-                      }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    {atsScore > baseScore ? "+" : "-"}{Math.abs(atsScore - baseScore)} pts
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              {rescoring && editMode && (
-                <p className="text-blue-electric text-xs mt-1 flex items-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Rescoring…
-                </p>
-              )}
-
-              {/* ATS Risk Badge */}
-              <div className="mt-5 flex flex-col items-center gap-3">
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-bold uppercase tracking-wider border ${atsRisk === "LOW" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                    atsRisk === "MEDIUM" ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                      "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                  }`}>
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  ATS Risk: {atsRisk}
-                </span>
-
-                {indiaAtsScore > 0 && (
-                  <div className="bg-orange-500/10 text-orange-400 border border-orange-500/20 px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2">
-                    <span className="text-lg">🇮🇳</span> India ATS Match: {indiaAtsScore}%
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-col items-center gap-2 py-6">
-              <div className="w-16 h-16 rounded-full border-4 border-surface-3 flex items-center justify-center">
-                <span className="text-white-30 font-mono font-bold text-xl">—</span>
-              </div>
-              <p className="text-white-30 text-sm">Upload a resume to see your score</p>
-            </div>
-          )}
-        </div>
-
-        <div className="mb-6">
-          <h4 className="font-display font-semibold text-foreground text-sm mb-3 uppercase tracking-wider">Top Issues</h4>
-          {issues.length > 0 ? (
-            <div className="space-y-2.5">
-              {issues.map((issue: any, i: number) => (
-                <div key={i} className="flex justify-between items-start gap-2.5 text-sm group">
-                  <div className="flex items-start gap-2.5">
-                    {issue.type === "warning" ? <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" /> : <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />}
-                    <span className="text-foreground">{issue.text}</span>
-                  </div>
-                  {issue.type === "warning" && issue.fixId && (
-                    <button
-                      onClick={() => handleAIFix(issue)}
-                      disabled={fixingIssueId === issue.fixId}
-                      className="shrink-0 bg-blue-electric/10 hover:bg-blue-electric/20 text-blue-electric px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 opacity-0 group-hover:opacity-100 disabled:opacity-50"
-                    >
-                      {fixingIssueId === issue.fixId ? <Loader2 className="w-3 h-3 animate-spin" /> : <Bot className="w-3 h-3" />}
-                      Fix
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : <p className="text-white-30 text-sm">No analysis yet</p>}
-        </div>
-
-        <div className="mb-6">
-          <h4 className="font-display font-semibold text-foreground text-sm mb-2 uppercase tracking-wider">Keywords Found</h4>
-          {hasParsed ? (
-            <>
-              <div className="flex flex-wrap gap-2 mb-3">
-                {keywordsFound.map((kw) => <span key={kw} className="bg-emerald-500/10 text-emerald-400 text-sm px-3 py-1 rounded-full font-medium border border-emerald-500/20">{kw}</span>)}
-              </div>
-              {keywordsMissing.length > 0 && (
-                <>
-                  <h4 className="font-display font-semibold text-foreground text-sm mb-2 uppercase tracking-wider mt-4">Missing Keywords</h4>
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {keywordsMissing.map((kw) => <span key={kw} className="bg-amber-500/10 text-amber-400 text-sm px-3 py-1 rounded-full font-medium border border-amber-500/20">{kw}</span>)}
-                  </div>
-                </>
-              )}
-              {inferredSkills && inferredSkills.length > 0 && (
-                <>
-                  <h4 className="font-display font-semibold text-foreground text-sm mb-2 uppercase tracking-wider mt-4 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-purple-400" /> Hidden Skills Detected
-                  </h4>
-                  <p className="text-xs text-white-60 mb-3 leading-relaxed">
-                    Our AI inferred these skills based on the context of your project descriptions and experience bullets, giving you hidden ATS points.
-                  </p>
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {inferredSkills.map((kw) => (
-                      <span key={kw} className="bg-purple-500/10 text-purple-400 text-sm px-3 py-1 rounded-full font-medium border border-purple-500/20">
-                        {kw}
-                      </span>
-                    ))}
-                  </div>
-                </>
-              )}
-              <div className="flex items-center gap-2.5 text-sm">
-                <span className="text-white-60">Matched: {keywordsMatched}/{keywordsTotal}</span>
-                <div className="flex-1 h-2 bg-surface-3 rounded-full">
-                  <div className="h-full bg-blue-electric rounded-full" style={{ width: `${keywordsTotal > 0 ? Math.round((keywordsMatched / keywordsTotal) * 100) : 0}%` }} />
-                </div>
-              </div>
-            </>
-          ) : <p className="text-white-30 text-sm">Upload a resume to see keyword analysis</p>}
-        </div>
-
-        {hasParsed && (
-          <div className="glass-card p-5 rounded-xl">
-            <h4 className="font-display font-semibold text-foreground text-sm mb-3 uppercase tracking-wider">💡 Tips</h4>
-            <div className="space-y-2 text-sm">
-              {atsScore < 60 && <p className="text-white-60">• Add more quantified achievements (numbers, percentages, metrics) to your bullet points</p>}
-              {keywordsMissing.length > 3 && <p className="text-white-60">• Consider adding these missing keywords: {keywordsMissing.slice(0, 3).join(", ")}</p>}
-              {sections && sections.summary.length < 50 && <p className="text-white-60">• Add a strong professional summary at the top of your resume</p>}
-              {atsScore >= 80 && <p className="text-emerald-400 font-medium">✦ Your resume looks great! Keep it updated with your latest achievements.</p>}
-            </div>
-          </div>
+          <ScorePanel 
+            hasParsed={hasParsed} 
+            atsResult={ats as any} 
+            onShare={() => setShowShareModal(true)} 
+            onExport={() => window.print()} 
+          />
         )}
 
         {/* ═══════ GAP ANALYSIS PANEL ═══════ */}

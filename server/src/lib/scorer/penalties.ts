@@ -4,7 +4,7 @@
 
 import { PENALTY_WEIGHTS } from './penalty-weights.js';
 import type { ParsedResume } from './helpers.js';
-import { TYPO_LIST } from './helpers.js';
+import { TYPO_LIST, extractBullets } from './helpers.js';
 
 const W = PENALTY_WEIGHTS;
 
@@ -35,6 +35,14 @@ const FILLER_PHRASES = [
     'grow professionally',     'eager to learn and grow',
     'self-motivated individual', 'dedicated and motivated',
     'passion for learning',    'enthusiastic fresher',
+    // Bug 3 fix: additional phrases for Krishna-style filler
+    'focused and goal-oriented',
+    'goal-oriented engineering',
+    'goal-oriented',
+    'strong communication, coordination',
+    'make a winning',
+    'making a career in',
+    'contributing effectively',
 ];
 
 const SOFT_TERMS = [
@@ -52,13 +60,21 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     const sections = resume.sections;
     const results: PenaltyResult[] = [];
 
-    const expBullets  = sections.experience?.bullets ?? [];
-    const projBullets = sections.projects?.bullets   ?? [];
-    const allBullets  = [...expBullets, ...projBullets];
+    // Bug 1 fix: extract bullets from .raw text, not .bullets (which is often empty)
+    const expBullets  = extractBullets(sections.experience?.raw);
+    const projBullets = extractBullets(sections.projects?.raw);
+    let allBullets  = [...expBullets, ...projBullets];
+
+    // Fallback: if both empty, extract from rawText
+    if (allBullets.length === 0 && raw.length > 100) {
+        allBullets = extractBullets(raw)
+            .filter(line => !/^(education|skills|summary|objective|contact|personal)/i.test(line));
+    }
 
     // ── P1. PERSONAL DETAILS ────────────────────────────────
+    // Bug 3 fix: Removed colon requirement + added 'personal details' keyword
     const personalHits = (raw.match(
-        /\b(date\s+of\s+birth|d\.?o\.?b\.?|gender\s*:|marital\s+status|nationality\s*:|religion\s*:|caste\s*:|father'?s?\s+name|mother'?s?\s+name)\b/gi
+        /\b(date\s+of\s+birth|d\.?o\.?b\.?|gender|marital\s+status|personal\s+details|nationality|religion|caste|father'?s?\s+name|mother'?s?\s+name)\b/gi
     ) ?? []);
 
     results.push({
@@ -116,10 +132,22 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P5. TRIVIAL PROJECTS ────────────────────────────────
-    const projRaw        = (sections.projects?.raw ?? '').toLowerCase();
-    const trivialByTime  = /\b[1-7]\s*days?\b/gi.test(projRaw);
-    const trivialByTitle = /\b(todo|to-do\s+list|calculator\s+app|weather\s+app|landing\s+page|static\s+website|portfolio\s+site)\b/gi.test(projRaw);
-    const trivialFired   = trivialByTime || trivialByTitle;
+    // Bug 3 fix: use includes() for broader title matching + search rawText as fallback
+    const projectsRaw = sections.projects?.raw ?? '';
+    const projRawForSearch = projectsRaw.length > 10 ? projectsRaw : raw;
+
+    // Match ", 3 Days" OR ", Days" OR standalone "X days"
+    const trivialByTime  = /,\s*\d*\s*days?\b/gi.test(projRawForSearch) || /\b[1-7]\s*days?\b/gi.test(projRawForSearch);
+
+    // Use includes() for broader title matching — catches "Todo list", "Restaurant Website" etc.
+    const projLower = projRawForSearch.toLowerCase();
+    const trivialByTitle = [
+        'todo', 'to-do list', 'calculator', 'restaurant website',
+        'tourism website', 'static website', 'static site',
+        'weather app', 'landing page', 'portfolio site',
+    ].some(t => projLower.includes(t));
+
+    const trivialFired = trivialByTime || trivialByTitle;
 
     results.push({
         id: 'trivial_projects', priority: 1,
@@ -133,27 +161,34 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P6. FILLER OBJECTIVE / SUMMARY ──────────────────────
+    // Bug 3 fix: search rawText too (for cases where sections aren't parsed properly)
     const summaryText = (
         sections.summary?.raw  ||
         sections.objective?.raw ||
         sections.profile?.raw  ||
-        raw.slice(0, 500)
+        raw.slice(0, 600)
     ).toLowerCase();
 
     const fillerHits = FILLER_PHRASES.filter(f => summaryText.includes(f));
 
+    // Bug 3 fix: threshold >= 1 when summary/profile/objective section exists
+    const hasSummarySection = !!(sections.summary?.raw || sections.profile?.raw || sections.objective?.raw);
+    const fillerThreshold = hasSummarySection ? 1 : 3;
+    const fillerTriggered = fillerHits.length >= fillerThreshold;
+
     results.push({
         id: 'filler_objective', priority: 2,
-        triggered:  fillerHits.length >= 2,
-        deduction:  fillerHits.length >= 2 ? W.filler_objective : 0,
+        triggered:  fillerTriggered,
+        deduction:  fillerTriggered ? W.filler_objective : 0,
         evidence:   fillerHits.slice(0, 3).map(f => `"${f}"`).join(', '),
         fix:        'Replace with a 3-line professional summary with specific skills, projects, and target role.',
         scoreGain:  `+${W.filler_objective} pts`,
     });
 
     // ── P7. HOBBIES / INTERESTS SECTION ─────────────────────
+    // FIX: Search rawText directly (not section-parsed text) to catch section headers
     const hobbiesHits = raw.match(
-        /\b(hobbies|other interests|special interests|extracurricular activities|personal interests|outside interests)\b/gi
+        /\b(hobbies|other\s+interests|special\s+interests|extracurricular\s+activities|personal\s+interests|outside\s+interests)\b/gi
     ) ?? [];
 
     results.push({
@@ -206,22 +241,31 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P11. DUPLICATE METRICS ──────────────────────────────
+    // FIX: Normalise "40 %" → "40%", also match "40 percent"
     const pctValues: string[] = [];
     allBullets.forEach(b => {
-        (b.match(/\d+\s*%/g) ?? []).forEach(m => pctValues.push(m.replace(/\s/, '')));
+        const matches = b.match(/(\d+)\s*(%|percent\b)/gi) ?? [];
+        matches.forEach(m => {
+            const num = m.match(/\d+/)?.[0];
+            if (num) pctValues.push(`${num}%`);
+        });
     });
+
     const pctCounts: Record<string, number> = {};
     pctValues.forEach(p => { pctCounts[p] = (pctCounts[p] ?? 0) + 1; });
+
     const dupeMetrics = Object.entries(pctCounts)
         .filter(([, n]) => n >= 3)
-        .map(([p, n]) => `${p} appears ${n}×`);
+        .map(([p, n]) => `${p} used ${n} times`);
 
     results.push({
-        id: 'duplicate_metrics', priority: 3,
+        id: 'duplicate_metrics', priority: 2,
         triggered:  dupeMetrics.length > 0,
         deduction:  dupeMetrics.length > 0 ? W.duplicate_metrics : 0,
         evidence:   dupeMetrics.join(', '),
-        fix:        'Using the same percentage 3+ times looks fabricated. Use distinct, specific metrics.',
+        fix:        dupeMetrics.length > 0
+            ? `Duplicated percentage values detected: ${dupeMetrics.join(', ')}. Fabricated-looking metrics damage credibility. Use distinct, specific numbers for each achievement.`
+            : 'Using the same percentage 3+ times looks fabricated. Use distinct, specific metrics.',
         scoreGain:  `+${W.duplicate_metrics} pts`,
     });
 

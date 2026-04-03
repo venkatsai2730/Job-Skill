@@ -25,6 +25,20 @@ export interface ATSIssue {
     fixId?: string;
 }
 
+export interface TopIssueCategory {
+    category: string;
+    penalty_key: string;
+    count: number;
+    point_gain: number;
+    is_locked: boolean;
+    sub_issues: { text: string; gain: number }[];
+}
+
+export interface CompletedCheck {
+    category: string;
+    points_saved: number;
+}
+
 export interface AdvancedATSResult {
     score: number;
     label: string;
@@ -33,10 +47,10 @@ export interface AdvancedATSResult {
     atsRisk: "LOW" | "MEDIUM" | "HIGH";
     indiaAtsScore: number;
     breakdown: {
-        impact: { score: number; max: 35 };
-        ats: { score: number; max: 25 };
-        style: { score: number; max: 25 };
-        advanced: { score: number; max: 15 };
+        impact: { score: number; max: 38 };
+        ats: { score: number; max: 20 };
+        style: { score: number; max: 14 };
+        advanced: { score: number; max: 10 };
     };
     issues: ATSIssue[];
     keywords: { found: string[]; missing: string[]; total: number; matched: number };
@@ -48,9 +62,11 @@ export interface AdvancedATSResult {
     grade: string;
     percentile: string;
     all_penalties: PenaltyResult[];
-    top_issues: PenaltyResult[];
+    top_issues: TopIssueCategory[];
+    completed_checks: CompletedCheck[];
     next_steps: { action: string; score_gain: string }[];
 }
+
 
 // ── Detect experience level ─────────────────────────────────
 function detectLevel(sections: ParsedSections): "Fresher" | "Medium" | "Senior" {
@@ -108,10 +124,58 @@ export function computeAdvancedATS(
         finalScore >= 45 ? 'Top 55%'    : finalScore >= 32 ? 'Bottom 40%' :
         finalScore >= 20 ? 'Bottom 20%' : 'Bottom 10%';
 
-    // ── Top Issues (sorted by priority then deduction) ──────
-    const topIssues = triggered
-        .sort((a, b) => a.priority - b.priority || b.deduction - a.deduction)
-        .slice(0, 5);
+    const CATEGORY_MAP: Record<string, string> = {
+        duplicate_metrics:  "Repetition",
+        vague_outcomes:     "Responsibilities",
+        filler_objective:   "Buzzwords",
+        personal_details:   "Unnecessary Sections",
+        no_github:          "Contact Details",
+        exp_zero_quant:     "Growth Signals",
+        trivial_projects:   "Project Impact",
+        hobbies_section:    "Unnecessary Sections",
+        soft_in_tech:       "Skills Section",
+        typos:              "Spelling & Grammar",
+        no_summary:         "Profile Summary",
+        full_zero_quant:    "Quantified Impact",
+        vague_achievement:  "Achievements"
+    };
+
+    const mappedIssues = triggered.map(p => {
+        // Estimate sub-issue count by looking at deduction vs base weight, or fallback to 1
+        return {
+            category: CATEGORY_MAP[p.id] || "Other Issues",
+            penalty_key: p.id,
+            count: p.id === 'vague_outcomes' || p.id === 'typos' ? Math.max(1, Math.round(p.deduction / (p.id === 'vague_outcomes' ? 1.2 : 2.5))) : 1,
+            point_gain: p.deduction,
+            is_locked: false,
+            sub_issues: [{ text: p.fix, gain: p.deduction }]
+        };
+    }).sort((a, b) => b.point_gain - a.point_gain);
+
+    const topIssuesMapped = mappedIssues.map((issue, idx) => ({
+        ...issue,
+        is_locked: idx >= 3
+    }));
+
+    const COMPLETED_MAP: Record<string, { name: string, pts: number }> = {
+        personal_details:  { name: "No Personal Details", pts: 9 },
+        full_zero_quant:   { name: "Quantified Impact", pts: 19.3 },
+        no_github:         { name: "Contact Details", pts: 3.5 },
+        duplicate_metrics: { name: "No Repeated Metrics", pts: 14 },
+        trivial_projects:  { name: "Strong Projects", pts: 5.5 },
+        filler_objective:  { name: "No Filler Language", pts: 6.5 },
+        hobbies_section:   { name: "No Irrelevant Sections", pts: 3.0 }
+    };
+
+    const completedChecks: CompletedCheck[] = [];
+    allPenalties.forEach(p => {
+        if (!p.triggered && COMPLETED_MAP[p.id]) {
+            completedChecks.push({
+                category: COMPLETED_MAP[p.id].name,
+                points_saved: COMPLETED_MAP[p.id].pts
+            });
+        }
+    });
 
     // ── Convert penalties to legacy ATSIssue format ──────────
     const issues: ATSIssue[] = [];
@@ -190,10 +254,10 @@ export function computeAdvancedATS(
         atsRisk,
         indiaAtsScore: 0,
         breakdown: {
-            impact:   { score: Math.round(Math.min(35, 35 * ratio)), max: 35 },
-            ats:      { score: Math.round(Math.min(25, 25 * ratio)), max: 25 },
-            style:    { score: Math.round(Math.min(25, 25 * ratio)), max: 25 },
-            advanced: { score: Math.round(Math.min(15, 15 * ratio)), max: 15 },
+            impact:   { score: Math.round(Math.min(38, 38 * ratio)), max: 38 },
+            ats:      { score: Math.round(Math.min(20, 20 * ratio)), max: 20 },
+            style:    { score: Math.round(Math.min(14, 14 * ratio)), max: 14 },
+            advanced: { score: Math.round(Math.min(10, 10 * ratio)), max: 10 },
         },
         issues,
         keywords: {
@@ -211,10 +275,11 @@ export function computeAdvancedATS(
         grade,
         percentile,
         all_penalties:  allPenalties,
-        top_issues:     topIssues,
-        next_steps: topIssues.slice(0, 3).map(p => ({
-            action:     p.fix.split('\n')[0],
-            score_gain: p.scoreGain,
+        top_issues:     topIssuesMapped,
+        completed_checks: completedChecks,
+        next_steps: topIssuesMapped.slice(0, 3).map(p => ({
+            action:     p.sub_issues[0].text.split('\n')[0],
+            score_gain: `+${p.point_gain} pts`,
         })),
     };
 }

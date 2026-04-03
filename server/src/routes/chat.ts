@@ -19,6 +19,7 @@ import {
     getConversationMessages,
     generateTitle,
 } from "../services/chatHistoryService.js";
+import { getResumeContext, getUserProfile } from "./chatbot.js";
 
 const router = Router();
 
@@ -115,10 +116,41 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
 
         // Get conversation history
         const history = await getConversationMessages(conversationId);
-        const messages = history.map(m => ({
-            role: m.role,
-            content: m.content,
-        }));
+        const messages = history.map(m => {
+            let parsedContent: any = m.content;
+            if (typeof m.content === "string" && m.content.trim().startsWith("[") && m.content.trim().endsWith("]")) {
+                try {
+                    parsedContent = JSON.parse(m.content);
+                } catch { /* ignore */ }
+            }
+            return {
+                role: m.role,
+                content: parsedContent,
+            };
+        });
+
+        // Inject resume and profile context into the latest user message
+        const ctx = await getResumeContext(req.user!.userId);
+        const userProfile = await getUserProfile(req.user!.userId);
+        let contextPrefix = "";
+        
+        if (ctx?.resumeText && ctx.resumeText.length > 20) {
+            contextPrefix += `\n\n[RESUME DATA]: ${ctx.resumeText.substring(0, 3000)}\n`;
+        }
+        if (userProfile) {
+            contextPrefix += `[USER PROFILE]: Skills: ${(userProfile.skills || []).join(", ")}. Experience: ${userProfile.experience_years || 0} years.\n`;
+        }
+        
+        if (contextPrefix && messages.length > 0) {
+            const lastMsg = messages[messages.length - 1];
+            if (lastMsg.role === "user") {
+                if (typeof lastMsg.content === "string") {
+                    lastMsg.content = `${lastMsg.content}${contextPrefix}`;
+                } else if (Array.isArray(lastMsg.content)) {
+                    lastMsg.content.push({ type: "text", text: contextPrefix });
+                }
+            }
+        }
 
         // Get AI reply
         const aiFeature: AIFeature = feature || "chat";

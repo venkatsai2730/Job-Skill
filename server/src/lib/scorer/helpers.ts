@@ -91,7 +91,27 @@ export function countTypos(rawText: string): number {
     return Object.keys(TYPO_LIST).filter(t => lower.includes(t)).length;
 }
 
-// ── BULLET EXTRACTOR ────────────────────────────────────────
+// ── BULLET EXTRACTOR (from raw section text) ────────────────
+// Extracts bullet-like lines from a section's raw text.
+// This is the PRIMARY source of bullets — .bullets arrays from
+// the parser are often empty, so we parse .raw directly.
+const SECTION_TITLE_REGEX = /^(experience|projects?|education|skills?|summary|profile|objective|achievements?|certifications?|interests?|hobbies|contact|personal\s+details?)/i;
+
+export function extractBullets(sectionRaw: string | undefined): string[] {
+    if (!sectionRaw || sectionRaw.trim().length === 0) return [];
+
+    return sectionRaw
+        .split('\n')
+        .map(line => line.replace(/^[\s\t•\-–—*▪►◆▸]+/, '').trim())
+        .filter(line =>
+            line.length > 15 &&          // not a header
+            line.length < 400 &&         // not a paragraph
+            !SECTION_TITLE_REGEX.test(line) && // not a section title
+            /[a-z]/i.test(line)          // has actual text
+        );
+}
+
+// Legacy bullet extractor — used for readability scoring
 export function getAllBullets(resume: ParsedResume): string[] {
     const raw = [
         resume.sections.experience?.raw,
@@ -129,6 +149,17 @@ export function sectionsToResume(
         `${e.degree} ${e.school} ${e.dates} ${e.gpa} ${e.courses.join(', ')}`
     ).join('\n');
 
+    // Extract achievements section from rawText
+    const achMatch = rawText.match(/(?:^|\n)\s*(?:achievements?|awards?\s*(?:&|and)?\s*achievements?|honors?\s*(?:&|and)?\s*awards?)\s*[\n:]/i);
+    let achRaw = '';
+    if (achMatch) {
+        const startIdx = achMatch.index! + achMatch[0].length;
+        const nextSection = rawText.slice(startIdx).match(/\n\s*(?:experience|projects?|education|skills?|summary|profile|objective|certifications?|interests?|hobbies|contact|personal\s+details?)\s*[\n:]/i);
+        achRaw = nextSection
+            ? rawText.slice(startIdx, startIdx + nextSection.index!)
+            : rawText.slice(startIdx);
+    }
+
     return {
         rawText,
         sections: {
@@ -137,6 +168,7 @@ export function sectionsToResume(
             education: { raw: eduRaw },
             skills: { raw: skillsRaw },
             projects: { raw: projRaw, bullets: projBullets },
+            ...(achRaw.trim() ? { achievements: { raw: achRaw } } : {}),
         },
         metadata: metadata ? {
             fileSizeMB: metadata.fileSizeMB,
