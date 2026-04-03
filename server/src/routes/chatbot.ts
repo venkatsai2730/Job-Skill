@@ -25,7 +25,7 @@ function getCommandBody(message: string): string {
 }
 
 // Helper to auto-fetch resume context
-async function getResumeContext(userId: string): Promise<{ resumeText: string; parsedData: any } | null> {
+export async function getResumeContext(userId: string): Promise<{ resumeText: string; parsedData: any } | null> {
     try {
         const { data: resumeRow, error } = await supabaseAdmin
             .from("resumes")
@@ -45,7 +45,7 @@ async function getResumeContext(userId: string): Promise<{ resumeText: string; p
 }
 
 // Helper to get user profile
-async function getUserProfile(userId: string): Promise<any | null> {
+export async function getUserProfile(userId: string): Promise<any | null> {
     try {
         const { data } = await supabaseAdmin
             .from("user_profiles")
