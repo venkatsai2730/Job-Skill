@@ -12,7 +12,7 @@ export const BenchmarkBar: React.FC<BenchmarkBarProps> = ({ score }) => {
         Your score is benchmarked against resumes at your experience level
       </p>
       
-      <div className="relative w-full h-3 rounded-full bg-surface-3 overflow-visible pointer-events-none mt-4">
+      <div className="relative w-full h-3 rounded-full bg-gray-100 overflow-visible pointer-events-none mt-4">
         {/* The Bar */}
         <div 
           className="absolute inset-0 rounded-full" 
@@ -29,7 +29,7 @@ export const BenchmarkBar: React.FC<BenchmarkBarProps> = ({ score }) => {
           transition={{ duration: 1.2, ease: "easeOut" }}
         >
           {/* Downward pointing triangle marker */}
-          <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-white relative drop-shadow-md">
+          <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[8px] border-l-transparent border-r-transparent border-t-slate-700 relative drop-shadow-md">
             {/* inner triangle matching the background or white */}
           </div>
         </motion.div>

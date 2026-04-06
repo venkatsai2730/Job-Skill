@@ -59,7 +59,7 @@ export const ScoreGauge: React.FC<ScoreGaugeProps> = ({ score, size = 120, strok
           cx={size / 2}
           cy={size / 2}
           r={r}
-          stroke="rgba(255,255,255,0.1)"
+          stroke="#e2e8f0"
           strokeWidth={strokeWidth}
           fill="none"
         />
@@ -81,8 +81,8 @@ export const ScoreGauge: React.FC<ScoreGaugeProps> = ({ score, size = 120, strok
       
       {/* Center Text */}
       <div className="absolute flex flex-col items-center justify-center">
-        <span className="text-3xl font-bold text-white font-mono leading-none">{animatedScore}</span>
-        <div className="w-8 h-[1px] bg-white/20 my-1" />
+        <span className="text-3xl font-bold text-slate-800 font-mono leading-none">{animatedScore}</span>
+        <div className="w-8 h-[1px] bg-gray-300 my-1" />
         <span className="text-xs text-slate-400 font-medium">{label}</span>
       </div>
     </div>

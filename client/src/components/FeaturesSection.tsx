@@ -13,7 +13,7 @@ const features = [
     icon: FileSearch,
     title: "ATS Scanner",
     desc: "Instant ATS compatibility scoring. Know exactly where your resume stands before you apply.",
-    gradient: "from-cyan-spark to-teal-400",
+    gradient: "from-cyan-500 to-teal-400",
     span: "",
   },
   {
@@ -27,7 +27,7 @@ const features = [
     icon: BarChart3,
     title: "Skill Gap Analysis",
     desc: "Identify missing skills and get AI-powered recommendations to upskill fast for 2026 market demands.",
-    gradient: "from-emerald-500 to-cyan-spark",
+    gradient: "from-emerald-500 to-cyan-500",
     span: "",
   },
   {
@@ -62,7 +62,7 @@ const FeaturesSection = () => {
           <h2 className="font-display text-4xl sm:text-5xl tracking-tight font-bold">
             <span className="text-gradient-hero">Your Smart Job Search</span>
             <br />
-            <span className="text-white-60 font-normal text-3xl sm:text-4xl mt-2 block">Already built. Ready to deploy.</span>
+            <span className="text-gray-600 font-normal text-3xl sm:text-4xl mt-2 block">Already built. Ready to deploy.</span>
           </h2>
         </motion.div>
 
@@ -71,13 +71,13 @@ const FeaturesSection = () => {
             <motion.div key={feat.title}
               initial={{ opacity: 0, y: 25 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
               transition={{ delay: i * 0.08, duration: 0.5 }}
-              className={`group relative p-8 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] transition-all duration-500 hover:border-purple-500/20 bento-glow ${feat.span}`}
+              className={`group relative p-8 rounded-2xl border border-border bg-white/70 hover:bg-white/70 transition-all duration-500 hover:border-purple-500/20 bento-glow ${feat.span}`}
             >
               <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${feat.gradient} flex items-center justify-center mb-5 opacity-80 group-hover:opacity-100 transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg`}>
                 <feat.icon className="w-6 h-6 text-white" />
               </div>
               <h3 className="font-display font-bold text-lg text-foreground mb-2">{feat.title}</h3>
-              <p className="text-white-60 text-sm leading-relaxed">{feat.desc}</p>
+              <p className="text-gray-600 text-sm leading-relaxed">{feat.desc}</p>
             </motion.div>
           ))}
         </div>

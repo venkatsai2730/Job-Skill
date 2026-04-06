@@ -62,7 +62,7 @@ export const ResumePDFViewer: React.FC<ResumePDFViewerProps> = ({ fileUrl, zoom 
     <div
       ref={containerRef}
       id="pdf-viewer-container"
-      className="w-full h-full overflow-y-auto bg-surface-2 p-4 flex flex-col items-center gap-4 scroll-smooth"
+      className="w-full h-full overflow-y-auto bg-gray-50 p-4 flex flex-col items-center gap-4 scroll-smooth"
     >
       <Document
         file={fileUrl}

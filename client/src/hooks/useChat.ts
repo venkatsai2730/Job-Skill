@@ -132,6 +132,64 @@ export function useChat() {
         }
     }, [messages, isLoading, token, activeConversationId, loadConversations]);
 
+    // Analyze uploaded resume with full ATS pipeline
+    const analyzeResume = useCallback(async (resumeText: string, fileName: string, jobDescription?: string) => {
+        if (!resumeText || isLoading) return;
+        setError(null);
+
+        // Show user message indicating upload
+        const userMsg: ChatMessage = {
+            role: "user",
+            content: `📄 Uploaded **${fileName}** for ATS analysis`,
+        };
+        setMessages(prev => [...prev, userMsg]);
+        setIsLoading(true);
+
+        try {
+            const result = await api.post<any>("/api/chatbot/analyze-resume", {
+                resumeText,
+                fileName,
+                jobDescription,
+            });
+
+            // Build a summary message from the real data
+            const score = result.data?.score ?? 0;
+            const grade = result.data?.grade ?? "—";
+            const percentile = result.data?.percentile ?? "";
+            const label = result.data?.label ?? "";
+            const issueCount = result.data?.issues?.filter((i: any) => i.type === "warning")?.length ?? 0;
+            const missingCount = result.data?.keywords?.missing?.length ?? 0;
+
+            const summaryText = [
+                `## 📊 ATS Resume Analysis — ${score}/100 (${grade})`,
+                `**${label}** · ${percentile}`,
+                ``,
+                `Found **${issueCount}** issues to fix and **${missingCount}** missing keywords.`,
+                `Scroll down for the full breakdown, simulator comparison, and recommended fixes.`,
+            ].join("\n");
+
+            setMessages(prev => [
+                ...prev,
+                {
+                    role: "assistant",
+                    content: summaryText,
+                    dataPayload: {
+                        type: "ats_analysis",
+                        data: result.data,
+                    },
+                },
+            ]);
+        } catch (err: any) {
+            setError(err.message || "Failed to analyze resume.");
+            setMessages(prev => [...prev, {
+                role: "assistant",
+                content: `⚠️ Failed to analyze resume: ${err.message || "Unknown error"}. Please try uploading again.`,
+            }]);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [isLoading]);
+
     const clearChat = useCallback(() => {
         setMessages([WELCOME_MESSAGE]);
         setError(null);
@@ -158,6 +216,7 @@ export function useChat() {
 
     return {
         messages, isLoading, error, provider, sendMessage, clearChat,
+        analyzeResume,
         conversations, activeConversationId, loadConversation,
         deleteConversation, renameConversation, loadingHistory,
     };

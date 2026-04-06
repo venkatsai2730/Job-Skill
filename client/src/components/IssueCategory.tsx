@@ -25,10 +25,10 @@ export const IssueCategory: React.FC<IssueCategoryProps> = ({
   };
 
   return (
-    <div className={`mb-2 rounded-lg border border-white/[0.06] overflow-hidden transition-colors ${
+    <div className={`mb-2 rounded-lg border border-border overflow-hidden transition-colors ${
       isLocked 
-        ? "opacity-50 cursor-not-allowed bg-surface-1" 
-        : "bg-surface-2 hover:bg-white/[0.05] cursor-pointer"
+        ? "opacity-50 cursor-not-allowed bg-white" 
+        : "bg-gray-50 hover:bg-white/70 cursor-pointer"
     }`}>
       
       {/* Main Row */}
@@ -43,14 +43,14 @@ export const IssueCategory: React.FC<IssueCategoryProps> = ({
           ) : (
             <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
           )}
-          <span className={`text-[13px] font-semibold ${isLocked ? 'text-slate-400' : 'text-white'}`}>
+          <span className={`text-[13px] font-semibold ${isLocked ? 'text-slate-400' : 'text-slate-700'}`}>
             {category}
           </span>
         </div>
         
         {isLocked ? (
-          <div className="w-[22px] h-[18px] bg-white/[0.1] rounded-[9px] flex items-center justify-center">
-            <Lock className="w-3 h-3 text-white" />
+          <div className="w-[22px] h-[18px] bg-black/[0.05] rounded-[9px] flex items-center justify-center">
+            <Lock className="w-3 h-3 text-slate-400" />
           </div>
         ) : (
           <div className="min-w-[22px] px-1.5 h-[18px] bg-red-500 rounded-[9px] flex items-center justify-center">
@@ -68,11 +68,11 @@ export const IssueCategory: React.FC<IssueCategoryProps> = ({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="px-4 pb-3 pt-1 border-t border-white/[0.04] bg-surface-1/50"
+            className="px-4 pb-3 pt-1 border-t border-border bg-white/50"
           >
             <ul className="space-y-2 mt-1">
               {subIssues.map((issue, idx) => (
-                <li key={idx} className="text-xs text-slate-400 flex items-start gap-2">
+                <li key={idx} className="text-xs text-slate-600 flex items-start gap-2">
                   <span className="shrink-0 mt-1">•</span>
                   <span>
                     {issue.text}{" "}

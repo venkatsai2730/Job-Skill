@@ -16,9 +16,9 @@ const FloatingChip = ({
     initial={{ opacity: 0, y: 10 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ delay, duration: 0.5 }}
-    className={`absolute glass rounded-full px-4 py-2 text-xs sm:text-sm text-white-90 font-body ${bobClass} ${className}`}
+    className={`absolute glass rounded-full px-4 py-2 text-xs sm:text-sm text-gray-900 font-body ${bobClass} ${className}`}
   >
-    <span className="text-cyan-spark mr-1.5">✦</span>
+    <span className="text-cyan-500 mr-1.5">✦</span>
     {text}
   </motion.div>
 );
@@ -135,12 +135,12 @@ const HeroCard3D = () => {
           {/* Card content */}
           <div className="space-y-4 relative z-10">
             <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-electric to-violet-pulse flex items-center justify-center text-white font-display font-bold text-lg">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center text-white font-display font-bold text-lg">
                 AC
               </div>
               <div>
                 <h3 className="font-display font-bold text-foreground text-sm sm:text-base">Alex Chen</h3>
-                <p className="text-white-60 text-xs sm:text-sm">Senior Software Engineer</p>
+                <p className="text-gray-600 text-xs sm:text-sm">Senior Software Engineer</p>
               </div>
               <div className="ml-auto px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-semibold border border-emerald-500/20">
                 ATS: 87%
@@ -149,28 +149,28 @@ const HeroCard3D = () => {
 
             <div className="space-y-3">
               <div>
-                <h4 className="text-xs font-semibold text-white-40 uppercase tracking-wider mb-1">Experience</h4>
+                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Experience</h4>
                 <div className="space-y-2">
                   <div className="flex gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
-                    <p className="text-white-60 text-xs sm:text-sm">Designed 12 REST APIs serving 2M requests/day, reducing latency by 40%</p>
+                    <p className="text-gray-600 text-xs sm:text-sm">Designed 12 REST APIs serving 2M requests/day, reducing latency by 40%</p>
                   </div>
                   <div className="flex gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
-                    <p className="text-white-60 text-xs sm:text-sm">Led migration to microservices architecture, improving deployment frequency 3x</p>
+                    <p className="text-gray-600 text-xs sm:text-sm">Led migration to microservices architecture, improving deployment frequency 3x</p>
                   </div>
                   <div className="flex gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
-                    <p className="text-white-60 text-xs sm:text-sm">Managed cross-functional team of 8 engineers across 3 time zones</p>
+                    <p className="text-gray-600 text-xs sm:text-sm">Managed cross-functional team of 8 engineers across 3 time zones</p>
                   </div>
                 </div>
               </div>
 
               <div>
-                <h4 className="text-xs font-semibold text-white-40 uppercase tracking-wider mb-1">Skills</h4>
+                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Skills</h4>
                 <div className="flex flex-wrap gap-1.5">
                   {["React", "TypeScript", "Node.js", "AWS", "Docker", "PostgreSQL"].map((skill) => (
-                    <span key={skill} className="px-2 py-0.5 bg-blue-electric/15 text-blue-bright rounded text-xs font-medium border border-blue-electric/20">
+                    <span key={skill} className="px-2 py-0.5 bg-blue-500/15 text-blue-bright rounded text-xs font-medium border border-blue-500/20">
                       {skill}
                     </span>
                   ))}

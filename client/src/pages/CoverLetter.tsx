@@ -141,30 +141,30 @@ const CoverLetter = () => {
     <div className="p-6 lg:p-10 space-y-8">
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="font-display text-3xl font-bold text-foreground mb-1">Cover Letter</h1>
-        <p className="text-white-60 text-base">Score existing cover letters or generate AI-tailored ones from your resume.</p>
+        <p className="text-gray-600 text-base">Score existing cover letters or generate AI-tailored ones from your resume.</p>
       </motion.div>
 
       {/* ═══ INPUT AREA ═══ */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left — Cover letter text */}
         <div className="space-y-3">
-          <label className="text-white-60 text-xs uppercase tracking-wider font-semibold">Cover Letter Text</label>
+          <label className="text-gray-600 text-xs uppercase tracking-wider font-semibold">Cover Letter Text</label>
           <textarea
             value={coverLetterText}
             onChange={(e) => setCoverLetterText(e.target.value)}
             placeholder="Paste your cover letter here to score it, or use the Generate button below..."
-            className="w-full min-h-[280px] bg-surface-1 border border-white/[0.1] rounded-xl p-5 text-foreground text-sm font-mono leading-relaxed resize-y focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all placeholder:text-white-20"
+            className="w-full min-h-[280px] bg-white border border-border rounded-xl p-5 text-foreground text-sm font-mono leading-relaxed resize-y focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all placeholder:text-slate-300"
           />
           <div className="flex gap-3">
             <button
               onClick={handleScore}
               disabled={scoring || coverLetterText.trim().length < 30}
-              className="flex-1 bg-blue-electric hover:bg-blue-bright text-primary-foreground py-2.5 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-1 bg-blue-500 hover:bg-blue-600 text-primary-foreground py-2.5 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {scoring ? <><Loader2 className="w-4 h-4 animate-spin" /> Scoring...</> : <><Sparkles className="w-4 h-4" /> Score Cover Letter</>}
             </button>
             {(generatedLetter || coverLetterText) && (
-              <button onClick={handleCopy} className="px-4 py-2.5 rounded-xl border border-white/[0.1] bg-surface-2 text-foreground text-sm font-medium hover:bg-surface-3 transition-all flex items-center gap-2">
+              <button onClick={handleCopy} className="px-4 py-2.5 rounded-xl border border-border bg-gray-50 text-foreground text-sm font-medium hover:bg-gray-100 transition-all flex items-center gap-2">
                 {copied ? <><Check className="w-4 h-4 text-emerald-400" /> Copied!</> : <><Copy className="w-4 h-4" /> Copy</>}
               </button>
             )}
@@ -173,24 +173,24 @@ const CoverLetter = () => {
 
         {/* Right — Job Description + Generate */}
         <div className="space-y-3">
-          <label className="text-white-60 text-xs uppercase tracking-wider font-semibold">Job Description</label>
+          <label className="text-gray-600 text-xs uppercase tracking-wider font-semibold">Job Description</label>
           <textarea
             value={jobDescription}
             onChange={(e) => setJobDescription(e.target.value)}
             placeholder="Paste the job description for better keyword matching and AI generation..."
-            className="w-full min-h-[180px] bg-surface-1 border border-white/[0.1] rounded-xl p-5 text-foreground text-sm leading-relaxed resize-y focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all placeholder:text-white-20"
+            className="w-full min-h-[180px] bg-white border border-border rounded-xl p-5 text-foreground text-sm leading-relaxed resize-y focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all placeholder:text-slate-300"
           />
           <div className="grid grid-cols-2 gap-3">
             <input
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
               placeholder="Company name (optional)"
-              className="bg-surface-1 border border-white/[0.1] rounded-xl px-4 py-2.5 text-foreground text-sm focus:outline-none focus:border-blue-electric transition-all placeholder:text-white-20"
+              className="bg-white border border-border rounded-xl px-4 py-2.5 text-foreground text-sm focus:outline-none focus:border-blue-500 transition-all placeholder:text-slate-300"
             />
             <select
               value={tone}
               onChange={(e) => setTone(e.target.value)}
-              className="bg-surface-1 border border-white/[0.1] rounded-xl px-4 py-2.5 text-foreground text-sm focus:outline-none focus:border-blue-electric transition-all"
+              className="bg-white border border-border rounded-xl px-4 py-2.5 text-foreground text-sm focus:outline-none focus:border-blue-500 transition-all"
             >
               <option value="professional">Professional</option>
               <option value="enthusiastic">Enthusiastic</option>
@@ -201,7 +201,7 @@ const CoverLetter = () => {
           <button
             onClick={handleGenerate}
             disabled={generating || !jobDescription.trim()}
-            className="w-full bg-gradient-to-r from-violet-600 to-blue-electric hover:from-violet-500 hover:to-blue-bright text-primary-foreground py-2.5 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+            className="w-full bg-gradient-to-r from-violet-600 to-blue-500 hover:from-violet-500 hover:to-blue-bright text-primary-foreground py-2.5 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
           >
             {generating ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><Wand2 className="w-4 h-4" /> AI Generate Cover Letter</>}
           </button>
@@ -222,7 +222,7 @@ const CoverLetter = () => {
                 {/* Score ring */}
                 <div className="text-center shrink-0">
                   <svg width="130" height="130" viewBox="0 0 130 130">
-                    <circle cx="65" cy="65" r={r + 10} fill="none" stroke="hsl(var(--surface-3))" strokeWidth="7" />
+                    <circle cx="65" cy="65" r={r + 10} fill="none" stroke="#e2e8f0" strokeWidth="7" />
                     <motion.circle cx="65" cy="65" r={r + 10} fill="none" stroke="url(#cl-gradient)" strokeWidth="7" strokeLinecap="round"
                       strokeDasharray={2 * Math.PI * (r + 10)}
                       initial={{ strokeDashoffset: 2 * Math.PI * (r + 10) }}
@@ -233,11 +233,11 @@ const CoverLetter = () => {
                     <defs>
                       <linearGradient id="cl-gradient">
                         <stop offset="0%" stopColor="#8B5CF6" />
-                        <stop offset="100%" stopColor="hsl(var(--blue-electric))" />
+                        <stop offset="100%" stopColor="#3b82f6" />
                       </linearGradient>
                     </defs>
                     <text x="65" y="60" textAnchor="middle" className="fill-foreground font-mono font-bold text-3xl">{score.overall}</text>
-                    <text x="65" y="78" textAnchor="middle" className="fill-white-60 font-body text-sm">{score.label}</text>
+                    <text x="65" y="78" textAnchor="middle" className="fill-slate-500 font-body text-sm">{score.label}</text>
                   </svg>
                 </div>
 
@@ -246,10 +246,10 @@ const CoverLetter = () => {
                   {breakdownItems.map(({ key, label, color }) => (
                     <div key={key}>
                       <div className="flex justify-between text-sm mb-1">
-                        <span className="text-white-90 font-medium">{label}</span>
+                        <span className="text-gray-900 font-medium">{label}</span>
                         <span className="text-foreground font-mono font-semibold">{score.breakdown[key].score}/{score.breakdown[key].max}</span>
                       </div>
-                      <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                         <motion.div
                           className={`h-full rounded-full bg-gradient-to-r ${color}`}
                           initial={{ width: 0 }}
@@ -284,7 +284,7 @@ const CoverLetter = () => {
                 <h3 className="font-display font-semibold text-foreground mb-4">Keywords</h3>
                 {score.keywordsFound.length > 0 && (
                   <div className="mb-4">
-                    <p className="text-white-60 text-xs uppercase tracking-wider font-semibold mb-2">Matched</p>
+                    <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold mb-2">Matched</p>
                     <div className="flex flex-wrap gap-2">
                       {score.keywordsFound.map(kw => (
                         <span key={kw} className="bg-emerald-500/10 text-emerald-400 text-xs px-2.5 py-1 rounded-full font-medium border border-emerald-500/20">{kw}</span>
@@ -294,7 +294,7 @@ const CoverLetter = () => {
                 )}
                 {score.keywordsMissing.length > 0 && (
                   <div>
-                    <p className="text-white-60 text-xs uppercase tracking-wider font-semibold mb-2">Missing</p>
+                    <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold mb-2">Missing</p>
                     <div className="flex flex-wrap gap-2">
                       {score.keywordsMissing.map(kw => (
                         <span key={kw} className="bg-amber-500/10 text-amber-400 text-xs px-2.5 py-1 rounded-full font-medium border border-amber-500/20">{kw}</span>
@@ -309,12 +309,12 @@ const CoverLetter = () => {
             {keyMatches.length > 0 && (
               <div className="glass-card p-6">
                 <h3 className="font-display font-semibold text-foreground mb-4 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-blue-electric" /> Resume → Job Matches
+                  <FileText className="w-4 h-4 text-blue-500" /> Resume → Job Matches
                 </h3>
                 <div className="space-y-2">
                   {keyMatches.map((match, i) => (
                     <div key={i} className="flex items-start gap-2 text-sm">
-                      <ArrowRight className="w-3.5 h-3.5 text-blue-electric shrink-0 mt-0.5" />
+                      <ArrowRight className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
                       <span className="text-foreground">{match}</span>
                     </div>
                   ))}

@@ -33,7 +33,7 @@ const CTASection = () => (
         <h2 className="font-display text-4xl sm:text-5xl font-bold text-gradient-hero mb-4">
           Scale Your Career, Not Your Effort
         </h2>
-        <p className="text-white-60 text-lg mb-10 max-w-xl mx-auto">
+        <p className="text-gray-600 text-lg mb-10 max-w-xl mx-auto">
           Join 12,000+ professionals who accelerated their career with AI. Start for free today.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -44,11 +44,11 @@ const CTASection = () => (
             </Link>
           </motion.div>
           <Link to="/pricing"
-            className="text-white-60 hover:text-foreground font-medium text-base px-8 py-4 rounded-full border border-white/[0.12] hover:border-white/[0.2] hover:bg-white/[0.03] transition-all">
+            className="text-gray-600 hover:text-foreground font-medium text-base px-8 py-4 rounded-full border border-border hover:border-border hover:bg-white/70 transition-all">
             View Pricing
           </Link>
         </div>
-        <p className="text-white-30 text-sm mt-5">No credit card required</p>
+        <p className="text-gray-400 text-sm mt-5">No credit card required</p>
       </motion.div>
     </div>
   </section>
@@ -62,7 +62,7 @@ const Index = () => (
       <meta property="og:title" content="JobSkill | AI Career Copilot" />
       <meta property="og:description" content="Turn your experience into an ATS-optimized resume instantly." />
     </Helmet>
-    <div className="min-h-screen bg-page">
+    <div className="min-h-screen app-bg">
       <Navbar />
       <HeroSection />
       <FeaturesSection />

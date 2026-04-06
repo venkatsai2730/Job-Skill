@@ -4,6 +4,71 @@
 
 @layer base {
   :root {
+    /* ── Modern Light Theme ── */
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
+    --radius: 0.75rem;
+
+    /* ── Semantic Tokens ── */
+    --bg-page: 210 40% 98%;
+    --bg-card: 0 0% 100%;
+    --text-primary: 222 47% 11%;
+    --text-secondary: 215 16% 47%;
+    --border-soft: 214 32% 91%;
+    --accent-primary: 221 83% 53%;
+
+    /* ── Sidebar ── */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 221 83% 53%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 210 40% 96%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-ring: 221 83% 53%;
+
+    /* ── Legacy Mapped → Light ── */
+    --page: 210 40% 98%;
+    --surface-1: 0 0% 100%;
+    --surface-2: 210 40% 96%;
+    --surface-3: 214 32% 91%;
+    --glass: 0 0% 100%;
+    --blue-electric: 217 91% 60%;
+    --blue-bright: 213 94% 55%;
+    --blue-deep: 224 76% 48%;
+    --blue-border: 214 32% 91%;
+    --blue-muted: 210 40% 96%;
+    --white-90: 222 47% 11%;
+    --white-60: 215 16% 47%;
+    --white-40: 215 20% 65%;
+    --white-30: 215 25% 80%;
+    --cyan-spark: 199 89% 48%;
+    --indigo-soft: 239 84% 67%;
+    --violet-pulse: 258 90% 66%;
+    --success: 142 76% 36%;
+    --warning: 38 92% 50%;
+    --error: 0 84% 60%;
+  }
+
+  /* ── Dark Mode (preserved behind feature flag) ── */
+  .dark {
     --background: 240 10% 4%;
     --foreground: 0 0% 98%;
     --card: 240 8% 8%;
@@ -23,7 +88,12 @@
     --border: 240 6% 14%;
     --input: 240 6% 12%;
     --ring: 262 83% 58%;
-    --radius: 0.75rem;
+    --bg-page: 240 10% 4%;
+    --bg-card: 240 8% 8%;
+    --text-primary: 0 0% 98%;
+    --text-secondary: 240 5% 70%;
+    --border-soft: 240 6% 14%;
+    --accent-primary: 262 83% 58%;
     --sidebar-background: 240 10% 5%;
     --sidebar-foreground: 240 5% 55%;
     --sidebar-primary: 262 83% 58%;
@@ -61,77 +131,102 @@
   html { scroll-behavior: smooth; }
 }
 
-
+/* ─── Utility Classes ─────────────────────────────────── */
 @layer utilities {
+  /* Soft pastel page background */
+  .app-bg {
+    background: linear-gradient(145deg,
+      rgba(252, 231, 243, 0.4) 0%,   /* pink-100 */
+      rgba(254, 252, 232, 0.35) 40%,  /* yellow-50 */
+      rgba(219, 234, 254, 0.4) 100%   /* blue-100 */
+    );
+    background-color: hsl(var(--bg-page));
+  }
+
+  /* Glassmorphism — ONLY for main containers */
   .glass {
-    background: rgba(12, 12, 20, 0.7);
-    backdrop-filter: blur(24px) saturate(1.6);
-    -webkit-backdrop-filter: blur(24px) saturate(1.6);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.04);
   }
+
+  /* Card with visible border */
   .glass-card {
-    background: rgba(12, 12, 20, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid #e2e8f0;
     border-radius: 1.25rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
   }
+
+  /* Card with hover effect */
   .glass-card-hover {
-    background: rgba(12, 12, 20, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid #e2e8f0;
     border-radius: 1.25rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .glass-card-hover:hover {
-    border-color: rgba(124, 58, 237, 0.3);
-    box-shadow: 0 20px 60px rgba(124, 58, 237, 0.12), 0 4px 16px rgba(0, 0, 0, 0.4);
+    border-color: rgba(59, 130, 246, 0.3);
+    box-shadow: 0 8px 30px rgba(59, 130, 246, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+    transform: translateY(-2px);
   }
-  .glow-purple { box-shadow: 0 0 60px rgba(124, 58, 237, 0.3); }
+
+  .glow-purple { box-shadow: 0 0 40px rgba(124, 58, 237, 0.12); }
+
   .text-gradient-blue {
-    @apply bg-gradient-to-r from-violet-400 via-purple-400 to-cyan-spark bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-blue-600 via-indigo-500 to-cyan-500 bg-clip-text text-transparent;
   }
   .text-gradient-hero {
-    background: linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.7) 100%);
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
+
+  /* Fixed starfield gradient (was broken with invalid hex) */
   .starfield {
-    background:
-      radial-gradient(ellipse at 25% 0%, rgba(124, 58, 237, 0.12) 0%, transparent 50%),
-      radial-gradient(ellipse at 75% 10%, rgba(168, 85, 247, 0.08) 0%, transparent 45%),
-      radial-gradient(ellipse at 50% 80%, rgba(45, 212, 191, 0.05) 0%, transparent 50%);
-    background-color: hsl(var(--page));
+    background: linear-gradient(145deg,
+      rgba(252, 231, 243, 0.3) 0%,
+      rgba(254, 252, 232, 0.35) 50%,
+      rgba(219, 234, 254, 0.3) 100%
+    );
+    background-color: hsl(var(--bg-page));
   }
+
+  /* Subtle hero orbs — pastel version */
   .hero-orb {
-    position: absolute; border-radius: 50%; filter: blur(100px); opacity: 0.35;
-    animation: orbFloat 12s ease-in-out infinite;
+    position: absolute; border-radius: 50%; filter: blur(100px); opacity: 0.25;
     pointer-events: none;
   }
   .hero-orb-1 {
     width: 500px; height: 500px;
-    background: radial-gradient(circle, rgba(124, 58, 237, 0.5), transparent 70%);
+    background: radial-gradient(circle, rgba(251, 207, 232, 0.7), transparent 70%);
     top: -15%; left: 5%;
   }
   .hero-orb-2 {
     width: 400px; height: 400px;
-    background: radial-gradient(circle, rgba(168, 85, 247, 0.35), transparent 70%);
-    top: 15%; right: 0%; animation-delay: -4s;
+    background: radial-gradient(circle, rgba(254, 249, 195, 0.7), transparent 70%);
+    top: 15%; right: 0%;
   }
   .hero-orb-3 {
     width: 350px; height: 350px;
-    background: radial-gradient(circle, rgba(45, 212, 191, 0.25), transparent 70%);
-    bottom: 5%; left: 25%; animation-delay: -7s;
+    background: radial-gradient(circle, rgba(191, 219, 254, 0.8), transparent 70%);
+    bottom: 5%; left: 25%;
   }
-  .chip-bob-1 { animation: chipBob 2.8s ease-in-out infinite; }
-  .chip-bob-2 { animation: chipBob 3.2s ease-in-out infinite 0.4s; }
-  .chip-bob-3 { animation: chipBob 2.5s ease-in-out infinite 0.8s; }
-  .chip-bob-4 { animation: chipBob 3s ease-in-out infinite 1.2s; }
+
+  .chip-bob-1 { animation: chipBob 3.5s ease-in-out infinite; }
+  .chip-bob-2 { animation: chipBob 4s ease-in-out infinite 0.5s; }
+  .chip-bob-3 { animation: chipBob 3.3s ease-in-out infinite 1s; }
+  .chip-bob-4 { animation: chipBob 3.8s ease-in-out infinite 1.5s; }
+
   .particle-grid {
-    background-image: radial-gradient(circle at 1px 1px, rgba(124, 58, 237, 0.08) 1px, transparent 0);
+    background-image: radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.08) 1px, transparent 0);
     background-size: 48px 48px;
   }
+
   .bento-glow {
     position: relative;
     overflow: hidden;
@@ -142,22 +237,26 @@
     inset: 0;
     border-radius: inherit;
     padding: 1px;
-    background: linear-gradient(135deg, rgba(124, 58, 237, 0.2), transparent 50%, rgba(45, 212, 191, 0.1));
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), transparent 50%, rgba(16, 185, 129, 0.04));
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
     pointer-events: none;
   }
+
+  /* Scrollbar hiding utility */
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
 }
 
 @keyframes chipBob {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
+  50% { transform: translateY(-4px); }
 }
 @keyframes orbFloat {
   0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(25px, -15px) scale(1.03); }
-  66% { transform: translate(-15px, 10px) scale(0.97); }
+  33% { transform: translate(15px, -10px) scale(1.02); }
+  66% { transform: translate(-10px, 8px) scale(0.98); }
 }
 @keyframes marquee-left {
   0% { transform: translateX(0); }
@@ -173,14 +272,14 @@
 }
 @keyframes float-up {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-12px); }
+  50% { transform: translateY(-8px); }
 }
 @keyframes pulse-ring {
-  0% { transform: scale(1); opacity: 0.4; }
-  100% { transform: scale(1.8); opacity: 0; }
+  0% { transform: scale(1); opacity: 0.2; }
+  100% { transform: scale(1.5); opacity: 0; }
 }
-.animate-marquee-left { animation: marquee-left 35s linear infinite; }
-.animate-marquee-right { animation: marquee-right 35s linear infinite; }
-.animate-spin-slow { animation: spin-slow 25s linear infinite; }
-.animate-float { animation: float-up 4s ease-in-out infinite; }
-.animate-pulse-ring { animation: pulse-ring 2s ease-out infinite; }
+.animate-marquee-left { animation: marquee-left 45s linear infinite; }
+.animate-marquee-right { animation: marquee-right 45s linear infinite; }
+.animate-spin-slow { animation: spin-slow 35s linear infinite; }
+.animate-float { animation: float-up 5s ease-in-out infinite; }
+.animate-pulse-ring { animation: pulse-ring 2.5s ease-out infinite; }

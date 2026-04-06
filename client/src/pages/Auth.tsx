@@ -22,7 +22,7 @@ const Auth = () => {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-page flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-blue-electric border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -81,7 +81,7 @@ const Auth = () => {
         <title>{isLogin ? "Sign In - JobSkill" : "Create Account - JobSkill"}</title>
         <meta name="description" content="Sign in or create an account to start building ATS-friendly resumes and tracking your job applications with AI." />
       </Helmet>
-      <div className="min-h-screen bg-page flex relative overflow-hidden">
+      <div className="min-h-screen app-bg flex relative overflow-hidden">
         {/* Gradient bg */}
         <div
           className="absolute inset-0 pointer-events-none"
@@ -94,8 +94,8 @@ const Auth = () => {
         {/* ─── LEFT PANEL: Review / Branding ─── */}
         <div className="hidden lg:flex flex-col justify-center w-[50%] relative px-16 py-12">
           {/* Decorative blobs */}
-          <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-blue-electric/10 blur-[100px] pointer-events-none" />
-          <div className="absolute bottom-10 right-0 w-60 h-60 rounded-full bg-violet-pulse/10 blur-[80px] pointer-events-none" />
+          <div className="absolute -top-20 -left-20 w-72 h-72 rounded-full bg-blue-500/10 blur-[100px] pointer-events-none" />
+          <div className="absolute bottom-10 right-0 w-60 h-60 rounded-full bg-violet-500/10 blur-[80px] pointer-events-none" />
 
           <motion.div
             initial={{ opacity: 0, x: -30 }}
@@ -105,7 +105,7 @@ const Auth = () => {
           >
             {/* Logo */}
             <Link to="/" className="flex items-center gap-2.5 mb-12">
-              <div className="w-10 h-10 rounded-xl bg-blue-electric flex items-center justify-center shadow-lg shadow-blue-electric/25">
+              <div className="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow-lg shadow-blue-500/25">
                 <Shield className="w-6 h-6 text-white" />
               </div>
               <span className="font-display font-bold text-xl text-foreground">JobSkill AI</span>
@@ -114,12 +114,12 @@ const Auth = () => {
             {/* Headline */}
             <h2 className="font-display font-bold text-3xl xl:text-4xl leading-tight text-foreground mb-4">
               Your career{" "}
-              <span className="bg-gradient-to-r from-blue-electric to-violet-pulse bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-blue-500 to-violet-500 bg-clip-text text-transparent">
                 breakthrough
               </span>{" "}
               starts here
             </h2>
-            <p className="text-white-60 text-base leading-relaxed mb-10 max-w-sm">
+            <p className="text-gray-600 text-base leading-relaxed mb-10 max-w-sm">
               Join thousands of professionals who landed interviews faster with AI-powered career coaching.
             </p>
 
@@ -128,20 +128,20 @@ const Auth = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.3 }}
-              className="bg-surface-1 rounded-2xl p-7 border border-white/[0.06] shadow-[0_8px_30px_rgba(124,101,255,0.1),0_2px_8px_rgba(0,0,0,0.2)]"
+              className="bg-white rounded-2xl p-7 border border-gray-200 shadow-lg shadow-blue-500/5"
             >
-              <Quote className="w-8 h-8 text-blue-electric/20 mb-4" />
+              <Quote className="w-8 h-8 text-blue-500/20 mb-4" />
               <p className="text-foreground text-base leading-relaxed mb-6">
-                "JobSkill AI completely transformed my job search. I went from getting ghosted to <span className="font-semibold text-blue-electric">4 offers in just 3 weeks</span>. The AI resume suggestions were absolute game-changers — my ATS score jumped from 45% to 92%."
+                "JobSkill AI completely transformed my job search. I went from getting ghosted to <span className="font-semibold text-blue-500">4 offers in just 3 weeks</span>. The AI resume suggestions were absolute game-changers — my ATS score jumped from 45% to 92%."
               </p>
 
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-electric to-violet-pulse flex items-center justify-center text-white font-display font-bold text-sm flex-shrink-0">
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center text-white font-display font-bold text-sm flex-shrink-0">
                   SK
                 </div>
                 <div className="flex-1">
                   <p className="text-foreground font-semibold text-sm">Sarah K.</p>
-                  <p className="text-white-60 text-xs">Product Manager @ Google</p>
+                  <p className="text-gray-600 text-xs">Product Manager @ Google</p>
                 </div>
                 <div className="flex gap-0.5">
                   {[...Array(5)].map((_, i) => (
@@ -162,7 +162,7 @@ const Auth = () => {
                 {["SK", "MJ", "PS", "DL"].map((initials, i) => (
                   <div
                     key={i}
-                    className="w-8 h-8 rounded-full border-2 border-surface-1 flex items-center justify-center text-[9px] font-bold text-white"
+                    className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-[9px] font-bold text-white"
                     style={{
                       background: [
                         "linear-gradient(135deg, #635bff, #7c6bff)",
@@ -178,7 +178,7 @@ const Auth = () => {
               </div>
               <div>
                 <p className="text-foreground text-sm font-semibold">12,847+ professionals</p>
-                <p className="text-white-60 text-xs">landed their dream jobs</p>
+                <p className="text-gray-600 text-xs">landed their dream jobs</p>
               </div>
             </motion.div>
           </motion.div>
@@ -188,7 +188,7 @@ const Auth = () => {
         <div className="flex-1 flex flex-col items-center justify-center px-6 lg:px-12 relative z-10">
           {/* Mobile logo */}
           <Link to="/" className="flex lg:hidden items-center gap-2 mb-8">
-            <div className="w-10 h-10 rounded-xl bg-blue-electric flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center">
               <Shield className="w-6 h-6 text-white" />
             </div>
             <span className="font-display font-bold text-xl text-foreground">JobSkill AI</span>
@@ -198,12 +198,12 @@ const Auth = () => {
             initial={{ opacity: 0, y: 20, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.4, delay: 0.1 }}
-            className="bg-surface-1 rounded-2xl p-8 border border-white/[0.06] shadow-[0_8px_40px_rgba(124,101,255,0.1),0_2px_8px_rgba(0,0,0,0.2)] w-full max-w-md"
+            className="bg-white rounded-2xl p-8 border border-gray-200 shadow-lg shadow-blue-500/5 w-full max-w-md"
           >
             <h1 className="font-display font-bold text-2xl text-foreground text-center mb-1">
               {isLogin ? "Welcome back" : "Create your account"}
             </h1>
-            <p className="text-white-60 text-sm text-center mb-6">
+            <p className="text-gray-600 text-sm text-center mb-6">
               {isLogin ? "Sign in to continue your career journey" : "Start your AI-powered career journey"}
             </p>
 
@@ -212,7 +212,7 @@ const Auth = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={handleGoogleAuth}
-              className="w-full flex items-center justify-center gap-3 h-11 rounded-xl border border-white/[0.06] bg-surface-2 text-foreground text-sm font-medium hover:border-blue-electric/50 hover:bg-surface-3 transition-all mb-5"
+              className="w-full flex items-center justify-center gap-3 h-11 rounded-xl border border-border bg-gray-50 text-foreground text-sm font-medium hover:border-blue-500/50 hover:bg-gray-100 transition-all mb-5"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
@@ -225,41 +225,41 @@ const Auth = () => {
 
             {/* Divider */}
             <div className="flex items-center gap-3 mb-5">
-              <div className="flex-1 h-px bg-white/[0.06]" />
-              <span className="text-white-30 text-xs uppercase tracking-wider">or</span>
-              <div className="flex-1 h-px bg-white/[0.06]" />
+              <div className="flex-1 h-px bg-white/70" />
+              <span className="text-gray-400 text-xs uppercase tracking-wider">or</span>
+              <div className="flex-1 h-px bg-white/70" />
             </div>
 
             {/* Form */}
             <form onSubmit={handleEmailAuth} className="space-y-4">
               {!isLogin && (
                 <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white-30" />
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
                     type="text"
                     placeholder="Full name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required={!isLogin}
-                    className="w-full h-11 pl-10 pr-4 rounded-xl bg-surface-2 border border-white/[0.06] text-foreground placeholder:text-white-30 text-sm focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all"
+                    className="w-full h-11 pl-10 pr-4 rounded-xl bg-gray-50 border border-border text-foreground placeholder:text-gray-400 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
                   />
                 </div>
               )}
 
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white-30" />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                   type="email"
                   placeholder="Email address"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full h-11 pl-10 pr-4 rounded-xl bg-surface-2 border border-white/[0.06] text-foreground placeholder:text-white-30 text-sm focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all"
+                  className="w-full h-11 pl-10 pr-4 rounded-xl bg-gray-50 border border-border text-foreground placeholder:text-gray-400 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
                 />
               </div>
 
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white-30" />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                   type={showPassword ? "text" : "password"}
                   placeholder="Password"
@@ -267,12 +267,12 @@ const Auth = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   minLength={6}
-                  className="w-full h-11 pl-10 pr-11 rounded-xl bg-surface-2 border border-white/[0.06] text-foreground placeholder:text-white-30 text-sm focus:outline-none focus:border-blue-electric focus:ring-2 focus:ring-blue-electric/10 transition-all"
+                  className="w-full h-11 pl-10 pr-11 rounded-xl bg-gray-50 border border-border text-foreground placeholder:text-gray-400 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white-30 hover:text-white-60 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -294,7 +294,7 @@ const Auth = () => {
                         toast.error(error.message || "Failed to send reset email");
                       }
                     }}
-                    className="text-blue-electric text-xs hover:underline"
+                    className="text-blue-500 text-xs hover:underline"
                   >
                     Forgot password?
                   </button>
@@ -306,24 +306,24 @@ const Auth = () => {
                 disabled={loading}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
-                className="w-full h-11 rounded-xl bg-blue-electric hover:bg-blue-bright text-primary-foreground font-medium text-sm transition-all hover:shadow-[0_0_30px_rgba(99,91,255,0.3)] disabled:opacity-50"
+                className="w-full h-11 rounded-xl bg-blue-500 hover:bg-blue-600 text-primary-foreground font-medium text-sm transition-all hover:shadow-[0_0_30px_rgba(99,91,255,0.3)] disabled:opacity-50"
               >
                 {loading ? "Please wait..." : isLogin ? "Sign In" : "Create Account"}
               </motion.button>
             </form>
 
-            <p className="text-white-60 text-sm text-center mt-6">
+            <p className="text-gray-600 text-sm text-center mt-6">
               {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
               <button
                 onClick={() => setIsLogin(!isLogin)}
-                className="text-blue-electric hover:underline font-medium"
+                className="text-blue-500 hover:underline font-medium"
               >
                 {isLogin ? "Sign up free" : "Sign in"}
               </button>
             </p>
 
             {!isLogin && (
-              <p className="text-white-30 text-xs text-center mt-3">
+              <p className="text-gray-400 text-xs text-center mt-3">
                 🎁 Get 5 free AI chats daily — no credit card needed
               </p>
             )}

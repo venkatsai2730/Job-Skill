@@ -18,8 +18,8 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
-    credentials: true,
+  origin: "http://localhost:5173",
+  credentials: true,
 }));
 app.use(express.json({ limit: "15mb" }));
 
@@ -34,6 +34,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/linkedin", linkedinRoutes);
 app.use("/api/geocode", geocodeRoutes);
 app.use("/api/chatbot", chatbotRoutes);
+
 
 // Health check
 app.get("/api/health", (_req, res) => {

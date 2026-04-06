@@ -12,7 +12,7 @@ const testimonials = [
 const TestimonialCard = ({ t }: { t: typeof testimonials[0] }) => (
   <motion.div
     whileHover={{ y: -4, transition: { duration: 0.25 } }}
-    className="min-w-[320px] max-w-[360px] flex-shrink-0 mx-3 p-6 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] hover:border-purple-500/15 transition-all duration-400 bento-glow"
+    className="min-w-[320px] max-w-[360px] flex-shrink-0 mx-3 p-6 rounded-2xl border border-border bg-white/70 hover:bg-white/70 hover:border-purple-500/15 transition-all duration-400 bento-glow"
   >
     <div className="flex items-center gap-3 mb-4">
       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-600 to-violet-500 flex items-center justify-center text-white font-display font-bold text-sm shadow-lg shadow-purple-600/15">
@@ -20,7 +20,7 @@ const TestimonialCard = ({ t }: { t: typeof testimonials[0] }) => (
       </div>
       <div>
         <p className="text-foreground font-medium text-sm">{t.name}</p>
-        <p className="text-white-40 text-xs">{t.role}</p>
+        <p className="text-gray-500 text-xs">{t.role}</p>
       </div>
     </div>
     <div className="flex gap-0.5 mb-3">
@@ -28,7 +28,7 @@ const TestimonialCard = ({ t }: { t: typeof testimonials[0] }) => (
         <span key={i} className="text-amber-400 text-sm">★</span>
       ))}
     </div>
-    <p className="text-white-60 text-sm leading-relaxed">"{t.quote}"</p>
+    <p className="text-gray-600 text-sm leading-relaxed">"{t.quote}"</p>
   </motion.div>
 );
 
@@ -50,7 +50,7 @@ const TestimonialsSection = () => {
         <h2 className="font-display text-4xl sm:text-5xl font-bold text-gradient-hero mb-3">
           Loved by Professionals
         </h2>
-        <p className="text-white-60 text-lg">Join thousands who landed their dream roles.</p>
+        <p className="text-gray-600 text-lg">Join thousands who landed their dream roles.</p>
       </motion.div>
 
       <div className="relative mb-6">

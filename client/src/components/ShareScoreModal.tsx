@@ -72,16 +72,16 @@ export const ShareScoreModal: React.FC<Props> = ({
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          className="relative w-full max-w-md bg-surface-1 border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden"
+          className="relative w-full max-w-md bg-white border border-border rounded-2xl shadow-2xl overflow-hidden"
         >
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b border-white/[0.06]">
+          <div className="flex items-center justify-between p-4 border-b border-border">
             <h3 className="font-display font-semibold text-lg text-foreground flex items-center gap-2">
-              <Share2 className="w-5 h-5 text-blue-electric" /> Share Your Flex
+              <Share2 className="w-5 h-5 text-blue-500" /> Share Your Flex
             </h3>
             <button
               onClick={onClose}
-              className="p-1.5 text-white-30 hover:text-white rounded-lg hover:bg-white/[0.06] transition-colors"
+              className="p-1.5 text-gray-400 hover:text-slate-700 rounded-lg hover:bg-gray-100 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -94,11 +94,11 @@ export const ShareScoreModal: React.FC<Props> = ({
               className="relative p-8 rounded-2xl overflow-hidden bg-gradient-to-br from-[#0c0a1d] via-[#1a1438] to-[#2d1b54] mb-6 shadow-xl"
             >
               {/* Decorative elements for the "Wrapped" look */}
-              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-electric/20 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2" />
-              <div className="absolute bottom-0 left-0 w-48 h-48 bg-violet-pulse/20 rounded-full blur-[60px] translate-y-1/2 -translate-x-1/2" />
+              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/20 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2" />
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-violet-500/20 rounded-full blur-[60px] translate-y-1/2 -translate-x-1/2" />
               
               <div className="relative z-10 flex flex-col items-center text-center">
-                <span className="px-3 py-1 rounded-full bg-white/10 border border-white/20 text-white font-medium text-xs tracking-widest uppercase mb-6 backdrop-blur-md">
+                <span className="px-3 py-1 rounded-full bg-white/10 border border-border text-white font-medium text-xs tracking-widest uppercase mb-6 backdrop-blur-md">
                   JobSkill.ai
                 </span>
                 
@@ -107,15 +107,15 @@ export const ShareScoreModal: React.FC<Props> = ({
                 </h4>
                 
                 <div className="my-6 relative">
-                  <div className="absolute inset-0 bg-blue-electric/30 blur-2xl rounded-full" />
-                  <div className="relative w-32 h-32 rounded-full border-4 border-blue-electric/30 flex items-center justify-center bg-background/50 backdrop-blur-sm">
+                  <div className="absolute inset-0 bg-blue-500/30 blur-2xl rounded-full" />
+                  <div className="relative w-32 h-32 rounded-full border-4 border-blue-500/30 flex items-center justify-center bg-background/50 backdrop-blur-sm">
                     <span className="font-mono font-bold text-5xl text-white drop-shadow-[0_0_15px_rgba(99,91,255,0.8)]">
                       {score}
                     </span>
                   </div>
                 </div>
                 
-                <p className="text-blue-electric font-semibold text-lg mb-4 tracking-wide uppercase">
+                <p className="text-blue-500 font-semibold text-lg mb-4 tracking-wide uppercase">
                   {label} Rating
                 </p>
                 
@@ -124,7 +124,7 @@ export const ShareScoreModal: React.FC<Props> = ({
                     <p className="text-white/60 text-xs uppercase tracking-wider mb-2">Top Keywords</p>
                     <div className="flex flex-wrap justify-center gap-1.5">
                       {keywords.slice(0, 5).map(kw => (
-                        <span key={kw} className="px-2 py-1 bg-white/5 border border-white/10 rounded border text-[10px] text-white/90">
+                        <span key={kw} className="px-2 py-1 bg-white/5 border border-border rounded border text-[10px] text-white/90">
                           {kw}
                         </span>
                       ))}
@@ -139,10 +139,10 @@ export const ShareScoreModal: React.FC<Props> = ({
               <button
                 onClick={handleDownloadImage}
                 disabled={isExporting}
-                className="flex items-center justify-center gap-2 py-3 bg-blue-electric hover:bg-blue-bright text-white rounded-xl font-medium transition-colors disabled:opacity-50"
+                className="flex items-center justify-center gap-2 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium transition-colors disabled:opacity-50"
               >
                 {isExporting ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <div className="w-5 h-5 border-2 border-border border-t-white rounded-full animate-spin" />
                 ) : (
                   <><Download className="w-4 h-4" /> Save Image</>
                 )}
@@ -150,15 +150,15 @@ export const ShareScoreModal: React.FC<Props> = ({
               
               <button
                 onClick={handleCopyLink}
-                className="flex items-center justify-center gap-2 py-3 bg-surface-2 hover:bg-surface-3 border border-white/[0.1] text-foreground rounded-xl font-medium transition-colors"
+                className="flex items-center justify-center gap-2 py-3 bg-gray-50 hover:bg-gray-100 border border-border text-foreground rounded-xl font-medium transition-colors"
               >
                 {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Share2 className="w-4 h-4" />}
                 {copied ? "Copied!" : "Copy Link"}
               </button>
             </div>
 
-            <div className="mt-4 pt-4 border-t border-white/[0.06] flex items-center justify-center gap-4">
-              <span className="text-xs text-white-30">Quick share:</span>
+            <div className="mt-4 pt-4 border-t border-border flex items-center justify-center gap-4">
+              <span className="text-xs text-gray-400">Quick share:</span>
               <a 
                 href={`https://www.linkedin.com/sharing/share-offsite/?url=https://jobskill.ai`} 
                 target="_blank" rel="noopener noreferrer"

@@ -53,14 +53,14 @@ const PricingSection = ({ fullPage = false }: { fullPage?: boolean }) => {
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Pricing
           </span>
           <h2 className="font-display text-4xl sm:text-5xl font-bold text-gradient-hero mb-4">Simple, Transparent Pricing</h2>
-          <p className="text-white-60 text-lg mb-8">Start free. Upgrade when you're ready.</p>
-          <div className="inline-flex items-center gap-1 rounded-full p-1 border border-white/[0.08] bg-white/[0.02]">
+          <p className="text-gray-600 text-lg mb-8">Start free. Upgrade when you're ready.</p>
+          <div className="inline-flex items-center gap-1 rounded-full p-1 border border-border bg-white/70">
             <button onClick={() => setAnnual(false)}
-              className={`px-5 py-2 rounded-full text-sm font-medium transition-all ${!annual ? "bg-gradient-to-r from-purple-600 to-violet-500 text-white shadow-lg shadow-purple-600/20" : "text-white-60 hover:text-foreground"}`}>
+              className={`px-5 py-2 rounded-full text-sm font-medium transition-all ${!annual ? "bg-gradient-to-r from-purple-600 to-violet-500 text-white shadow-lg shadow-purple-600/20" : "text-gray-600 hover:text-foreground"}`}>
               Monthly
             </button>
             <button onClick={() => setAnnual(true)}
-              className={`px-5 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${annual ? "bg-gradient-to-r from-purple-600 to-violet-500 text-white shadow-lg shadow-purple-600/20" : "text-white-60 hover:text-foreground"}`}>
+              className={`px-5 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${annual ? "bg-gradient-to-r from-purple-600 to-violet-500 text-white shadow-lg shadow-purple-600/20" : "text-gray-600 hover:text-foreground"}`}>
               Annual <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-2 py-0.5 rounded-full font-semibold">-20%</span>
             </button>
           </div>
@@ -69,7 +69,7 @@ const PricingSection = ({ fullPage = false }: { fullPage?: boolean }) => {
           {plans.map((plan, i) => (
             <motion.div key={plan.name} initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.12 }}
               className={`relative rounded-2xl p-8 border transition-all duration-500 hover:border-purple-500/20 bento-glow ${
-                plan.popular ? "border-purple-500/30 bg-purple-500/[0.04] shadow-[0_8px_40px_rgba(124,58,237,0.15)]" : "border-white/[0.06] bg-white/[0.02]"}`}>
+                plan.popular ? "border-purple-500/30 bg-purple-500/[0.04] shadow-[0_8px_40px_rgba(124,58,237,0.15)]" : "border-border bg-white/70"}`}>
               {plan.popular && (
                 <motion.div initial={{ scale: 0 }} whileInView={{ scale: 1 }} viewport={{ once: true }} transition={{ delay: 0.4, type: "spring", stiffness: 300 }}
                   className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-600 to-violet-500 text-white text-xs font-display font-semibold px-4 py-1 rounded-full shadow-lg shadow-purple-600/20">
@@ -77,16 +77,16 @@ const PricingSection = ({ fullPage = false }: { fullPage?: boolean }) => {
                 </motion.div>
               )}
               <h3 className="font-display font-bold text-xl text-foreground mb-1">{plan.name}</h3>
-              <p className="text-white-40 text-sm mb-6">{plan.desc}</p>
+              <p className="text-gray-500 text-sm mb-6">{plan.desc}</p>
               <div className="mb-6">
                 <span className="font-display font-extrabold text-4xl text-foreground">${annual ? plan.price.annual : plan.price.monthly}</span>
-                <span className="text-white-40 text-sm">/mo</span>
+                <span className="text-gray-500 text-sm">/mo</span>
               </div>
               <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                 <Link to="/auth" className={`block w-full text-center py-3 rounded-full font-semibold text-sm transition-all ${
                   plan.variant === "primary" ? "bg-gradient-to-r from-purple-600 to-violet-500 hover:from-purple-500 hover:to-violet-400 text-white hover:shadow-[0_0_30px_rgba(124,58,237,0.3)]"
                   : plan.variant === "filled" ? "bg-purple-600/80 hover:bg-purple-600 text-white"
-                  : "border border-white/[0.12] text-white-60 hover:text-foreground hover:border-white/[0.2] hover:bg-white/[0.03]"}`}>
+                  : "border border-border text-gray-600 hover:text-foreground hover:border-border hover:bg-white/70"}`}>
                   {plan.cta}
                 </Link>
               </motion.div>
@@ -95,8 +95,8 @@ const PricingSection = ({ fullPage = false }: { fullPage?: boolean }) => {
                   <li key={f.text} className="flex items-center gap-2.5 text-sm">
                     {f.included
                       ? <div className="w-4 h-4 rounded-full bg-emerald-500/15 flex items-center justify-center flex-shrink-0"><Check className="w-2.5 h-2.5 text-emerald-400" /></div>
-                      : <div className="w-4 h-4 rounded-full bg-white/[0.04] flex items-center justify-center flex-shrink-0"><X className="w-2.5 h-2.5 text-white-30" /></div>}
-                    <span className={f.included ? "text-white-60" : "text-white-30"}>{f.text}</span>
+                      : <div className="w-4 h-4 rounded-full bg-white/70 flex items-center justify-center flex-shrink-0"><X className="w-2.5 h-2.5 text-gray-400" /></div>}
+                    <span className={f.included ? "text-gray-600" : "text-gray-400"}>{f.text}</span>
                   </li>
                 ))}
               </ul>

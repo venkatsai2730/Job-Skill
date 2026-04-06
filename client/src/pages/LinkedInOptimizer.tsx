@@ -184,24 +184,24 @@ const LinkedInOptimizer = () => {
     <div className="p-6 lg:p-10 space-y-8">
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="font-display text-3xl font-bold text-foreground mb-1">LinkedIn Optimizer</h1>
-        <p className="text-white-60 text-base">AI-powered improvements for your LinkedIn profile with ATS scoring.</p>
+        <p className="text-gray-600 text-base">AI-powered improvements for your LinkedIn profile with ATS scoring.</p>
       </motion.div>
 
       {/* URL / Text input */}
       <div className="flex gap-3">
-        <div className="flex-1 flex items-center gap-2 bg-surface-2 border border-blue-muted/50 rounded-xl px-4 py-3 focus-within:border-blue-electric transition-colors">
-          <Link2 className="w-4 h-4 text-white-30" />
+        <div className="flex-1 flex items-center gap-2 bg-gray-50 border border-blue-muted/50 rounded-xl px-4 py-3 focus-within:border-blue-500 transition-colors">
+          <Link2 className="w-4 h-4 text-gray-400" />
           <input
             value={profileText}
             onChange={(e) => setProfileText(e.target.value)}
             placeholder="Paste your LinkedIn profile URL or profile details..."
-            className="flex-1 bg-transparent text-foreground text-sm outline-none placeholder:text-white-30"
+            className="flex-1 bg-transparent text-foreground text-sm outline-none placeholder:text-gray-400"
           />
         </div>
         <button
           onClick={handleAnalyze}
           disabled={loading}
-          className="bg-blue-electric hover:bg-blue-bright text-primary-foreground px-6 rounded-xl font-medium text-sm transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          className="bg-blue-500 hover:bg-blue-600 text-primary-foreground px-6 rounded-xl font-medium text-sm transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {loading ? (
             <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing...</>
@@ -234,17 +234,17 @@ const LinkedInOptimizer = () => {
             className="glass-card p-6"
           >
             <div className="flex items-center gap-2 mb-5">
-              <Sparkles className="w-5 h-5 text-blue-electric" />
+              <Sparkles className="w-5 h-5 text-blue-500" />
               <h3 className="font-display font-semibold text-foreground text-lg">Score Comparison</h3>
-              {scoringLinkedin && <Loader2 className="w-4 h-4 text-blue-electric animate-spin ml-auto" />}
+              {scoringLinkedin && <Loader2 className="w-4 h-4 text-blue-500 animate-spin ml-auto" />}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
               {/* Resume score ring */}
               <div className="text-center">
-                <p className="text-white-60 text-xs uppercase tracking-wider font-semibold mb-3">Resume Score</p>
+                <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold mb-3">Resume Score</p>
                 <svg width="100" height="100" viewBox="0 0 100 100" className="mx-auto">
-                  <circle cx="50" cy="50" r={r + 6} fill="none" stroke="hsl(var(--surface-3))" strokeWidth="6" />
+                  <circle cx="50" cy="50" r={r + 6} fill="none" stroke="#e2e8f0" strokeWidth="6" />
                   <motion.circle cx="50" cy="50" r={r + 6} fill="none" stroke="url(#resume-grad)" strokeWidth="6" strokeLinecap="round"
                     strokeDasharray={2 * Math.PI * (r + 6)}
                     initial={{ strokeDashoffset: 2 * Math.PI * (r + 6) }}
@@ -254,20 +254,20 @@ const LinkedInOptimizer = () => {
                   />
                   <defs>
                     <linearGradient id="resume-grad">
-                      <stop offset="0%" stopColor="hsl(var(--blue-electric))" />
-                      <stop offset="100%" stopColor="hsl(var(--cyan-spark))" />
+                      <stop offset="0%" stopColor="#3b82f6" />
+                      <stop offset="100%" stopColor="#06b6d4" />
                     </linearGradient>
                   </defs>
                   <text x="50" y="47" textAnchor="middle" className="fill-foreground font-mono font-bold text-2xl">{resumeAts?.score ?? "—"}</text>
-                  <text x="50" y="62" textAnchor="middle" className="fill-white-60 font-body text-[10px]">{resumeAts?.label ?? "N/A"}</text>
+                  <text x="50" y="62" textAnchor="middle" className="fill-slate-500 font-body text-[10px]">{resumeAts?.label ?? "N/A"}</text>
                 </svg>
               </div>
 
               {/* LinkedIn score ring */}
               <div className="text-center">
-                <p className="text-white-60 text-xs uppercase tracking-wider font-semibold mb-3">LinkedIn Score</p>
+                <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold mb-3">LinkedIn Score</p>
                 <svg width="100" height="100" viewBox="0 0 100 100" className="mx-auto">
-                  <circle cx="50" cy="50" r={r + 6} fill="none" stroke="hsl(var(--surface-3))" strokeWidth="6" />
+                  <circle cx="50" cy="50" r={r + 6} fill="none" stroke="#e2e8f0" strokeWidth="6" />
                   <motion.circle cx="50" cy="50" r={r + 6} fill="none" stroke="url(#linkedin-grad)" strokeWidth="6" strokeLinecap="round"
                     strokeDasharray={2 * Math.PI * (r + 6)}
                     initial={{ strokeDashoffset: 2 * Math.PI * (r + 6) }}
@@ -282,7 +282,7 @@ const LinkedInOptimizer = () => {
                     </linearGradient>
                   </defs>
                   <text x="50" y="47" textAnchor="middle" className="fill-foreground font-mono font-bold text-2xl">{linkedinScore?.score ?? "—"}</text>
-                  <text x="50" y="62" textAnchor="middle" className="fill-white-60 font-body text-[10px]">{linkedinScore?.label ?? "N/A"}</text>
+                  <text x="50" y="62" textAnchor="middle" className="fill-slate-500 font-body text-[10px]">{linkedinScore?.label ?? "N/A"}</text>
                 </svg>
               </div>
             </div>
@@ -307,7 +307,7 @@ const LinkedInOptimizer = () => {
             {syncTips.length > 0 && (
               <div className="space-y-2.5 mt-4">
                 <h4 className="font-display font-semibold text-foreground text-sm uppercase tracking-wider flex items-center gap-2">
-                  <RefreshCw className="w-4 h-4 text-blue-electric" /> Sync Recommendations
+                  <RefreshCw className="w-4 h-4 text-blue-500" /> Sync Recommendations
                 </h4>
                 {syncTips.map((tip, i) => (
                   <div key={i} className="flex items-start gap-2.5 text-sm">
@@ -327,18 +327,18 @@ const LinkedInOptimizer = () => {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card p-6">
         <h3 className="font-display font-semibold text-foreground mb-4">
           Section Scores
-          {analyzed && <span className="ml-2 text-xs text-blue-electric font-normal">(AI-analyzed)</span>}
+          {analyzed && <span className="ml-2 text-xs text-blue-500 font-normal">(AI-analyzed)</span>}
         </h3>
         <div className="space-y-4">
           {sections.map((s) => (
             <div key={s.name}>
               <div className="flex justify-between text-sm mb-1">
-                <span className="text-white-90">{s.name}</span>
+                <span className="text-gray-900">{s.name}</span>
                 <span className="text-foreground font-mono font-semibold">{s.score}%</span>
               </div>
-              <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
+              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                 <motion.div
-                  className="h-full rounded-full bg-gradient-to-r from-blue-electric to-cyan-spark"
+                  className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-500"
                   initial={{ width: 0 }}
                   animate={{ width: `${s.score}%` }}
                   transition={{ duration: 0.8 }}
@@ -361,12 +361,12 @@ const LinkedInOptimizer = () => {
             className="grid grid-cols-1 md:grid-cols-2 gap-4"
           >
             <div className="glass-card p-5">
-              <h4 className="text-white-60 text-xs uppercase tracking-wider font-semibold mb-2">Current — {s.name}</h4>
-              <p className="text-white-60 text-sm leading-relaxed">{s.current}</p>
+              <h4 className="text-gray-600 text-xs uppercase tracking-wider font-semibold mb-2">Current — {s.name}</h4>
+              <p className="text-gray-600 text-sm leading-relaxed">{s.current}</p>
             </div>
-            <div className="glass-card p-5 border-l-4 border-l-blue-electric shadow-[0_4px_20px_rgba(59,91,255,0.1)]">
-              <h4 className="text-blue-electric text-xs uppercase tracking-wider font-semibold mb-2">✦ AI Optimized — {s.name}</h4>
-              <p className="text-white-90 text-sm leading-relaxed">{s.optimized}</p>
+            <div className="glass-card p-5 border-l-4 border-l-blue-500 shadow-[0_4px_20px_rgba(59,91,255,0.1)]">
+              <h4 className="text-blue-500 text-xs uppercase tracking-wider font-semibold mb-2">✦ AI Optimized — {s.name}</h4>
+              <p className="text-gray-900 text-sm leading-relaxed">{s.optimized}</p>
             </div>
           </motion.div>
         ))}
@@ -378,7 +378,7 @@ const LinkedInOptimizer = () => {
           <h3 className="font-display font-semibold text-foreground mb-4">LinkedIn Keywords</h3>
           {linkedinScore.keywords.found.length > 0 && (
             <div className="mb-4">
-              <p className="text-white-60 text-xs uppercase tracking-wider font-semibold mb-2">Found on LinkedIn</p>
+              <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold mb-2">Found on LinkedIn</p>
               <div className="flex flex-wrap gap-2">
                 {linkedinScore.keywords.found.slice(0, 15).map(kw => (
                   <span key={kw} className="bg-emerald-500/10 text-emerald-400 text-xs px-2.5 py-1 rounded-full font-medium border border-emerald-500/20">{kw}</span>
@@ -388,7 +388,7 @@ const LinkedInOptimizer = () => {
           )}
           {linkedinScore.keywords.missing.length > 0 && (
             <div className="mb-4">
-              <p className="text-white-60 text-xs uppercase tracking-wider font-semibold mb-2">Missing from LinkedIn</p>
+              <p className="text-gray-600 text-xs uppercase tracking-wider font-semibold mb-2">Missing from LinkedIn</p>
               <div className="flex flex-wrap gap-2">
                 {linkedinScore.keywords.missing.slice(0, 10).map(kw => (
                   <span key={kw} className="bg-amber-500/10 text-amber-400 text-xs px-2.5 py-1 rounded-full font-medium border border-amber-500/20">{kw}</span>
@@ -401,7 +401,7 @@ const LinkedInOptimizer = () => {
               <p className="flex items-center gap-1.5 text-purple-400 text-xs uppercase tracking-wider font-semibold mb-2">
                 <Sparkles className="w-3.5 h-3.5" /> Hidden Skills Detected
               </p>
-              <p className="text-white-60 text-xs mb-3">AI inferred these undocumented skills from your experience context.</p>
+              <p className="text-gray-600 text-xs mb-3">AI inferred these undocumented skills from your experience context.</p>
               <div className="flex flex-wrap gap-2">
                 {linkedinScore.inferredSkills.map(kw => (
                   <span key={kw} className="bg-purple-500/10 text-purple-400 text-xs px-2.5 py-1 rounded-full font-medium border border-purple-500/20">{kw}</span>
@@ -425,10 +425,10 @@ const LinkedInOptimizer = () => {
               className="glass-card p-5"
             >
               <h4 className="text-foreground font-medium text-sm mb-2">{t.title}</h4>
-              <p className="text-white-60 text-xs leading-relaxed mb-3">{t.text}</p>
+              <p className="text-gray-600 text-xs leading-relaxed mb-3">{t.text}</p>
               <button
                 onClick={() => handleCopy(t.text, i)}
-                className="text-blue-electric text-xs font-medium hover:underline flex items-center gap-1"
+                className="text-blue-500 text-xs font-medium hover:underline flex items-center gap-1"
               >
                 {copiedIdx === i ? (
                   <><Check className="w-3 h-3" /> Copied!</>
