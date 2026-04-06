@@ -336,13 +336,20 @@ Your task is to analyze a candidate's resume against a specific Job Description 
 - Return ONLY the fixed resume text, no JSON, no markdown fences, no explanations.
 - Do NOT add any preamble like "Here is the fixed resume:" - return ONLY the resume content itself.`,
 
+    resume_rewrite: `You are an elite ATS Resume Rewriter. Your task is to structurally rewrite and improve an existing resume or a specific section WITHOUT fabricating any details.
+
+### CRITICAL RULES:
+1. TRUTHFULNESS: NEVER hallucinate, fabricate, or make up metrics, impact numbers, tools, or experiences that are not explicitly present or highly implied by the source content.
+2. ATS SCORE FOCUSED: Enhance action verbs, employ the STAR method (Situation, Task, Action, Result) where possible, and restructure poorly formatted text based strictly on the provided ATS Penalty Issues.
+3. NO FILLER: Remove vague responsibilities, personal details, or weak phrases ("helped", "assisted", "worked on") and replace them with strong ownership verbs ("Spearheaded", "Engineered", "Orchestrated", "Led").
+4. FORMAT: Return ONLY the rewritten text cleanly. No conversational intro/outro (e.g. "Here is the rewritten section"). Do not use markdown code fences. Structure nicely for readability.`
 };
 
 // ── Model Configuration ─────────────────────────────────────
 const MODELS = {
     scout: "meta-llama/llama-4-scout-17b-16e-instruct",
-    maverick: "meta-llama/llama-4-maverick-17b-128e-instruct",
-    gemini: "gemini-2.5-pro-preview-06-05",
+    maverick: "meta-llama/llama-4-scout-17b-16e-instruct",  // Maverick deprecated Mar 2026 → Scout
+    gemini: "gemini-2.5-pro",
     codestral: "codestral-latest",
 };
 
@@ -353,14 +360,14 @@ const FEATURE_MODEL_MAP: Record<AIFeature, { provider: string; model: string }> 
     agent: { provider: "groq", model: MODELS.scout },
     screening: { provider: "groq", model: MODELS.scout },
     notification: { provider: "groq", model: MODELS.scout },
-    resume_pdf: { provider: "gemini", model: MODELS.gemini },
-    job_match: { provider: "gemini", model: MODELS.gemini },
+    resume_pdf: { provider: "groq", model: MODELS.scout },
+    job_match: { provider: "groq", model: MODELS.scout },
     code_gen: { provider: "mistral", model: MODELS.codestral },
     linkedin_optimize: { provider: "groq", model: MODELS.scout },
     resume_rewrite: { provider: "groq", model: MODELS.maverick },
     gap_rewrite: { provider: "groq", model: MODELS.maverick },
     skill_inference: { provider: "groq", model: MODELS.scout },
-    interview_prediction: { provider: "gemini", model: MODELS.gemini },
+    interview_prediction: { provider: "groq", model: MODELS.scout },
     fix_bullets: { provider: "groq", model: MODELS.maverick },
     create_bullets: { provider: "groq", model: MODELS.maverick },
     resume_fix: { provider: "groq", model: MODELS.maverick },
@@ -450,7 +457,15 @@ async function callGroq(messages: any[], model: string, systemPrompt: string, ma
     };
 }
 
+// ── Gemini Cooldown (skip for 1 hour if quota exhausted) ──
+let geminiCooldownUntil = 0;
+
 async function callGemini(messages: any[], model: string, systemPrompt: string, maxTokens = 4000) {
+    // If Gemini is in cooldown, throw immediately so fallback kicks in
+    if (Date.now() < geminiCooldownUntil) {
+        throw new Error(`Gemini quota cooldown active (resets at ${new Date(geminiCooldownUntil).toLocaleTimeString()})`);
+    }
+
     const geminiMessages: any[] = [];
 
     for (const m of messages) {
@@ -495,7 +510,16 @@ async function callGemini(messages: any[], model: string, systemPrompt: string, 
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(`Gemini (${model}): ${err.error?.message || res.status}`);
+        const errMsg = err.error?.message || '';
+
+        // Quota exhausted → set 1-hour cooldown, fall back to Groq
+        if (res.status === 429 || errMsg.includes('Quota exceeded') || errMsg.includes('quota')) {
+            console.warn(`[Gemini] Quota exhausted. Cooldown for 1 hour. Falling back to Groq.`);
+            geminiCooldownUntil = Date.now() + 60 * 60 * 1000;
+            throw new Error(`Gemini quota exceeded — cooldown active`);
+        }
+
+        throw new Error(`Gemini (${model}): ${errMsg || res.status}`);
     }
     const data = await res.json();
     return {
@@ -572,6 +596,7 @@ export async function getAIReply(messages: any[], feature: AIFeature = "chat") {
     const fallbacks = [
         { fn: callGroq, model: MODELS.scout, name: "groq-scout" },
         { fn: callGemini, model: MODELS.gemini, name: "gemini" },
+        { fn: callMistral, model: MODELS.codestral, name: "mistral" },
     ].filter(f => f.fn !== providerFn);
 
     for (const fb of fallbacks) {
@@ -883,3 +908,78 @@ Return ONLY the complete fixed resume text. No explanations, no JSON, no markdow
     }
 }
 
+// ── NEW: Rewrite specific resume section ───────────────────
+export async function rewriteResumeSection(
+    resumeText: string,
+    sectionName: string,
+    atsIssues: string[],
+    jobDescription?: string
+): Promise<{ reply: string }> {
+    const issuesContext = atsIssues.length > 0 
+        ? `\n=== ATS PENALTY ISSUES TO FIX ===\nFocus on resolving these known issues:\n- ${atsIssues.join("\n- ")}`
+        : "";
+
+    const jdContext = jobDescription
+        ? `\n=== TARGET JOB DESCRIPTION ===\nTailor the keywords to this role:\n${jobDescription}`
+        : "";
+
+    const messages = [{
+        role: "user" as const,
+        content: `Rewrite the "${sectionName}" section of this resume to dramatically improve its ATS score and impact.
+        
+=== COMPLETE RESUME CONTENT ===
+${resumeText}` + issuesContext + jdContext + `
+
+Return ONLY the rewritten "${sectionName}" section text. Do not return the entire resume, and do not add any preamble.`
+    }];
+
+    try {
+        const result = await getAIReply(messages, "resume_rewrite");
+        return { reply: result.reply.trim() };
+    } catch (err: any) {
+        console.error("Failed to rewrite resume section:", err);
+        throw new Error("AI failed to rewrite the section.");
+    }
+}
+
+// ── NEW: Generate Full Improved Draft ──────────────────────
+export async function generateImprovedDraft(
+    resumeText: string,
+    atsIssues: string[],
+    jobDescription?: string
+): Promise<{ reply: string }> {
+    const issuesContext = atsIssues.length > 0 
+        ? `\n=== KNOWN ATS PENALTIES ===\nFix these issues across the entire resume:\n- ${atsIssues.join("\n- ")}`
+        : "";
+
+    const jdContext = jobDescription
+        ? `\n=== TARGET ROLE ===\nAlign technical keywords with this JD:\n${jobDescription}`
+        : "";
+
+    const messages = [{
+        role: "user" as const,
+        content: `Create a fully optimized, improved draft of this complete resume. 
+
+=== ORIGINAL RESUME ===
+${resumeText}` + issuesContext + jdContext + `
+
+INSTRUCTIONS:
+1. Re-format and re-write the entire resume text.
+2. Resolve the listed ATS penalties.
+3. Enhance all bullets using the STAR method and strong action verbs.
+4. DO NOT hallucinate any new jobs, degrees, or false metrics.
+5. Return ONLY the new resume text.`
+    }];
+
+    try {
+        const result = await getAIReply(messages, "resume_rewrite");
+        let content = result.reply.trim();
+        if (content.startsWith("```")) {
+            content = content.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
+        }
+        return { reply: content };
+    } catch (err: any) {
+        console.error("Failed to generate improved draft:", err);
+        throw new Error("AI failed to generate a complete draft.");
+    }
+}

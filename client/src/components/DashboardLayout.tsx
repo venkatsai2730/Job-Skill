@@ -41,13 +41,13 @@ const DashboardLayout = () => {
   const initials = displayName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2);
 
   return (
-    <div className="min-h-screen bg-page flex flex-col">
+    <div className="min-h-screen app-bg flex flex-col">
       {/* TOP NAVBAR */}
-      <header className="sticky top-0 z-50 glass border-b border-white/[0.06] h-16 shrink-0">
+      <header className="sticky top-0 z-50 glass border-b border-border h-16 shrink-0">
         <div className="w-full px-6 lg:px-10 h-full">
           <div className="flex items-center justify-between h-full">
             <Link to="/" className="flex items-center gap-2.5 shrink-0">
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-electric to-violet-pulse flex items-center justify-center shadow-sm shadow-blue-electric/20">
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 flex items-center justify-center shadow-sm shadow-blue-500/20">
                 <Shield className="w-5 h-5 text-primary-foreground" />
               </div>
               <span className="font-display font-bold text-base text-foreground hidden sm:inline">JobSkill AI</span>
@@ -61,8 +61,8 @@ const DashboardLayout = () => {
                     key={item.path}
                     to={item.path}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${isActive
-                      ? "bg-blue-electric/10 text-blue-electric"
-                      : "text-white-60 hover:bg-surface-2 hover:text-foreground"
+                      ? "bg-blue-500/10 text-blue-500"
+                      : "text-gray-600 hover:bg-gray-50 hover:text-foreground"
                     }`}
                   >
                     <item.icon className="w-4 h-4" />
@@ -73,23 +73,23 @@ const DashboardLayout = () => {
             </nav>
 
             <div className="flex items-center gap-4">
-              <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-full bg-surface-2 border border-white/[0.06]">
-                <Gift className="w-4 h-4 text-blue-electric" />
+              <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-full bg-gray-50 border border-border">
+                <Gift className="w-4 h-4 text-blue-500" />
                 <span className="text-sm font-medium text-foreground">{user?.dailyCreditsUsed ?? 0}/{user?.dailyCreditsLimit ?? 5}</span>
-                <div className="w-14 h-1.5 bg-surface-3 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-electric rounded-full" style={{ width: `${((user?.dailyCreditsUsed ?? 0) / (user?.dailyCreditsLimit ?? 5)) * 100}%` }} />
+                <div className="w-14 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${((user?.dailyCreditsUsed ?? 0) / (user?.dailyCreditsLimit ?? 5)) * 100}%` }} />
                 </div>
               </div>
 
-              <Link to="/pricing" className="hidden sm:inline text-sm font-medium text-blue-electric hover:underline">
+              <Link to="/pricing" className="hidden sm:inline text-sm font-medium text-blue-500 hover:underline">
                 Upgrade →
               </Link>
 
               {/* Notification Bell */}
-              <button className="relative p-2 rounded-lg hover:bg-surface-2 text-white-40 hover:text-foreground transition-colors">
+              <button className="relative p-2 rounded-lg hover:bg-gray-50 text-gray-500 hover:text-foreground transition-colors">
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-4.5 h-4.5 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center min-w-[18px] h-[18px] border-2 border-surface-1">
+                  <span className="absolute -top-0.5 -right-0.5 w-4.5 h-4.5 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center min-w-[18px] h-[18px] border-2 border-white">
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </span>
                 )}
@@ -98,25 +98,25 @@ const DashboardLayout = () => {
               <div className="relative">
                 <button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  className="flex items-center gap-2 p-1 rounded-full hover:bg-surface-2 transition-colors"
+                  className="flex items-center gap-2 p-1 rounded-full hover:bg-gray-50 transition-colors"
                 >
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-electric to-cyan-spark flex items-center justify-center text-white font-display font-bold text-xs">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-display font-bold text-xs">
                     {initials}
                   </div>
-                  <ChevronDown className="w-4 h-4 text-white-60 hidden sm:block" />
+                  <ChevronDown className="w-4 h-4 text-gray-600 hidden sm:block" />
                 </button>
 
                 {userMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
-                    <div className="absolute right-0 top-12 z-50 w-56 bg-surface-1 rounded-xl border border-white/[0.06] shadow-lg shadow-black/30 py-1.5">
-                      <div className="px-4 py-3 border-b border-white/[0.06]">
+                    <div className="absolute right-0 top-12 z-50 w-56 bg-white rounded-xl border border-gray-200 shadow-lg shadow-black/8 py-1.5">
+                      <div className="px-4 py-3 border-b border-border">
                         <p className="text-foreground text-sm font-semibold">{displayName}</p>
-                        <p className="text-white-60 text-xs">{user?.email}</p>
+                        <p className="text-gray-600 text-xs">{user?.email}</p>
                       </div>
                       <Link
                         to="/dashboard/settings"
-                        className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-white-60 hover:text-foreground hover:bg-surface-2 transition-colors"
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-600 hover:text-foreground hover:bg-gray-50 transition-colors"
                         onClick={() => setUserMenuOpen(false)}
                       >
                         <Settings className="w-4 h-4" /> Settings
@@ -137,14 +137,14 @@ const DashboardLayout = () => {
       </header>
 
       {/* MOBILE BOTTOM NAV */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 glass border-t border-white/[0.06] flex justify-around py-2 px-2">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 glass border-t border-border flex justify-around py-2 px-2">
         {navItems.slice(0, 5).map((item) => {
           const isActive = location.pathname === item.path;
           return (
             <Link
               key={item.path}
               to={item.path}
-              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${isActive ? "text-blue-electric" : "text-white-30"}`}
+              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${isActive ? "text-blue-500" : "text-gray-400"}`}
             >
               <item.icon className="w-5 h-5" />
               {item.label.replace("AI ", "")}

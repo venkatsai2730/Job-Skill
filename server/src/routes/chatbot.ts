@@ -5,8 +5,10 @@ import { simulateGreenhouse, simulateLever, simulateAshby, simulateNaukri } from
 import {
     getAIReply, predictInterviewQuestions, fixResumeBullets, createResumeBullets,
     generateCoverLetter, scoreJobMatch, answerScreeningQuestions, optimizeLinkedIn,
+    inferSemanticSkills, rewriteResumeSection, generateImprovedDraft
 } from "../services/chatService.js";
 import { parseSections } from "./resume.js";
+import { computeAdvancedATS } from "../lib/advanced-scorer.js";
 import { generateLatex } from "../lib/latex-generator.js";
 import { searchJobs } from "../services/jobFetcher.js";
 
@@ -114,15 +116,19 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
         // If no explicit slash command, try natural language mapping
         if (!command && message) {
             const nl = message.toLowerCase();
-            if (/fix|improve|better|higher score|how to fix/.test(nl)) command = "fix";
+            if (/fix|improve|better|higher score|how to fix|optimize/.test(nl)) command = "fix";
             else if (/rewrite|improve my (summary|experience|projects|skills)/.test(nl)) command = "rewrite";
-            else if (/find jobs|show jobs|what jobs|jobs for me/.test(nl)) command = "jobs";
-            else if (/my score|ats score|how is my resume|check my resume|score my/.test(nl)) command = "score";
+            else if (/find jobs|show jobs|what jobs|jobs for me|job search|matching jobs/.test(nl)) command = "jobs";
+            else if (/my score|ats score|how is my resume|check my resume|score my|rate my/.test(nl)) command = "score";
             else if (/interview|prepare for|interview questions/.test(nl)) command = "prep";
-            else if (/roadmap|plan|30 day|what should i do/.test(nl)) command = "roadmap";
+            else if (/roadmap|plan|30 day|what should i do|learning path/.test(nl)) command = "roadmap";
             else if (/write bullets|bullet points|help me write/.test(nl)) command = "fix";
             else if (/cover letter|write a cover/.test(nl)) command = "cover";
             else if (/mock interview/.test(nl)) command = "mock";
+            else if (/salary|pay|compensation|package/.test(nl)) command = "salary";
+            else if (/linkedin|profile optimization/.test(nl)) command = "linkedin";
+            else if (/skill gap|missing skills|what skills/.test(nl)) command = "skills";
+            else if (/help|commands|what can you do|features|how to use/.test(nl)) command = "help";
             else command = "chat"; // Default: conversational chat with resume context
         }
 
@@ -141,11 +147,21 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
             jobDescription = body;
         }
 
+        let atsIssues: string[] = [];
+
         // 3. Auto-fetch Resume Context if missing
         if (!resumeText || typeof resumeText !== "string" || resumeText.trim().length < 20) {
             const ctx = await getResumeContext(userId);
             if (ctx) {
                 resumeText = ctx.resumeText;
+                
+                // Extract Top issues / Penalties for rewriting context
+                if (ctx.parsedData && ctx.parsedData.ats) {
+                    const issuesFromDB = ctx.parsedData.ats.issues || [];
+                    atsIssues = issuesFromDB
+                        .filter((i: any) => i.type === "warning")
+                        .map((i: any) => i.text);
+                }
             }
         }
 
@@ -242,6 +258,30 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                     content: `${contextPrefix}Find ALL bullets in this resume that lack numbers/metrics/percentages. For each, suggest a realistic quantified version. Show before → after format.`
                 }], "resume_fix");
                 return res.json({ type: "success", command: "quantify", message: "Quantification suggestions ready.", data: { reply: quantifyResult.reply } });
+            }
+
+            case "rewrite": {
+                if (!resumeText) return res.status(400).json({ type: "error", message: "Upload a resume first." });
+                const section = body || "summary";
+                const rewriteResult = await rewriteResumeSection(resumeText, section, atsIssues, jobDescription);
+                return res.json({
+                    type: "success", 
+                    command: "rewrite", 
+                    message: `Rewritten ${section} section to improve ATS score.`, 
+                    data: { reply: rewriteResult.reply }
+                });
+            }
+
+            case "draft":
+            case "export": {
+                if (!resumeText) return res.status(400).json({ type: "error", message: "Upload a resume first." });
+                const draftResult = await generateImprovedDraft(resumeText, atsIssues, jobDescription);
+                return res.json({
+                    type: "success", 
+                    command: "draft", 
+                    message: "A fully optimized, ATS-friendly resume draft has been generated.", 
+                    data: { reply: draftResult.reply, draft: draftResult.reply, type: "draft" }
+                });
             }
 
             // ──────────────────────────────────────────
@@ -443,10 +483,7 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
             // LEGACY COMMANDS
             // ──────────────────────────────────────────
             case "create": {
-                if (!payload.role && !jobDescription && !body) {
-                    return res.status(400).json({ type: "error", message: "Provide a role: /create [role name]" });
-                }
-                const targetRole2 = payload.role || body || "Software Engineer";
+                const targetRole2 = payload.role || body || userProfile?.current_role || "Software Engineer";
                 const createdBullets = await createResumeBullets(targetRole2, jobDescription);
                 return res.json({ type: "success", command: "create", message: `Generated bullets for ${targetRole2}.`, data: createdBullets });
             }
@@ -465,11 +502,39 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                 return res.json({ type: "success", command: "help", message: "Available commands", data: { reply: HELP_TEXT } });
             }
 
-            default:
-                return res.status(400).json({
-                    type: "error",
-                    message: `Unknown command '/${command}'. Type /help to see all available commands.`
+            // ──────────────────────────────────────────
+            // FREE-FORM CHAT (website Q&A, career advice, general)
+            // ──────────────────────────────────────────
+            case "chat":
+            default: {
+                // Build rich context for the AI
+                const websiteKnowledge = `
+[JOBSKILL AI PLATFORM KNOWLEDGE]:
+JobSkill AI is a comprehensive career platform offering:
+- Resume Builder & Editor: Upload PDF resumes or create from scratch with AI
+- ATS Scorer: 20-criteria scoring engine simulating Greenhouse, Lever, Ashby, Naukri ATS systems
+- AI Career Coach (Aria): Slash-command chatbot for resume optimization, job search, interview prep
+- Job Search: Real-time listings from Greenhouse & Lever APIs with AI match scoring
+- LinkedIn Optimizer: Profile audit with section-by-section improvement suggestions
+- Cover Letter Generator: JD-tailored cover letters with keyword matching
+- Interview Prep: AI-predicted questions with STAR-method answer strategies
+- Skill Gap Analysis: Resume vs JD comparison with learning roadmap & course links
+- Resume Export: PDF and DOCX download with LaTeX compilation
+
+Available commands: /score, /fix, /create, /jobs, /cover, /prep, /skills, /roadmap, /linkedin, /help, /latex, /match, /salary, /mock, /tailor, /keywords, /compare, /improve, /quantify, /behavioral, /technical, /answer, /apply, /followup, /cover-email, /answers, /draft, /rewrite, /word-choice, /why, /market
+`;
+                const chatPrompt = `${websiteKnowledge}\n\n${contextPrefix}${profilePrefix}User message: ${message}`;
+                const chatResult = await getAIReply([{
+                    role: "user",
+                    content: chatPrompt
+                }], "chat");
+                return res.json({
+                    type: "success",
+                    command: "chat",
+                    message: chatResult.reply,
+                    data: { reply: chatResult.reply }
                 });
+            }
         }
 
     } catch (err: any) {
@@ -477,6 +542,106 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
         return res.status(500).json({
             type: "error",
             message: "An unexpected error occurred while processing your command. Please try again."
+        });
+    }
+});
+
+// ── POST /api/chatbot/analyze-resume ─────────────────────────
+// Auto-analyze an uploaded PDF/DOCX resume with the full ATS pipeline
+router.post("/analyze-resume", authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+        const { resumeText, fileName, jobDescription } = req.body;
+        const userId = req.user!.userId;
+
+        // ── Validate input ──
+        if (!resumeText || typeof resumeText !== "string" || resumeText.trim().length < 30) {
+            return res.status(400).json({
+                type: "error",
+                message: "The uploaded file does not contain enough text to analyze. Please upload a valid resume (PDF or DOCX)."
+            });
+        }
+
+        // ── Step 1: Parse sections ──
+        const sections = parseSections(resumeText);
+
+        // ── Step 2: Compute advanced ATS score ──
+        const ats = computeAdvancedATS(
+            sections,
+            resumeText,
+            userId,
+            { fileName: fileName || "resume.pdf" }
+        );
+
+        // ── Step 3: Run all 4 ATS simulators ──
+        const greenhouse = simulateGreenhouse(sections, resumeText, jobDescription);
+        const lever = simulateLever(sections, resumeText, jobDescription);
+        const ashby = simulateAshby(sections, resumeText, jobDescription);
+        const naukri = simulateNaukri(sections, resumeText, jobDescription);
+
+        // ── Step 4: AI semantic skill inference (non-blocking catch) ──
+        let semanticSkills: string[] = [];
+        try {
+            semanticSkills = await inferSemanticSkills(resumeText);
+        } catch (err: any) {
+            console.warn("[analyze-resume] Semantic skill inference failed (non-fatal):", err.message);
+        }
+
+        // Merge inferred skills
+        const allInferredSkills = Array.from(new Set([...ats.inferredSkills, ...semanticSkills]));
+
+        // ── Step 5: Save to Supabase so /score and other commands can use it ──
+        try {
+            const parsedData = {
+                sections,
+                ats: { ...ats, inferredSkills: allInferredSkills },
+                rawText: resumeText.substring(0, 5000),
+            };
+            await supabaseAdmin
+                .from("resumes")
+                .insert({
+                    user_id: userId,
+                    file_name: fileName || "chat-upload.pdf",
+                    storage_path: `${userId}/chat-${Date.now()}-${fileName || "resume"}`,
+                    parsed_data: parsedData,
+                });
+        } catch (saveErr: any) {
+            console.warn("[analyze-resume] DB save failed (non-fatal):", saveErr.message);
+        }
+
+        // ── Step 6: Build structured response ──
+        return res.json({
+            type: "ats_analysis",
+            message: "Resume analyzed successfully.",
+            data: {
+                score: ats.score,
+                grade: ats.grade,
+                percentile: ats.percentile,
+                label: ats.label,
+                level: ats.level,
+                atsRisk: ats.atsRisk,
+                breakdown: ats.breakdown,
+                issues: ats.issues,
+                topIssues: ats.top_issues,
+                completedChecks: ats.completed_checks,
+                nextSteps: ats.next_steps,
+                keywords: ats.keywords,
+                inferredSkills: allInferredSkills,
+                baseScore: ats.base_score,
+                totalPenalty: ats.total_penalty,
+                simulators: {
+                    greenhouse: { overallScore: greenhouse.overallScore, fields: greenhouse.fields },
+                    lever: { overallScore: lever.overallScore, fields: lever.fields },
+                    ashby: { overallScore: ashby.overallScore, fields: ashby.fields },
+                    naukri: { overallScore: naukri.overallScore, fields: naukri.fields },
+                }
+            }
+        });
+
+    } catch (err: any) {
+        console.error("[analyze-resume] Unhandled error:", err);
+        return res.status(500).json({
+            type: "error",
+            message: "Failed to analyze resume. Please try again."
         });
     }
 });

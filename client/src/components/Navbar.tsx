@@ -21,7 +21,7 @@ const Navbar = () => {
   }, []);
 
   return (
-    <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${scrolled ? "glass border-b border-white/[0.06]" : "bg-transparent"}`}>
+    <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${scrolled ? "glass border-b border-border" : "bg-transparent"}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <Link to="/" className="flex items-center gap-2.5 group">
@@ -34,14 +34,14 @@ const Navbar = () => {
           <div className="hidden md:flex items-center gap-1">
             {navLinks.map((link) => (
               <a key={link.label} href={link.href}
-                className="text-white-60 hover:text-foreground transition-colors text-sm font-medium px-4 py-2 rounded-lg hover:bg-white/[0.04]">
+                className="text-gray-600 hover:text-foreground transition-colors text-sm font-medium px-4 py-2 rounded-lg hover:bg-white/70">
                 {link.label}
               </a>
             ))}
           </div>
 
           <div className="hidden md:flex items-center gap-3">
-            <Link to="/auth" className="text-white-60 hover:text-foreground transition-colors text-sm font-medium px-4 py-2">
+            <Link to="/auth" className="text-gray-600 hover:text-foreground transition-colors text-sm font-medium px-4 py-2">
               Log In
             </Link>
             <Link to="/auth"
@@ -50,7 +50,7 @@ const Navbar = () => {
             </Link>
           </div>
 
-          <button className="md:hidden text-white-60" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
+          <button className="md:hidden text-gray-600" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
             {mobileOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
         </div>
@@ -59,11 +59,11 @@ const Navbar = () => {
       <AnimatePresence>
         {mobileOpen && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-            className="md:hidden glass border-t border-white/[0.06]">
+            className="md:hidden glass border-t border-border">
             <div className="px-4 py-4 space-y-1">
               {navLinks.map((link) => (
                 <a key={link.label} href={link.href}
-                  className="block text-white-60 hover:text-foreground text-sm py-2.5 px-3 rounded-lg hover:bg-white/[0.04]"
+                  className="block text-gray-600 hover:text-foreground text-sm py-2.5 px-3 rounded-lg hover:bg-white/70"
                   onClick={() => setMobileOpen(false)}>
                   {link.label}
                 </a>

@@ -8,7 +8,7 @@ export interface CompletedCategoryProps {
 
 export const CompletedCategory: React.FC<CompletedCategoryProps> = ({ category, pointsSaved }) => {
   return (
-    <div className="mb-2 rounded-lg border border-white/[0.06] overflow-hidden bg-surface-2">
+    <div className="mb-2 rounded-lg border border-border overflow-hidden bg-gray-50">
       <div className="flex items-center justify-between px-3 h-[40px]">
         <div className="flex items-center gap-2">
           <Check className="w-3.5 h-3.5 text-green-500" strokeWidth={3} />

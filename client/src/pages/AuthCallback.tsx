@@ -61,12 +61,12 @@ const AuthCallback = () => {
             {error ? (
                 <div className="text-center">
                     <p className="text-red-500 text-base mb-2">{error}</p>
-                    <p className="text-white-60 text-sm">Redirecting to login...</p>
+                    <p className="text-gray-600 text-sm">Redirecting to login...</p>
                 </div>
             ) : (
                 <div className="flex flex-col items-center gap-4">
-                    <div className="w-8 h-8 border-2 border-blue-electric border-t-transparent rounded-full animate-spin" />
-                    <p className="text-white-60 text-sm">Completing sign in...</p>
+                    <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-gray-600 text-sm">Completing sign in...</p>
                 </div>
             )}
         </div>
