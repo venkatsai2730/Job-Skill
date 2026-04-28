@@ -2,6 +2,8 @@
 // Multi-Model AI Service — Llama 4 Scout, Maverick, Gemini 2.5 Pro, Codestral
 // ═══════════════════════════════════════════════════════════════
 
+import { traceStandalone } from "../observability/langfuse.js";
+
 // ── Feature → Model Routing ─────────────────────────────────
 // 💬 Job chatbot       → Llama 4 Scout         → Groq
 // 📄 Resume PDF        → Gemini 2.5 Pro        → Google AI
@@ -569,6 +571,7 @@ async function callMistral(messages: any[], model: string, systemPrompt: string,
 // ═══════════════════════════════════════════════════════════════
 
 export async function getAIReply(messages: any[], feature: AIFeature = "chat") {
+    const startTime = Date.now();
     const config = FEATURE_MODEL_MAP[feature];
     const systemPrompt = SYSTEM_PROMPTS[feature] || SYSTEM_PROMPTS.chat;
 
@@ -587,7 +590,19 @@ export async function getAIReply(messages: any[], feature: AIFeature = "chat") {
 
     // Primary attempt
     try {
-        return await providerFn(messages, config.model, systemPrompt);
+        const result = await providerFn(messages, config.model, systemPrompt);
+        // Trace successful LLM call
+        traceStandalone({
+            name: `llm:${feature}`,
+            input: messages[messages.length - 1]?.content?.substring?.(0, 500) || "multi-part",
+            output: result.reply?.substring(0, 500),
+            metadata: {
+                provider: result.provider, model: result.model,
+                tokens: result.tokens, feature,
+                latencyMs: Date.now() - startTime,
+            },
+        });
+        return result;
     } catch (err: any) {
         console.warn(`[AI] Primary provider failed for ${feature}: ${err.message}`);
     }

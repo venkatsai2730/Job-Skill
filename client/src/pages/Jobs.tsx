@@ -25,6 +25,9 @@ interface JobListing {
   confidence_score?: number;
   is_active?: boolean;
   category?: string;
+  // v2.0: Smart ranking fields
+  matched_skills?: string[];
+  skill_gap?: string[];
 }
 
 interface TrackedJob {
@@ -179,10 +182,16 @@ export function JobCard({ job, userSkills, onSave, onMatch }: { job: JobListing,
           <DollarSign className="w-4 h-4 shrink-0 text-gray-400" /> <span className="truncate">{formatSalary(job.salary_min, job.salary_max)}</span>
         </div>
         <div className="flex flex-wrap gap-1.5 mt-2">
-          {(job.skills || []).slice(0, 3).map((skill: string) => (
+          {(job.matched_skills || []).slice(0, 2).map((skill: string) => (
+            <span key={`m-${skill}`} className="bg-green-50 border border-green-200 px-2 py-0.5 rounded text-[11px] text-green-700 font-medium">✓ {skill}</span>
+          ))}
+          {(job.skill_gap || []).slice(0, 2).map((skill: string) => (
+            <span key={`g-${skill}`} className="bg-red-50 border border-red-200 px-2 py-0.5 rounded text-[11px] text-red-600">✗ {skill}</span>
+          ))}
+          {(!job.matched_skills || job.matched_skills.length === 0) && (job.skills || []).slice(0, 3).map((skill: string) => (
             <span key={skill} className="bg-white/70 border border-border px-2 py-0.5 rounded text-[11px] text-gray-600">{skill}</span>
           ))}
-          {(job.skills || []).length > 3 && <span className="bg-white/70 border border-border px-2 py-0.5 rounded text-[11px] text-gray-500">+{(job.skills || []).length - 3}</span>}
+          {(job.skills || []).length > 3 && (!job.matched_skills || job.matched_skills.length === 0) && <span className="bg-white/70 border border-border px-2 py-0.5 rounded text-[11px] text-gray-500">+{(job.skills || []).length - 3}</span>}
           {!(job.skills) || job.skills.length === 0 && <span className="text-gray-400 italic text-[11px]">No specific skills</span>}
         </div>
       </div>

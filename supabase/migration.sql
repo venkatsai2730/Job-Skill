@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     skills TEXT[] DEFAULT '{}',
     experience_years NUMERIC DEFAULT 0,
     education TEXT,
-    current_role TEXT,
+    "current_role" TEXT,
     target_roles TEXT[] DEFAULT '{}',
     preferred_locations TEXT[] DEFAULT '{}',
     seniority_level TEXT DEFAULT 'unknown',

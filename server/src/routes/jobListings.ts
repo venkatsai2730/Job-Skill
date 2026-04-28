@@ -4,6 +4,7 @@
 
 import { Router, Response } from "express";
 import { fetchAllJobsLegacy, searchJobs, searchJSearchLive, extractExperience } from "../services/jobFetcher.js";
+import { rankJobsForUser, getUserSkillsForMatching } from "../services/jobRankingService.js";
 import { supabaseAdmin } from "../config/supabase.js";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
 
@@ -150,7 +151,24 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             }
         }
 
-        const responseData = { jobs: allJobs, count: allJobs.length, total: totalCount };
+        // v2.0: Smart ranking by resume match when user is identified
+        let rankedJobs = allJobs;
+        let userSkillsForResponse: string[] = [];
+        if (user_id && allJobs.length > 0) {
+            try {
+                rankedJobs = await rankJobsForUser(user_id as string, allJobs, allJobs.length);
+                userSkillsForResponse = await getUserSkillsForMatching(user_id as string);
+            } catch (rankErr: any) {
+                console.warn("[JobListings] Ranking failed, returning unranked:", rankErr.message);
+            }
+        }
+
+        const responseData = {
+            jobs: rankedJobs,
+            count: rankedJobs.length,
+            total: totalCount,
+            user_skills: userSkillsForResponse,
+        };
         routeCache.set(cacheKey, { timestamp: Date.now(), data: responseData });
         res.json(responseData);
     } catch (err: any) {
