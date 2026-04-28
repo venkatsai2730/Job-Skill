@@ -3,7 +3,9 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { Router, Response } from "express";
-import { fetchAllJobsLegacy, searchJobs, searchJSearchLive, extractExperience } from "../services/jobFetcher.js";
+import { searchJobs, extractExperience, detectCategory } from "../services/jobFetcher.js";
+import { mcpLiveSearch } from "../mcp/mcpClient.js";
+import { syncJobsViaMCP } from "../mcp/jobSyncCron.js";
 import { rankJobsForUser, getUserSkillsForMatching } from "../services/jobRankingService.js";
 import { supabaseAdmin } from "../config/supabase.js";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
@@ -24,9 +26,9 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        const { query, location, skills, experience_max, limit, page, preferred_location, city, country, user_id } = req.query;
+        const { query, location, skills, experience_max, limit, page, preferred_location, city, country, user_id, category } = req.query;
 
-        const parsedLimit = limit ? parseInt(limit as string) : 20;
+        const parsedLimit = limit ? parseInt(limit as string) : 40;
         const parsedPage = page ? parseInt(page as string) : 1;
         const parsedExpMax = experience_max !== undefined && experience_max !== "" 
             ? parseInt(experience_max as string) 
@@ -90,6 +92,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             preferred_location: preferred_location as string,
             city: city as string,
             country: country as string,
+            category: category as string,
             // Resume-based matching
             user_skills: userSkills.length > 0 ? userSkills : undefined,
             user_experience_years: userExperienceYears,
@@ -99,55 +102,76 @@ router.get("/", async (req: AuthRequest, res: Response) => {
         let allJobs = result.data;
         let totalCount = result.total;
 
-        // If DB results are too few, supplement with live JSearch
+        // If DB results are too few, supplement with MCP live scraping (no API keys)
         if (allJobs.length < 10 && (location || city || query)) {
             const searchLocation = (location || city || "") as string;
             const searchQuery = (query || "") as string;
-            const liveJobs = await searchJSearchLive(searchQuery, searchLocation, 20);
+            
+            // For fresher searches, use targeted queries to get more relevant results
+            const isFresherSearch = parsedExpMax !== undefined && parsedExpMax <= 2;
+            const queries = isFresherSearch
+                ? [
+                    `junior ${searchQuery || "developer"}`,
+                    `entry level ${searchQuery || "software engineer"}`,
+                    `fresher ${searchQuery || "developer"}`,
+                    `intern ${searchQuery || "software"}`,
+                  ]
+                : [searchQuery || "software engineer"];
 
-            if (liveJobs.length > 0) {
-                const existingUrls = new Set(allJobs.map((j: any) => j.job_url));
-                let newJobs = liveJobs
-                    .filter(j => j.job_url && !existingUrls.has(j.job_url))
-                    .map(j => ({
-                        id: `jsearch_${Buffer.from(j.job_url).toString("base64").substring(0, 20)}`,
-                        title: j.title,
-                        company: j.company,
-                        location: j.location,
-                        salary_min: null,
-                        salary_max: null,
-                        experience_min: null,
-                        experience_max: null,
-                        skills: [],
-                        job_url: j.job_url,
-                        source: "jsearch",
-                        posted_at: j.posted_at || new Date().toISOString(),
-                        description: j.description || "",
-                        seniority_level: "unknown",
-                        match_score: 0,
-                        confidence_score: 50,
-                        is_active: true,
-                        category: "Software Development",
-                    }));
+            const existingUrls = new Set(allJobs.map((j: any) => j.job_url));
+            
+            for (const q of queries) {
+                if (allJobs.length >= 20) break; // enough results
+                const liveJobs = await mcpLiveSearch(q, searchLocation, 20);
 
-                // Apply experience filtering to live JSearch jobs before appending
-                if (parsedExpMax !== undefined && !isNaN(parsedExpMax)) {
-                    newJobs = newJobs.filter(job => {
-                        const exp = extractExperience(job.description || "");
-                        if (exp.min !== null && exp.min > parsedExpMax) return false;
-                        
-                        // Strict title check for Entry-level/Fresher
-                        if (parsedExpMax <= 2) {
-                            const title = (job.title || "").toLowerCase();
-                            const seniorKw = ["senior", "sr ", "sr.", "lead", "staff", "principal", "architect", "manager", "director", "vp", "head", "expert"];
-                            if (seniorKw.some(kw => title.includes(kw))) return false;
+                if (liveJobs.length > 0) {
+                    let newJobs = liveJobs
+                        .filter(j => j.job_url && !existingUrls.has(j.job_url))
+                        .map(j => ({
+                            id: `mcp_${Buffer.from(j.job_url).toString("base64").substring(0, 20)}`,
+                            title: j.title,
+                            company: j.company,
+                            location: j.location,
+                            salary_min: j.salary_min,
+                            salary_max: j.salary_max,
+                            experience_min: null as number | null,
+                            experience_max: null as number | null,
+                            skills: [] as string[],
+                            job_url: j.job_url,
+                            source: j.source || "mcp",
+                            posted_at: j.posted_at || new Date().toISOString(),
+                            description: j.description || "",
+                            seniority_level: "unknown",
+                            match_score: 0,
+                            confidence_score: 50,
+                            is_active: true,
+                            category: detectCategory(j.title, j.category),
+                        }));
+
+                    // Apply experience filtering to live jobs before appending
+                    if (parsedExpMax !== undefined && !isNaN(parsedExpMax)) {
+                        newJobs = newJobs.filter(job => {
+                            const exp = extractExperience(job.description || "");
+                            if (exp.min !== null && exp.min > parsedExpMax) return false;
+                            
+                            // Strict title check for Entry-level/Fresher
+                            if (parsedExpMax <= 2) {
+                                const title = (job.title || "").toLowerCase();
+                                const seniorKw = ["senior", "sr ", "sr.", "lead", "staff", "principal", "architect", "manager", "director", "vp", "head", "expert"];
+                                if (seniorKw.some(kw => title.includes(kw))) return false;
+                            }
+                            return true;
+                        });
+                    }
+
+                    for (const j of newJobs) {
+                        if (!existingUrls.has(j.job_url)) {
+                            existingUrls.add(j.job_url);
+                            allJobs.push(j);
                         }
-                        return true;
-                    });
+                    }
+                    totalCount = allJobs.length;
                 }
-
-                allJobs = [...allJobs, ...newJobs];
-                totalCount += newJobs.length;
             }
         }
 
@@ -176,11 +200,11 @@ router.get("/", async (req: AuthRequest, res: Response) => {
     }
 });
 
-// POST /api/job-listings/fetch — trigger manual job fetch
+// POST /api/job-listings/fetch — trigger manual job fetch (now uses MCP)
 router.post("/fetch", async (_req, res: Response) => {
     try {
-        const result = await fetchAllJobsLegacy();
-        res.json(result);
+        const result = await syncJobsViaMCP();
+        res.json({ message: `MCP sync complete. Stored: ${result.total}, Errors: ${result.errors}` });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }

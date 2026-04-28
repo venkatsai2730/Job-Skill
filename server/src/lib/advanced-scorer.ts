@@ -110,6 +110,21 @@ export function computeAdvancedATS(
     // THE ONLY ALLOWED FLOOR
     const finalScore = Math.max(3, Math.round(baseScore - totalPenalty));
 
+    console.log('[AdvancedATS]', {
+        baseScore,
+        totalPenalty: Math.round(totalPenalty * 10) / 10,
+        finalScore,
+        triggeredPenalties: triggered.map(p => `${p.id}(-${p.deduction})`).join(', '),
+        expRawLen: resume.sections.experience?.raw?.length ?? 0,
+        projRawLen: resume.sections.projects?.raw?.length ?? 0,
+        skillsRawLen: resume.sections.skills?.raw?.length ?? 0,
+        summaryRawLen: resume.sections.summary?.raw?.length ?? 0,
+        rawTextLen: rawText.length,
+        sectionsExpCount: sections.experience.length,
+        sectionsBulletCount: sections.experience.reduce((s, e) => s + e.bullets.length, 0),
+        sectionsProjCount: sections.projects.length,
+    });
+
     // ── Grade ────────────────────────────────────────────────
     const grade =
         finalScore >= 88 ? 'A+' : finalScore >= 78 ? 'A'  :
@@ -137,7 +152,16 @@ export function computeAdvancedATS(
         typos:              "Spelling & Grammar",
         no_summary:         "Profile Summary",
         full_zero_quant:    "Quantified Impact",
-        vague_achievement:  "Achievements"
+        vague_achievement:  "Achievements",
+        // New penalties
+        short_bullets:      "Bullet Detail",
+        long_bullets:       "Bullet Length",
+        weak_verbs:         "Action Verbs",
+        no_linkedin:        "Contact Details",
+        repetitive_language: "Language Variety",
+        missing_dates:      "Date Formatting",
+        too_few_bullets:    "Experience Detail",
+        excessive_skills:   "Skills Section",
     };
 
     const mappedIssues = triggered.map(p => {
@@ -160,11 +184,20 @@ export function computeAdvancedATS(
     const COMPLETED_MAP: Record<string, { name: string, pts: number }> = {
         personal_details:  { name: "No Personal Details", pts: 9 },
         full_zero_quant:   { name: "Quantified Impact", pts: 19.3 },
-        no_github:         { name: "Contact Details", pts: 3.5 },
+        no_github:         { name: "GitHub Profile Linked", pts: 3.5 },
         duplicate_metrics: { name: "No Repeated Metrics", pts: 14 },
         trivial_projects:  { name: "Strong Projects", pts: 5.5 },
         filler_objective:  { name: "No Filler Language", pts: 6.5 },
-        hobbies_section:   { name: "No Irrelevant Sections", pts: 3.0 }
+        hobbies_section:   { name: "No Irrelevant Sections", pts: 3.0 },
+        no_summary:        { name: "Summary Section Present", pts: 8.0 },
+        short_bullets:     { name: "Detailed Bullets", pts: 4.0 },
+        long_bullets:      { name: "Concise Bullets", pts: 3.0 },
+        weak_verbs:        { name: "Strong Action Verbs", pts: 3.5 },
+        no_linkedin:       { name: "LinkedIn Profile Linked", pts: 2.5 },
+        repetitive_language: { name: "Varied Language", pts: 4.0 },
+        missing_dates:     { name: "Dates Present", pts: 3.0 },
+        too_few_bullets:   { name: "Sufficient Detail", pts: 5.0 },
+        excessive_skills:  { name: "Focused Skills List", pts: 2.5 },
     };
 
     const completedChecks: CompletedCheck[] = [];
@@ -207,6 +240,14 @@ export function computeAdvancedATS(
                 'duplicate_metrics': 'Metrics are unique across bullets.',
                 'no_summary': 'Summary/profile section present.',
                 'vague_achievement': 'Achievements reference specific organisations.',
+                'short_bullets': 'All bullets have sufficient detail.',
+                'long_bullets': 'Bullets are concise and scannable.',
+                'weak_verbs': 'Bullets use strong action verbs.',
+                'no_linkedin': 'LinkedIn profile URL linked.',
+                'repetitive_language': 'Action verbs are varied across bullets.',
+                'missing_dates': 'Experience entries have date ranges.',
+                'too_few_bullets': 'Experience section has sufficient detail.',
+                'excessive_skills': 'Skills list is focused and relevant.',
             };
             if (successTexts[p.id]) {
                 issues.push({

@@ -112,8 +112,12 @@ export const JSEARCH_CRON_QUERIES = [
     { query: "software developer", location: "Chennai" },
     { query: "software developer", location: "Mumbai" },
     { query: "software developer", location: "Delhi NCR" },
+    { query: "software developer", location: "Kolkata" },
+    { query: "software developer", location: "Ahmedabad" },
+    { query: "software developer", location: "Jaipur" },
+    { query: "software developer", location: "Kochi" },
 
-    // Fresher/Entry level India
+    // Fresher/Entry level India — expanded queries
     { query: "junior developer", location: "India" },
     { query: "fresher engineer", location: "India" },
     { query: "graduate engineer trainee", location: "India" },
@@ -121,12 +125,40 @@ export const JSEARCH_CRON_QUERIES = [
     { query: "associate software engineer", location: "India" },
     { query: "trainee developer", location: "India" },
     { query: "0-1 years experience developer", location: "India" },
+    { query: "entry level software engineer", location: "India" },
+    { query: "junior software developer", location: "India" },
+    { query: "fresher developer", location: "Bangalore" },
+    { query: "fresher developer", location: "Hyderabad" },
+    { query: "fresher developer", location: "Pune" },
+    { query: "fresher developer", location: "Chennai" },
+    { query: "campus hire engineer", location: "India" },
+    { query: "associate engineer", location: "India" },
+    { query: "junior web developer", location: "India" },
+    { query: "fresher data analyst", location: "India" },
+    { query: "intern software", location: "India" },
+    { query: "apprentice developer", location: "India" },
+
+    // Fresher/Entry level — Global
+    { query: "junior developer", location: "United States" },
+    { query: "entry level software engineer", location: "United States" },
+    { query: "junior developer", location: "Remote" },
+    { query: "entry level developer", location: "Remote" },
+    { query: "new grad software engineer", location: "United States" },
 
     // Tech role queries
     { query: "react developer", location: "India" },
     { query: "node developer", location: "India" },
     { query: "python developer", location: "India" },
     { query: "java developer", location: "India" },
+    { query: "full stack developer", location: "India" },
+    { query: "frontend developer", location: "India" },
+    { query: "backend developer", location: "India" },
+    { query: "mern stack developer", location: "India" },
+    { query: "angular developer", location: "India" },
+    { query: "flutter developer", location: "India" },
+    { query: "android developer", location: "India" },
+    { query: "ios developer", location: "India" },
+    { query: "machine learning engineer", location: "India" },
 
     // Non-tech / cross-functional
     { query: "data analyst", location: "India" },
@@ -138,6 +170,9 @@ export const JSEARCH_CRON_QUERIES = [
     { query: "sales", location: "India" },
     { query: "operations manager", location: "India" },
     { query: "marketing manager", location: "India" },
+    { query: "business analyst", location: "India" },
+    { query: "cloud engineer", location: "India" },
+    { query: "cybersecurity analyst", location: "India" },
 ];
 
 // ── Indian State to Nearest Metro Map ──────────────────────
@@ -183,8 +218,8 @@ export const SKILL_PATTERNS = [
 
 // ── Seniority allowed per experience range ──────────────────
 export const SENIORITY_FOR_EXPERIENCE: Record<string, string[]> = {
-    "0-1": ["intern", "entry"],
-    "1-3": ["intern", "entry", "mid"],
+    "0-1": ["intern", "entry", "unknown"],
+    "1-3": ["intern", "entry", "mid", "unknown"],
     "3-5": ["mid", "senior"],
     "5+":  ["senior", "lead"],
 };

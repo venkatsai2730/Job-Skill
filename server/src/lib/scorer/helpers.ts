@@ -133,16 +133,50 @@ export function sectionsToResume(
     metadata?: { fileSizeMB?: number; isPdf?: boolean; fileName?: string }
 ): ParsedResume {
     const expBullets = sections.experience.flatMap(e => e.bullets);
-    const expRaw = sections.experience.map(e =>
+    
+    // Build expRaw from BOTH structured data AND raw text extraction
+    // This ensures the scorer sees all experience content even if parsing missed bullets
+    let expRaw = sections.experience.map(e =>
         `${e.title} ${e.company} ${e.dates}\n${e.bullets.join('\n')}`
     ).join('\n');
+    
+    // If parsed bullets are sparse, supplement with raw text from the experience section
+    if (expBullets.length < 3) {
+        const expSectionMatch = rawText.match(/(?:^|\n)\s*(?:experience|work\s+experience|professional\s+experience|employment)\s*[\n:]/i);
+        if (expSectionMatch) {
+            const startIdx = expSectionMatch.index! + expSectionMatch[0].length;
+            const nextSection = rawText.slice(startIdx).match(/\n\s*(?:projects?|education|skills?|technical\s+skills|certifications?|achievements?|summary|profile)\s*[\n:]/i);
+            const rawExpText = nextSection
+                ? rawText.slice(startIdx, startIdx + nextSection.index!)
+                : rawText.slice(startIdx, startIdx + 3000);
+            if (rawExpText.trim().length > expRaw.trim().length) {
+                expRaw = rawExpText;
+            }
+        }
+    }
 
     const projBullets = sections.projects.flatMap(p => {
         return p.description ? p.description.split(/[.\n]+/).filter(s => s.trim().length > 20) : [];
     });
-    const projRaw = sections.projects.map(p =>
+    
+    // Same approach for projects — supplement with raw text if parsing is sparse
+    let projRaw = sections.projects.map(p =>
         `${p.name}\n${p.description}\n${p.tech.join(', ')}`
     ).join('\n');
+    
+    if (projBullets.length < 3) {
+        const projSectionMatch = rawText.match(/(?:^|\n)\s*(?:projects?|personal\s+projects|key\s+projects)\s*[\n:]/i);
+        if (projSectionMatch) {
+            const startIdx = projSectionMatch.index! + projSectionMatch[0].length;
+            const nextSection = rawText.slice(startIdx).match(/\n\s*(?:experience|education|skills?|technical\s+skills|certifications?|achievements?|summary|profile)\s*[\n:]/i);
+            const rawProjText = nextSection
+                ? rawText.slice(startIdx, startIdx + nextSection.index!)
+                : rawText.slice(startIdx, startIdx + 3000);
+            if (rawProjText.trim().length > projRaw.trim().length) {
+                projRaw = rawProjText;
+            }
+        }
+    }
 
     const skillsRaw = sections.skills.map(g => `${g.category}: ${g.items.join(', ')}`).join('\n');
     const eduRaw = sections.education.map(e =>

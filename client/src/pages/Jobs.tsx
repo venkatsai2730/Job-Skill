@@ -254,6 +254,10 @@ export default function Jobs() {
   const [userSkills, setUserSkills] = useState<string[]>([]);
   const [feedSubTab, setFeedSubTab] = useState<"for-you" | "browse" | "remote">("for-you");
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [categoryJobs, setCategoryJobs] = useState<JobListing[]>([]);
+  const [loadingCategory, setLoadingCategory] = useState(false);
+  const [categoryTotal, setCategoryTotal] = useState(0);
+  const [categoryPage, setCategoryPage] = useState(1);
 
   const [geoLocation, setGeoLocation] = useState<GeoLocation | null>(null);
   const [geoStatus, setGeoStatus] = useState<"detecting" | "detected" | "denied" | "idle">("idle");
@@ -318,11 +322,12 @@ export default function Jobs() {
     fetchFeedJobs(true, 1, initPrefLoc);
   };
 
-  const fetchFeedJobs = async (reset = false, currentPage = 1, forcePrefLoc?: string, city?: string, country?: string, overrides?: { query?: string; location?: string; experience?: string; skills?: string }) => {
+  const fetchFeedJobs = async (reset = false, currentPage = 1, forcePrefLoc?: string, city?: string, country?: string, overrides?: { query?: string; location?: string; experience?: string; skills?: string; category?: string; limit?: string }) => {
     setLoadingFeed(true);
     if (reset) setPage(1);
     try {
-      const params = new URLSearchParams({ page: currentPage.toString(), limit: "20" });
+      const defaultLimit = overrides?.category ? "60" : "40";
+      const params = new URLSearchParams({ page: currentPage.toString(), limit: overrides?.limit || defaultLimit });
       const q = overrides?.query ?? search;
       const loc = overrides?.location ?? location;
       const exp = overrides?.experience ?? experience;
@@ -331,6 +336,7 @@ export default function Jobs() {
       if (loc) params.append("location", loc);
       if (exp) params.append("experience_max", exp);
       if (sk) params.append("skills", sk);
+      if (overrides?.category) params.append("category", overrides.category);
 
       const resolvedPrefLoc = forcePrefLoc !== undefined ? forcePrefLoc : preferredLocation;
       if (resolvedPrefLoc) params.append("preferred_location", resolvedPrefLoc);
@@ -357,9 +363,74 @@ export default function Jobs() {
 
   const handleApplyFilters = () => { fetchFeedJobs(true, 1); };
   const handlePageChange = (newPage: number) => {
-    const totalPages = Math.ceil(totalJobs / 20);
+    const totalPages = Math.ceil(totalJobs / 40);
     if (newPage < 1 || newPage > totalPages) return;
     fetchFeedJobs(false, newPage);
+  };
+
+  // Fetch jobs for a specific category from the server (not client-side filtering)
+  const fetchCategoryJobs = async (serverCategory: string, pageNum = 1) => {
+    setLoadingCategory(true);
+    try {
+      const params = new URLSearchParams({ page: pageNum.toString(), limit: "60", category: serverCategory });
+      if (location) params.append("location", location);
+      if (experience) params.append("experience_max", experience);
+      
+      const resolvedCity = geoLocation?.city || "";
+      const resolvedCountry = geoLocation?.country || "";
+      if (resolvedCity) params.append("city", resolvedCity);
+      if (resolvedCountry) params.append("country", resolvedCountry);
+      if (preferredLocation) params.append("preferred_location", preferredLocation);
+
+      const userId = getUserId();
+      if (userId) params.append("user_id", userId);
+
+      const res = await api.get<{ jobs: JobListing[], total: number }>(`/api/job-listings?${params.toString()}`);
+      setCategoryJobs(res.jobs || []);
+      setCategoryTotal(res.total || 0);
+      setCategoryPage(pageNum);
+    } catch {
+      toast.error("Failed to load category jobs");
+    } finally {
+      setLoadingCategory(false);
+    }
+  };
+
+  const handleCategoryPageChange = (newPage: number) => {
+    if (!categoryFilter) return;
+    const serverCat = CATEGORY_TO_SERVER[categoryFilter];
+    if (!serverCat) return;
+    const totalPages = Math.ceil(categoryTotal / 60);
+    if (newPage < 1 || newPage > totalPages) return;
+    fetchCategoryJobs(serverCat, newPage);
+  };
+
+  // Map UI category names to server category filter values
+  const CATEGORY_TO_SERVER: Record<string, string> = {
+    "💻 Tech Jobs Near You": "Software Development",
+    "🎓 Fresher & Internship": "Internships & Fresher",
+    "🌍 Remote Worldwide": "Remote",
+    "🏢 Top Companies Hiring": "", // handled client-side (no server category)
+  };
+
+  const handleSeeAll = (uiCategory: string) => {
+    setCategoryFilter(uiCategory);
+    const serverCat = CATEGORY_TO_SERVER[uiCategory];
+    if (serverCat) {
+      // Fetch from server with category filter for a full page of results
+      fetchCategoryJobs(serverCat, 1);
+    } else {
+      // For "Top Companies", filter client-side (no server category)
+      setCategoryJobs([]);
+      setCategoryTotal(0);
+    }
+  };
+
+  const handleBackToCategories = () => {
+    setCategoryFilter(null);
+    setCategoryJobs([]);
+    setCategoryTotal(0);
+    setCategoryPage(1);
   };
 
   const fetchTrackedJobs = async () => {
@@ -444,7 +515,7 @@ export default function Jobs() {
   // ── Category Sections Data ──
   const categoryFilters: Record<string, (j: JobListing) => boolean> = {
     "💻 Tech Jobs Near You": (j) => ["Software Development", "Data & Analytics", "DevOps & Cloud"].includes(j.category || ""),
-    "🎓 Fresher & Internship": (j) => (j.category === "Internships & Fresher") || (j.seniority_level === "intern" || j.seniority_level === "entry"),
+    "🎓 Fresher & Internship": (j) => (j.category === "Internships & Fresher") || (j.seniority_level === "intern" || j.seniority_level === "entry") || /\b(intern|fresher|trainee|junior|jr\.?|associate|graduate|entry[\s-]?level|apprentice)\b/i.test(j.title),
     "🌍 Remote Worldwide": (j) => (j.location || "").toLowerCase().includes("remote"),
     "🏢 Top Companies Hiring": (j) => ["google", "microsoft", "amazon", "flipkart", "swiggy", "zomato", "razorpay", "cred"].some(c => (j.company || "").toLowerCase().includes(c)),
   };
@@ -454,7 +525,10 @@ export default function Jobs() {
   const topCompanyJobs = feedJobs.filter(categoryFilters["🏢 Top Companies Hiring"]);
 
   // Get all jobs for the active category filter
-  const categoryFilteredJobs = categoryFilter ? feedJobs.filter(categoryFilters[categoryFilter] || (() => true)) : [];
+  // Use server-fetched category jobs when available, fall back to client-side filtering
+  const categoryFilteredJobs = categoryFilter
+    ? (categoryJobs.length > 0 ? categoryJobs : feedJobs.filter(categoryFilters[categoryFilter] || (() => true)))
+    : [];
 
   return (
     <div className="p-6 md:p-10 max-w-[1600px] mx-auto min-h-screen flex flex-col">
@@ -569,7 +643,7 @@ export default function Jobs() {
             <div className="text-center py-20 bg-white border border-border rounded-2xl">
               <h3 className="text-lg font-medium text-gray-800">No jobs match your filters</h3>
               <p className="text-gray-600 mt-2">Try adjusting your search criteria broadly to find more roles.</p>
-              <button onClick={() => { setSearch(""); setLocation(""); setExperience(""); setSkills(""); fetchFeedJobs(true, 1, undefined, undefined, undefined, { query: "", location: "", experience: "", skills: "" }); }} className="mt-4 text-blue-500 hover:underline text-sm font-medium">Clear Filters</button>
+              <button onClick={() => { setSearch(""); setLocation(""); setExperience(""); setSkills(""); fetchFeedJobs(true, 1, undefined, undefined, undefined, { query: "", location: "", experience: "", skills: "", category: "" }); }} className="mt-4 text-blue-500 hover:underline text-sm font-medium">Clear Filters</button>
             </div>
           ) : (
             <>
@@ -577,20 +651,34 @@ export default function Jobs() {
               {categoryFilter ? (
                 <div className="mb-6">
                   <div className="flex items-center gap-3 mb-6">
-                    <button onClick={() => setCategoryFilter(null)} className="flex items-center gap-1.5 text-blue-500 hover:text-blue-600 font-semibold text-sm transition-colors">
+                    <button onClick={handleBackToCategories} className="flex items-center gap-1.5 text-blue-500 hover:text-blue-600 font-semibold text-sm transition-colors">
                       ← Back to all categories
                     </button>
                     <span className="text-gray-300">|</span>
                     <h3 className="text-lg font-bold text-foreground">{categoryFilter}</h3>
-                    <span className="text-gray-500 text-sm">({categoryFilteredJobs.length} jobs)</span>
+                    <span className="text-gray-500 text-sm">({categoryTotal > 0 ? categoryTotal : categoryFilteredJobs.length} jobs)</span>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {categoryFilteredJobs.map(job => <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />)}
-                  </div>
-                  {categoryFilteredJobs.length === 0 && (
-                    <div className="text-center py-12 bg-white border border-border rounded-2xl">
-                      <p className="text-gray-500">No jobs found in this category right now.</p>
-                    </div>
+                  {loadingCategory ? (
+                    <div className="flex items-center justify-center py-20"><div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full" /></div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {categoryFilteredJobs.map(job => <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />)}
+                      </div>
+                      {categoryFilteredJobs.length === 0 && (
+                        <div className="text-center py-12 bg-white border border-border rounded-2xl">
+                          <p className="text-gray-500">No jobs found in this category right now.</p>
+                        </div>
+                      )}
+                      {/* Category Pagination */}
+                      {categoryTotal > 60 && (
+                        <div className="flex justify-center items-center gap-3 mt-12 mb-6">
+                          <button onClick={() => handleCategoryPageChange(categoryPage - 1)} disabled={categoryPage === 1} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Previous</button>
+                          <span className="text-sm text-gray-500">Page {categoryPage} of {Math.ceil(categoryTotal / 60)}</span>
+                          <button onClick={() => handleCategoryPageChange(categoryPage + 1)} disabled={categoryPage >= Math.ceil(categoryTotal / 60)} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Next</button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               ) : (
@@ -598,10 +686,10 @@ export default function Jobs() {
               {/* Category Sections */}
               {page === 1 && !search && (
                 <div className="mb-4">
-                  <CategorySection title="💻 Tech Jobs Near You" jobs={techJobs} onSeeAll={() => setCategoryFilter("💻 Tech Jobs Near You")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
-                  <CategorySection title="🎓 Fresher & Internship" jobs={fresherJobs} onSeeAll={() => setCategoryFilter("🎓 Fresher & Internship")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
-                  <CategorySection title="🌍 Remote Worldwide" jobs={remoteJobs} onSeeAll={() => setCategoryFilter("🌍 Remote Worldwide")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
-                  <CategorySection title="🏢 Top Companies Hiring" jobs={topCompanyJobs} onSeeAll={() => setCategoryFilter("🏢 Top Companies Hiring")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
+                  <CategorySection title="💻 Tech Jobs Near You" jobs={techJobs} onSeeAll={() => handleSeeAll("💻 Tech Jobs Near You")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
+                  <CategorySection title="🎓 Fresher & Internship" jobs={fresherJobs} onSeeAll={() => handleSeeAll("🎓 Fresher & Internship")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
+                  <CategorySection title="🌍 Remote Worldwide" jobs={remoteJobs} onSeeAll={() => handleSeeAll("🌍 Remote Worldwide")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
+                  <CategorySection title="🏢 Top Companies Hiring" jobs={topCompanyJobs} onSeeAll={() => handleSeeAll("🏢 Top Companies Hiring")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
                 </div>
               )}
 
@@ -620,12 +708,12 @@ export default function Jobs() {
               </div>
 
               {/* Pagination */}
-              {Math.ceil(totalJobs / 20) > 1 && (
+              {Math.ceil(totalJobs / 40) > 1 && (
                 <div className="flex justify-center items-center gap-3 mt-12 mb-6">
                   <button onClick={() => handlePageChange(page - 1)} disabled={page === 1} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Previous</button>
                   <div className="flex items-center gap-1.5 px-2">
-                    {Array.from({ length: Math.min(5, Math.ceil(totalJobs / 20)) }, (_, i) => {
-                      const totalPages = Math.ceil(totalJobs / 20);
+                    {Array.from({ length: Math.min(5, Math.ceil(totalJobs / 40)) }, (_, i) => {
+                      const totalPages = Math.ceil(totalJobs / 40);
                       let pageNum: number;
                       if (totalPages <= 5) pageNum = i + 1;
                       else if (page <= 3) pageNum = i + 1;
@@ -639,7 +727,7 @@ export default function Jobs() {
                       );
                     })}
                   </div>
-                  <button onClick={() => handlePageChange(page + 1)} disabled={page === Math.ceil(totalJobs / 20)} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Next</button>
+                  <button onClick={() => handlePageChange(page + 1)} disabled={page === Math.ceil(totalJobs / 40)} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Next</button>
                 </div>
               )}
               </>
