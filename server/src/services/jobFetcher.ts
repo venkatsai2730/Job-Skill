@@ -13,7 +13,7 @@ import {
     SENIORITY_FOR_EXPERIENCE,
 } from "./jobCompanies.js";
 import { classifySeniorityWithAI, classifySeniorityFromTitle, resetAICallCounter } from "./jobClassifier.js";
-import { fetchFreshersWorldJobs, fetchApnaJobs } from "./jobScrapers.js";
+import { fetchFreshersWorldJobs, fetchApnaJobs, fetchIndeedRssJobs, fetchGlassdoorRssJobs } from "./jobScrapers.js";
 
 // ── Types ───────────────────────────────────────────────────
 interface RawJob {
@@ -318,7 +318,9 @@ export function detectCategory(title: string, category?: string): string {
     const seniorKw = ["senior", "sr ", "sr.", "lead", "staff", "principal", "architect", "manager", "director", "vp", "head", "expert", "general management", "vp "];
     const isSenior = seniorKw.some(kw => t.includes(kw));
 
-    if (!isSenior && (t.includes("intern") || t.includes("fresher") || t.includes("trainee") || t.includes("0-1"))) {
+    // Expanded fresher detection — catches junior, associate, graduate, campus, GET, entry-level
+    const fresherPattern = /\b(intern|fresher|trainee|0[\s-]?1|junior|jr\.?|associate|graduate\s*engineer|campus|entry[\s-]?level|get\b|apprentice)\b/i;
+    if (!isSenior && fresherPattern.test(t)) {
         return "Internships & Fresher";
     }
     
@@ -577,12 +579,13 @@ export async function fetchRssJobs(): Promise<{ total: number; stored: number }>
 }
 
 export async function fetchScraperJobs(): Promise<{ total: number; stored: number }> {
-    console.log(`[JobFetcher] Scraper Cron: Fetching Internshala + Freshersworld + Apna...`);
-    const [internshala, freshersworld, apna] = await Promise.all([
+    console.log(`[JobFetcher] Scraper Cron: Fetching Internshala + Freshersworld + Apna + Indeed RSS + Glassdoor...`);
+    const [internshala, freshersworld, apna, indeedRss, glassdoor] = await Promise.all([
         fetchInternshalaJobs(), fetchFreshersWorldJobs(), fetchApnaJobs(),
+        fetchIndeedRssJobs(), fetchGlassdoorRssJobs(),
     ]);
-    const allJobs = [...internshala, ...freshersworld, ...apna];
-    console.log(`[JobFetcher] Scraper Fetched ${allJobs.length} jobs`);
+    const allJobs = [...internshala, ...freshersworld, ...apna, ...indeedRss, ...glassdoor];
+    console.log(`[JobFetcher] Scraper Fetched ${allJobs.length} jobs (Internshala: ${internshala.length}, FW: ${freshersworld.length}, Apna: ${apna.length}, Indeed: ${indeedRss.length}, Glassdoor: ${glassdoor.length})`);
     const stored = await storeJobs(allJobs);
     return { total: allJobs.length, stored };
 }
@@ -692,11 +695,12 @@ export async function searchJobs(filters: {
     preferred_location?: string;
     city?: string;
     country?: string;
+    category?: string;
     user_skills?: string[];
     user_experience_years?: number;
     user_seniority?: string;
 }) {
-    const limit = filters.limit || 20;
+    const limit = Math.min(filters.limit || 40, 100);
     const page = filters.page || 1;
     const effectiveLocation = filters.location || filters.city || "";
 
@@ -799,6 +803,31 @@ export async function searchJobs(filters: {
         jobs = data || [];
     }
 
+    // ── In-Memory: Category Filtering ──
+    // When a specific category is requested (e.g., "Internships & Fresher"),
+    // filter jobs to that category BEFORE pagination so we get a full page of results.
+    if (filters.category) {
+        const cat = filters.category;
+        const fresherPattern = /\b(intern|fresher|trainee|junior|jr\.?|associate|graduate|campus|entry[\s-]?level|apprentice)\b/i;
+        
+        if (cat === "Internships & Fresher") {
+            jobs = jobs.filter(job => {
+                if ((job.category || "").includes("Fresher")) return true;
+                if (job.seniority_level === "intern" || job.seniority_level === "entry") return true;
+                if (fresherPattern.test(job.title || "")) return true;
+                return false;
+            });
+        } else if (cat === "Remote") {
+            jobs = jobs.filter(job => (job.location || "").toLowerCase().includes("remote"));
+        } else if (cat === "Software Development") {
+            jobs = jobs.filter(job => 
+                ["Software Development", "Data & Analytics", "DevOps & Cloud"].includes(job.category || "")
+            );
+        } else {
+            jobs = jobs.filter(job => (job.category || "") === cat);
+        }
+    }
+
     // ── In-Memory: Seniority + Experience Filtering ──
     if (filters.experience_max !== undefined) {
         const maxExp = filters.experience_max;
@@ -814,6 +843,7 @@ export async function searchJobs(filters: {
             // Filter by experience number
             if (expMin !== null && expMin > maxExp) return false;
             // Filter by seniority level — NEVER show senior/lead to 0-1yr user
+            // BUT allow "unknown" seniority through (don't discard unclassified jobs)
             const jobSeniority = (job.seniority_level || "unknown").toLowerCase();
             if (jobSeniority !== "unknown" && !allowedSeniorities.includes(jobSeniority)) return false;
             // Extra safety: title keyword check for entry-level
@@ -824,6 +854,17 @@ export async function searchJobs(filters: {
             }
             return true;
         });
+
+        // For freshers (0-2 yrs), boost jobs that are explicitly fresher-friendly
+        if (maxExp <= 2) {
+            const fresherPattern = /\b(intern|fresher|trainee|junior|jr\.?|associate|graduate|campus|entry[\s-]?level|apprentice|0[\s-]?[12]\s*(?:years?|yrs?))\b/i;
+            jobs.sort((a, b) => {
+                const aFresher = fresherPattern.test(a.title || "") || (a.category || "").includes("Fresher") ? 1 : 0;
+                const bFresher = fresherPattern.test(b.title || "") || (b.category || "").includes("Fresher") ? 1 : 0;
+                if (aFresher !== bFresher) return bFresher - aFresher;
+                return 0; // preserve existing order for ties
+            });
+        }
     }
 
     // ── In-Memory: Resume Match Scoring ──
@@ -964,20 +1005,23 @@ export async function searchJobs(filters: {
     });
 
     // ── Company Interleaving (before pagination) ──
-    // Always apply interleaving, but preserve score-based ordering when resume matching
-    jobs = interleaveByCompany(jobs, 2);
+    // Apply interleaving, but preserve score-based ordering when resume matching
+    // Use higher per-company limit when total results are low (e.g., fresher searches)
+    const maxPerCompany = jobs.length < 40 ? 4 : 2;
+    jobs = interleaveByCompany(jobs, maxPerCompany);
 
     // Pagination
     const from = (page - 1) * limit;
     const to = from + limit;
     let paginated = jobs.slice(from, to);
 
-    // HARD RULE: Enforce max 2 jobs from same company per page
+    // HARD RULE: Enforce max per-company limit per page (relaxed when few results)
+    const maxPerPage = jobs.length < 40 ? 4 : 2;
     const companyPageCount = new Map<string, number>();
     paginated = paginated.filter(job => {
         const key = (job.company || "").toLowerCase();
         const count = companyPageCount.get(key) || 0;
-        if (count >= 2) return false;
+        if (count >= maxPerPage) return false;
         companyPageCount.set(key, count + 1);
         return true;
     });

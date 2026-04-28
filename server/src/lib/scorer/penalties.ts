@@ -18,7 +18,8 @@ export interface PenaltyResult {
     scoreGain: string;
 }
 
-const STRONG_NUM = /\d+\s*(%|x\b|times\b|users?|people|requests?|queries|ms\b|seconds?|records?|rows?|million|lakh|crore|\$|₹|lpa)/i;
+const STRONG_NUM = /\d+(?:\.\d+)?\s*(%|x\b|times\b|users?|people|requests?|queries|ms\b|seconds?|records?|rows?|million|lakh|crore|\$|₹|lpa|accuracy|score|chunks?|throughput)/i;
+const METRIC_CONTEXT = /(\d+(?:\.\d+)?)\s*(%|x\b)|(?:by|of|to|over|under|within|achieving|reduced|increased|improved|boosted|cut|slashed)\s+\d+|(?:top|rank)\s+\d+|\d+\s*\+/i;
 const ANY_NUM    = /\d+/;
 
 const VAGUE_VERBS = /\b(improving|improved|enhancing|enhanced|boosting|boosted|increasing|increased|reducing|reduced|decreasing|decreased|optimizing|optimised|optimized|streamlining|streamlined|accelerating|accelerated|strengthening|strengthened|maximizing|maximised|minimizing|minimised)\b/i;
@@ -61,8 +62,32 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     const results: PenaltyResult[] = [];
 
     // Bug 1 fix: extract bullets from .raw text, not .bullets (which is often empty)
-    const expBullets  = extractBullets(sections.experience?.raw);
-    const projBullets = extractBullets(sections.projects?.raw);
+    let expBullets  = extractBullets(sections.experience?.raw);
+    let projBullets = extractBullets(sections.projects?.raw);
+
+    // CRITICAL FALLBACK: extract from rawText if section-specific extraction is sparse
+    if (expBullets.length < 2 && raw.length > 200) {
+        const expMatch = raw.match(/(?:^|\n)\s*(?:experience|work\s+experience|professional\s+experience|employment)\b/i);
+        if (expMatch) {
+            const startIdx = expMatch.index! + expMatch[0].length;
+            const nextSection = raw.slice(startIdx).match(/\n\s*(?:projects?|education|skills?|technical\s+skills|certifications?|achievements?|summary|profile)\s*(?:\n|$)/i);
+            const expText = nextSection ? raw.slice(startIdx, startIdx + nextSection.index!) : raw.slice(startIdx, startIdx + 3000);
+            const rawExpBullets = extractBullets(expText);
+            if (rawExpBullets.length > expBullets.length) expBullets = rawExpBullets;
+        }
+    }
+
+    if (projBullets.length < 2 && raw.length > 200) {
+        const projMatch = raw.match(/(?:^|\n)\s*(?:projects?|personal\s+projects|key\s+projects)\b/i);
+        if (projMatch) {
+            const startIdx = projMatch.index! + projMatch[0].length;
+            const nextSection = raw.slice(startIdx).match(/\n\s*(?:experience|education|skills?|technical\s+skills|certifications?|achievements?|summary|profile)\s*(?:\n|$)/i);
+            const projText = nextSection ? raw.slice(startIdx, startIdx + nextSection.index!) : raw.slice(startIdx, startIdx + 3000);
+            const rawProjBullets = extractBullets(projText);
+            if (rawProjBullets.length > projBullets.length) projBullets = rawProjBullets;
+        }
+    }
+
     let allBullets  = [...expBullets, ...projBullets];
 
     // Fallback: if both empty, extract from rawText
@@ -87,7 +112,7 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P2. FULL ZERO QUANTIFICATION ────────────────────────
-    const anyStrongNum     = allBullets.some(b => STRONG_NUM.test(b));
+    const anyStrongNum     = allBullets.some(b => STRONG_NUM.test(b) || METRIC_CONTEXT.test(b));
     const anyNumber        = allBullets.some(b => ANY_NUM.test(b));
     const fullZeroTriggered = allBullets.length > 0 && !anyStrongNum && !anyNumber;
 
@@ -118,7 +143,7 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P4. VAGUE OUTCOMES WITHOUT NUMBERS ──────────────────
-    const vagueBullets = allBullets.filter(b => VAGUE_VERBS.test(b) && !ANY_NUM.test(b));
+    const vagueBullets = allBullets.filter(b => VAGUE_VERBS.test(b) && !ANY_NUM.test(b) && !METRIC_CONTEXT.test(b));
 
     results.push({
         id: 'vague_outcomes', priority: 2,
@@ -201,13 +226,14 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P8. MISSING GITHUB URL ──────────────────────────────
-    const hasGitHubUrl = /github\.com\/[a-zA-Z0-9_-]+/i.test(raw);
+    // Check for github in any form: URL, text, icon label, etc.
+    const hasGitHubUrl = /github/i.test(raw) || /gh\s*:/i.test(raw);
 
     results.push({
         id: 'no_github', priority: 2,
         triggered:  !hasGitHubUrl,
         deduction:  !hasGitHubUrl ? W.no_github : 0,
-        evidence:   !hasGitHubUrl ? 'No github.com/username URL found.' : '',
+        evidence:   !hasGitHubUrl ? 'No GitHub profile reference found.' : '',
         fix:        'Add your full GitHub URL to the contact header: github.com/yourusername.',
         scoreGain:  `+${W.no_github} pts`,
     });
@@ -295,6 +321,119 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
         evidence:   hasVagueAch ? 'Achievement uses "national/international" without naming the organiser' : '',
         fix:        'Name the org and scale: "Top 5 at IIT Bombay ML Hackathon on Unstop (2024, 800+ teams)"',
         scoreGain:  `+${W.vague_achievement} pts`,
+    });
+
+    // ── P14. SHORT BULLETS ──────────────────────────────────
+    const shortBullets = allBullets.filter(b => b.length < 30);
+    const shortBulletTriggered = shortBullets.length >= 3;
+
+    results.push({
+        id: 'short_bullets', priority: 2,
+        triggered:  shortBulletTriggered,
+        deduction:  shortBulletTriggered ? W.short_bullets : 0,
+        evidence:   shortBullets.slice(0, 2).map(b => `"${b}"`).join(', '),
+        fix:        'Expand short bullets with specific details: what you did, how, and the measurable result.',
+        scoreGain:  `+${W.short_bullets} pts`,
+    });
+
+    // ── P15. LONG BULLETS ───────────────────────────────────
+    const longBullets = allBullets.filter(b => b.length > 200);
+    const longBulletTriggered = longBullets.length >= 3;
+
+    results.push({
+        id: 'long_bullets', priority: 3,
+        triggered:  longBulletTriggered,
+        deduction:  longBulletTriggered ? W.long_bullets : 0,
+        evidence:   `${longBullets.length} bullets exceed 200 characters`,
+        fix:        'Break long bullets into 2 concise points. Each bullet should be 1 line (50-150 chars).',
+        scoreGain:  `+${W.long_bullets} pts`,
+    });
+
+    // ── P16. WEAK VERBS ─────────────────────────────────────
+    const WEAK_VERB_RE = /^(responsible\s+for|worked\s+on|helped|assisted|participated|involved\s+in|tasked\s+with|duties\s+included|was\s+part\s+of|contributed\s+to)\b/i;
+    const weakVerbBullets = allBullets.filter(b => WEAK_VERB_RE.test(b.trim()));
+    const weakVerbTriggered = weakVerbBullets.length >= 2;
+
+    results.push({
+        id: 'weak_verbs', priority: 2,
+        triggered:  weakVerbTriggered,
+        deduction:  weakVerbTriggered ? W.weak_verbs : 0,
+        evidence:   weakVerbBullets.slice(0, 2).map(b => `"${b.slice(0, 60)}..."`).join(', '),
+        fix:        'Replace "Responsible for X" with "Built/Designed/Implemented X, resulting in Y".',
+        scoreGain:  `+${W.weak_verbs} pts`,
+    });
+
+    // ── P17. NO LINKEDIN ────────────────────────────────────
+    const hasLinkedIn = /linkedin/i.test(raw);
+
+    results.push({
+        id: 'no_linkedin', priority: 3,
+        triggered:  !hasLinkedIn,
+        deduction:  !hasLinkedIn ? W.no_linkedin : 0,
+        evidence:   !hasLinkedIn ? 'No linkedin.com/in/ URL found.' : '',
+        fix:        'Add your LinkedIn profile URL to the contact header.',
+        scoreGain:  `+${W.no_linkedin} pts`,
+    });
+
+    // ── P18. REPETITIVE LANGUAGE ────────────────────────────
+    const firstVerbs: Record<string, number> = {};
+    allBullets.forEach(b => {
+        const firstWord = b.trim().replace(/^[•\-–—*▪►\s]+/, '').split(/\s+/)[0]?.toLowerCase();
+        if (firstWord && firstWord.length > 2) {
+            firstVerbs[firstWord] = (firstVerbs[firstWord] || 0) + 1;
+        }
+    });
+    const repeatedVerbs = Object.entries(firstVerbs).filter(([, n]) => n >= 4).map(([v, n]) => `"${v}" (${n}x)`);
+    const repetitiveTriggered = repeatedVerbs.length > 0;
+
+    results.push({
+        id: 'repetitive_language', priority: 2,
+        triggered:  repetitiveTriggered,
+        deduction:  repetitiveTriggered ? W.repetitive_language : 0,
+        evidence:   repeatedVerbs.join(', '),
+        fix:        'Vary your action verbs. Using the same verb 3+ times makes bullets feel repetitive.',
+        scoreGain:  `+${W.repetitive_language} pts`,
+    });
+
+    // ── P19. MISSING DATES ──────────────────────────────────
+    const expRaw = sections.experience?.raw ?? '';
+    const hasExpSection = expRaw.trim().length > 30;
+    const hasDateRange = /\b(19|20)\d{2}\b/.test(expRaw) || /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|present|current)\b/i.test(expRaw);
+    const missingDatesTriggered = hasExpSection && !hasDateRange;
+
+    results.push({
+        id: 'missing_dates', priority: 2,
+        triggered:  missingDatesTriggered,
+        deduction:  missingDatesTriggered ? W.missing_dates : 0,
+        evidence:   missingDatesTriggered ? 'Experience section has no date ranges.' : '',
+        fix:        'Add date ranges to every experience entry: "Jan 2023 – Present" or "2022 – 2024".',
+        scoreGain:  `+${W.missing_dates} pts`,
+    });
+
+    // ── P20. TOO FEW BULLETS ────────────────────────────────
+    const tooFewTriggered = hasExpSection && expBullets.length < 3 && expBullets.length > 0;
+
+    results.push({
+        id: 'too_few_bullets', priority: 1,
+        triggered:  tooFewTriggered,
+        deduction:  tooFewTriggered ? W.too_few_bullets : 0,
+        evidence:   tooFewTriggered ? `Only ${expBullets.length} experience bullet(s) found.` : '',
+        fix:        'Add 3-5 bullets per role describing your key contributions and measurable impact.',
+        scoreGain:  `+${W.too_few_bullets} pts`,
+    });
+
+    // ── P21. EXCESSIVE SKILLS ───────────────────────────────
+    const skillsRawText = sections.skills?.raw ?? '';
+    const skillTokens = skillsRawText.split(/[,|•\n]/).map(s => s.trim()).filter(s => s.length > 1);
+    const excessiveSkillsTriggered = skillTokens.length > 35;
+
+    results.push({
+        id: 'excessive_skills', priority: 3,
+        triggered:  excessiveSkillsTriggered,
+        deduction:  excessiveSkillsTriggered ? W.excessive_skills : 0,
+        evidence:   excessiveSkillsTriggered ? `${skillTokens.length} skills listed — too many.` : '',
+        fix:        'Trim to 15-20 most relevant skills. Long lists dilute your strongest skills.',
+        scoreGain:  `+${W.excessive_skills} pts`,
     });
 
     return results;

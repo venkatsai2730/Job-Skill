@@ -97,8 +97,24 @@ export function useChat() {
                 });
             } else if (token && !activeConversationId) {
                 // Create new conversation first
+                const COMMAND_LABELS: Record<string, string> = {
+                    "/jobs": "Job Search & Matches",
+                    "/score": "Resume Score Analysis",
+                    "/fix": "Resume Bullet Fixes",
+                    "/draft": "Full Resume Draft",
+                    "/rewrite summary": "Summary Rewrite",
+                    "/rewrite": "Resume Rewrite",
+                    "/cover": "Cover Letter",
+                    "/prep": "Interview Preparation",
+                    "/help": "Help & Commands",
+                };
+                let title = "New Chat";
+                if (typeof content === "string") {
+                    const cmd = content.trim().toLowerCase();
+                    title = COMMAND_LABELS[cmd] || content.substring(0, 60);
+                }
                 const convData = await api.post<{ conversation: Conversation }>("/api/chat/conversations", {
-                    title: typeof content === "string" ? content.substring(0, 60) : "New Chat",
+                    title,
                 });
                 const newConvId = convData.conversation?.id;
                 if (newConvId) {

@@ -30,6 +30,70 @@ const chatLimiter = rateLimit({
     message: { error: "Too many messages. Please wait a moment." },
 });
 
+// ── Extract role keywords for title relevance filtering ──────
+function extractRoleKeywords(role: string): string[] {
+    const lower = role.toLowerCase();
+    const keywords: string[] = [];
+    
+    // Map common role titles to search keywords
+    const ROLE_KEYWORD_MAP: Record<string, string[]> = {
+        "data scientist":       ["data", "scientist", "ml", "machine learning", "analytics", "ai"],
+        "data analyst":         ["data", "analyst", "analytics", "bi", "business intelligence"],
+        "machine learning":     ["ml", "machine learning", "ai", "deep learning", "data scientist"],
+        "software engineer":    ["software", "engineer", "developer", "sde", "swe"],
+        "frontend":             ["frontend", "front-end", "react", "angular", "vue", "ui"],
+        "backend":              ["backend", "back-end", "server", "api", "node", "python", "java"],
+        "full stack":           ["full stack", "fullstack", "full-stack", "software", "developer"],
+        "devops":               ["devops", "sre", "infrastructure", "cloud", "platform"],
+        "product manager":      ["product", "manager", "pm"],
+        "designer":             ["design", "ui", "ux", "product design"],
+        "android":              ["android", "mobile", "kotlin"],
+        "ios":                  ["ios", "swift", "mobile"],
+    };
+
+    for (const [roleKey, kws] of Object.entries(ROLE_KEYWORD_MAP)) {
+        if (lower.includes(roleKey)) {
+            keywords.push(...kws);
+            return [...new Set(keywords)];
+        }
+    }
+
+    // Fallback: split the role into individual words
+    const words = lower.split(/\s+/).filter(w => w.length > 2);
+    keywords.push(...words);
+    return [...new Set(keywords)];
+}
+
+// ── Format a single job card for chat display ───────────────
+function formatJobCard(j: any, index: number): string {
+    const salary = j.salary_min && j.salary_max
+        ? `₹${Math.round(j.salary_min / 100000)}-${Math.round(j.salary_max / 100000)} LPA`
+        : j.salary_min ? `₹${Math.round(j.salary_min / 100000)}+ LPA` : null;
+
+    // Clean skill names: remove parenthetical content and duplicates
+    const cleanSkill = (s: string) => s.replace(/\s*\([^)]*\)/g, '').trim();
+    const matchedSkills = [...new Set((j.matched_skills || []).map(cleanSkill))].filter(Boolean).slice(0, 4);
+    const skillGap = [...new Set((j.skill_gap || []).map(cleanSkill))].filter(Boolean).slice(0, 2);
+
+    let card = `### ${index}. ${j.title} at **${j.company}**\n`;
+    card += `📍 ${j.location || "Remote"}`;
+    if (salary) card += ` · 💰 ${salary}`;
+    card += `\n\n`;
+
+    if (matchedSkills.length > 0) {
+        card += `✅ Your skills match: ${matchedSkills.join(", ")}\n`;
+    }
+    if (skillGap.length > 0) {
+        card += `📌 Good to have: ${skillGap.join(", ")}\n`;
+    }
+
+    if (j.job_url) {
+        card += `\n🔗 **[Apply Now →](${j.job_url})**\n`;
+    }
+    card += `\n---\n\n`;
+    return card;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // POST /api/chat — Main AI chat (supports feature routing)
 // ═══════════════════════════════════════════════════════════════
@@ -154,7 +218,147 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
 
         // Get AI reply
         const aiFeature: AIFeature = feature || "chat";
-        const result = await getAIReply(messages, aiFeature);
+        
+        // ── INTERCEPT: /jobs command → fetch real jobs from DB with links ──
+        const userMsg = typeof content === "string" ? content.trim().toLowerCase() : "";
+        let result: any;
+        
+        if (userMsg === "/jobs" || userMsg.startsWith("/jobs ")) {
+            const searchQuery = userMsg.replace(/^\/jobs\s*/, "").trim();
+            try {
+                // Extract clean individual skills from user's resume
+                let userSkills: string[] = [];
+                if (ctx?.parsedData?.sections?.skills) {
+                    const skillGroups = ctx.parsedData.sections.skills as any[];
+                    userSkills = skillGroups.flatMap((g: any) => (g.items || []))
+                        .map((s: string) => s.replace(/\s*\([^)]*\)/g, '').trim()) // Remove parenthetical: "Python (pandas)" → "Python"
+                        .filter((s: string) => s.length > 0 && s.length < 40);
+                }
+                if (userSkills.length === 0 && userProfile?.skills) {
+                    userSkills = (userProfile.skills as string[])
+                        .map((s: string) => s.replace(/\s*\([^)]*\)/g, '').trim())
+                        .filter((s: string) => s.length > 0);
+                }
+
+                // Determine user's role and location from resume/profile
+                // The experience parser sometimes puts company name in title field,
+                // so we need to be smart about extracting the actual job role.
+                let userRole = searchQuery;
+                
+                if (!userRole) {
+                    // Try to find a real job title from experience entries
+                    const expEntries = ctx?.parsedData?.sections?.experience || [];
+                    for (const exp of expEntries) {
+                        const title = (exp.title || "").trim();
+                        const company = (exp.company || "").trim();
+                        // A real job title contains role keywords, a company name doesn't
+                        const ROLE_WORDS = /\b(engineer|developer|scientist|analyst|designer|manager|lead|architect|consultant|intern|associate|senior|junior|trainee|specialist|coordinator|administrator|devops|sre|qa|tester)\b/i;
+                        if (ROLE_WORDS.test(title)) {
+                            userRole = title;
+                            break;
+                        }
+                        // Check if company field has the role (parser sometimes swaps them)
+                        if (ROLE_WORDS.test(company)) {
+                            userRole = company;
+                            break;
+                        }
+                    }
+                    
+                    // Fallback: try user profile
+                    if (!userRole) {
+                        userRole = userProfile?.current_role || "";
+                    }
+                    
+                    // Last resort: infer from skills
+                    if (!userRole && userSkills.length > 0) {
+                        const skillsLower = userSkills.map(s => s.toLowerCase());
+                        if (skillsLower.some(s => ["tensorflow", "pytorch", "machine learning", "deep learning", "ml", "nlp"].includes(s))) {
+                            userRole = "machine learning engineer";
+                        } else if (skillsLower.some(s => ["react", "angular", "vue", "frontend"].includes(s))) {
+                            userRole = "frontend developer";
+                        } else if (skillsLower.some(s => ["node", "express", "django", "flask", "fastapi"].includes(s))) {
+                            userRole = "backend developer";
+                        } else if (skillsLower.some(s => ["python", "sql", "pandas", "data"].includes(s))) {
+                            userRole = "data scientist";
+                        } else {
+                            userRole = "software engineer";
+                        }
+                    }
+                }
+                
+                const userLocation = userProfile?.preferred_locations?.[0] || "";
+
+                // Search with role-specific query and user's location
+                const jobResult = await (await import("../services/jobFetcher.js")).searchJobs({
+                    query: userRole || "data scientist",
+                    location: userLocation,
+                    limit: 100,
+                    page: 1,
+                    user_skills: userSkills,
+                    user_experience_years: userProfile?.experience_years || 0,
+                });
+
+                let rankedJobs = jobResult.data || [];
+                
+                if (rankedJobs.length > 0) {
+                    try {
+                        const { rankJobsForUser } = await import("../services/jobRankingService.js");
+                        rankedJobs = await rankJobsForUser(req.user!.userId, rankedJobs, 100);
+                    } catch { /* use unranked */ }
+                }
+
+                // Filter: only recommend jobs that are actually relevant
+                // 1. Match score >= 50 (strong skill overlap)
+                // 2. Title must be somewhat related to user's field
+                const roleKeywords = extractRoleKeywords(userRole || "software");
+                const recommended = rankedJobs
+                    .filter((j: any) => {
+                        const score = j.match_score || 0;
+                        if (score < 50) return false;
+                        // Title relevance check: at least one role keyword must appear in job title
+                        const titleLower = (j.title || "").toLowerCase();
+                        const hasRelevantTitle = roleKeywords.length === 0 || roleKeywords.some(kw => titleLower.includes(kw));
+                        return hasRelevantTitle;
+                    })
+                    .slice(0, 10);
+
+                if (recommended.length === 0 && rankedJobs.length > 0) {
+                    // Fallback: show top 5 by match score with a note
+                    const topJobs = rankedJobs
+                        .filter((j: any) => (j.match_score || 0) >= 30)
+                        .slice(0, 5);
+                    
+                    if (topJobs.length === 0) {
+                        result = { reply: `I couldn't find strong matches for your profile right now. New jobs are synced every 2 hours. Try searching for a specific role:\n- \`/jobs data scientist\`\n- \`/jobs machine learning engineer\`\n- \`/jobs python developer\``, provider: "system", model: "internal" };
+                    } else {
+                        let reply = `## Recommended Jobs\n\n`;
+                        reply += `Here are the closest matches I found. Your resume could be stronger for some of these — type \`/score\` to see what to improve.\n\n`;
+                        for (let i = 0; i < topJobs.length; i++) {
+                            reply += formatJobCard(topJobs[i], i + 1);
+                        }
+                        result = { reply, provider: "system+db", model: "job_ranking" };
+                    }
+                } else if (recommended.length === 0) {
+                    result = { reply: `No matching jobs found for your profile right now. New jobs sync every 2 hours — check back soon, or try a specific role like \`/jobs data scientist\`.`, provider: "system", model: "internal" };
+                } else {
+                    const userName = ctx?.resumeText?.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/)?.[1] || "";
+                    let reply = `## Recommended Jobs${userName ? ` for ${userName}` : ""}\n\n`;
+                    reply += `Based on your skills and experience, these are the best roles for you right now:\n\n`;
+
+                    for (let i = 0; i < recommended.length; i++) {
+                        reply += formatJobCard(recommended[i], i + 1);
+                    }
+
+                    reply += `\n💡 **Next step:** Click a link to apply, or type \`/cover [company name]\` to generate a tailored cover letter.`;
+                    result = { reply, provider: "system+db", model: "job_ranking" };
+                }
+            } catch (jobErr: any) {
+                console.warn("[Chat] Job search failed:", jobErr.message);
+                result = await getAIReply(messages, aiFeature);
+            }
+        } else {
+            result = await getAIReply(messages, aiFeature);
+        }
 
         // Save AI reply
         await addMessage({
@@ -167,9 +371,31 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
             tokens: result.tokens,
         });
 
-        // Auto-title if first message
+        // Auto-title: generate a meaningful title like ChatGPT does
         if (history.length <= 1) {
-            const title = generateTitle(typeof content === "string" ? content : "New Chat");
+            let title: string;
+            const msgText = typeof content === "string" ? content : "New Chat";
+            
+            // First try the command mapping for instant titles
+            title = generateTitle(msgText);
+            
+            // If it's not a slash command and we have an AI reply, generate a smarter title
+            if (!msgText.startsWith("/") && result.reply && result.reply.length > 20) {
+                try {
+                    const { getAIReply: getTitleReply } = await import("../services/chatService.js");
+                    const titleResult = await getTitleReply([
+                        { role: "system", content: "Generate a short 3-6 word title for this conversation. Return ONLY the title text, nothing else. No quotes, no punctuation at the end." },
+                        { role: "user", content: `User asked: "${msgText.substring(0, 200)}"\nAssistant replied about: "${result.reply.substring(0, 300)}"` },
+                    ], "chat");
+                    const aiTitle = (titleResult.reply || "").trim().replace(/^["']|["']$/g, "").substring(0, 50);
+                    if (aiTitle && aiTitle.length > 3 && aiTitle.length < 50) {
+                        title = aiTitle;
+                    }
+                } catch {
+                    // Fall back to generateTitle
+                }
+            }
+            
             await renameConversation(conversationId as any as string, req.user!.userId, title);
         }
 

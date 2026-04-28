@@ -33,11 +33,36 @@ function formatMarkdown(text: string) {
     return text
         .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre class="bg-gray-50 border border-gray-200 rounded-lg p-3 my-2 overflow-x-auto text-sm font-mono text-blue-700 shadow-inner"><code>$2</code></pre>')
         .replace(/`([^`]+)`/g, '<code class="bg-blue-50 px-1.5 py-0.5 rounded text-blue-700 border border-blue-100 text-sm font-mono">$1</code>')
+        // Links: [text](url) → clickable styled link
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-blue-600 font-semibold hover:text-blue-700 underline decoration-blue-300 underline-offset-2 transition-colors">$1 ↗</a>')
+        // Bold
         .replace(/\*\*(.*?)\*\*/g, "<strong class='text-gray-900'>$1</strong>")
+        // Headers
         .replace(/^### (.+)$/gm, "<h3 class='text-gray-900 font-semibold text-base mt-3 mb-1'>$1</h3>")
         .replace(/^## (.+)$/gm, "<h2 class='text-gray-900 font-semibold text-lg mt-4 mb-1'>$1</h2>")
+        // Horizontal rule
+        .replace(/^---$/gm, "<hr class='my-3 border-gray-200' />")
+        // Tables
+        .replace(/\|(.+)\|\n\|[-| ]+\|\n((?:\|.+\|\n?)*)/g, (_match, header, body) => {
+            const headers = header.split('|').map((h: string) => h.trim()).filter(Boolean);
+            const rows = body.trim().split('\n').map((row: string) => 
+                row.split('|').map((c: string) => c.trim()).filter(Boolean)
+            );
+            let table = '<table class="w-full text-sm my-2 border-collapse"><thead><tr>';
+            headers.forEach((h: string) => { table += `<th class="text-left py-1 px-2 border-b border-gray-200 text-gray-600 font-medium">${h}</th>`; });
+            table += '</tr></thead><tbody>';
+            rows.forEach((row: string[]) => {
+                table += '<tr>';
+                row.forEach((c: string) => { table += `<td class="py-1 px-2 border-b border-gray-100">${c}</td>`; });
+                table += '</tr>';
+            });
+            table += '</tbody></table>';
+            return table;
+        })
+        // Lists
         .replace(/^[•\-] (.+)$/gm, "<li class='ml-4'>$1</li>")
         .replace(/^\d+\.\s(.+)$/gm, "<li class='ml-4 list-decimal'>$1</li>")
+        // Paragraphs
         .replace(/\n\n/g, "</p><p class='mt-2'>")
         .replace(/\n/g, "<br/>");
 }

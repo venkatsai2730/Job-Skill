@@ -11,7 +11,7 @@ import notificationRoutes from "./routes/notifications.js";
 import linkedinRoutes from "./routes/linkedin.js";
 import geocodeRoutes from "./routes/geocode.js";
 import chatbotRoutes from "./routes/chatbot.js";
-import { fetchAtsJobs, fetchRssJobs, fetchScraperJobs, fetchJSearchCronJobs, autoExpireJobs, verifyTopJobs } from "./services/jobFetcher.js";
+import { fetchAtsJobs, autoExpireJobs, verifyTopJobs } from "./services/jobFetcher.js";
 import { startMCPJobCron } from "./mcp/jobSyncCron.js";
 
 const app = express();
@@ -42,39 +42,38 @@ app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// ── Job Fetch Cron (Staggered Intervals) ────────────────────
-const ATS_INTERVAL = 5 * 60 * 1000;        // 5 minutes
-const RSS_INTERVAL = 15 * 60 * 1000;       // 15 minutes
-const SCRAPER_INTERVAL = 30 * 60 * 1000;   // 30 minutes
-const JSEARCH_INTERVAL = 10 * 60 * 1000;   // 10 minutes
+// ═══════════════════════════════════════════════════════════════
+// JOB FETCHING ARCHITECTURE
+//
+// PRIMARY: MCP-based scraping (zero API keys, zero rate limits)
+//   → LinkedIn, Indeed, Naukri, RemoteOK, Remotive, Arbeitnow,
+//     Internshala, SimplyHired, Glassdoor, Google Jobs
+//   → Runs every 2 hours with 60+ queries
+//
+// SECONDARY: ATS board APIs (free, no rate limits)
+//   → Greenhouse, Lever, Ashby (public company job board APIs)
+//   → Runs every 15 minutes
+//
+// REMOVED: JSearch (RapidAPI — rate limited, paid)
+// REMOVED: RSS feeds (unreliable, low volume)
+// REMOVED: Legacy scrapers (replaced by MCP scrapers)
+// ═══════════════════════════════════════════════════════════════
+
+const ATS_INTERVAL = 15 * 60 * 1000;       // 15 minutes (free APIs, no limits)
 const EXPIRY_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 const VERIFY_INTERVAL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-function startJobFetchCron() {
-    // Initial fetch after a short delay to let server start
+function startATSBoardCron() {
+    // ATS boards (Greenhouse, Lever, Ashby) — free public APIs
+    // These are reliable and don't need API keys
     setTimeout(() => {
         fetchAtsJobs().catch(err => console.warn("[Cron] Initial ATS fetch failed:", err.message));
-        fetchRssJobs().catch(err => console.warn("[Cron] Initial RSS fetch failed:", err.message));
-        setTimeout(() => fetchScraperJobs().catch(e => console.warn("[Cron] Scraper failed", e.message)), 10000);
-        setTimeout(() => fetchJSearchCronJobs().catch(e => console.warn("[Cron] JSearch cron failed", e.message)), 20000);
         autoExpireJobs().catch(e => console.warn("[Cron] Expiry failed", e.message));
-    }, 30000);
+    }, 45000); // Start after MCP initial sync
 
     setInterval(() => {
         fetchAtsJobs().catch(err => console.warn("[Cron] ATS fetch failed:", err.message));
     }, ATS_INTERVAL);
-
-    setInterval(() => {
-        fetchRssJobs().catch(err => console.warn("[Cron] RSS fetch failed:", err.message));
-    }, RSS_INTERVAL);
-
-    setInterval(() => {
-        fetchScraperJobs().catch(err => console.warn("[Cron] Scraper fetch failed:", err.message));
-    }, SCRAPER_INTERVAL);
-
-    setInterval(() => {
-        fetchJSearchCronJobs().catch(err => console.warn("[Cron] JSearch cron failed:", err.message));
-    }, JSEARCH_INTERVAL);
 
     setInterval(() => {
         autoExpireJobs().catch(err => console.warn("[Cron] Expiry failed:", err.message));
@@ -84,11 +83,12 @@ function startJobFetchCron() {
         verifyTopJobs().catch(err => console.warn("[Cron] Verification failed:", err.message));
     }, VERIFY_INTERVAL);
 
-    console.log(`⏰ Cron started: ATS (5m), RSS (15m), Scraper (30m), JSearch (10m), Expiry (24h), Verify (7d)`);
+    console.log(`⏰ ATS Board cron started: Greenhouse/Lever/Ashby (15m), Expiry (24h), Verify (7d)`);
 }
 
-startJobFetchCron();
-startMCPJobCron(); // v2.0: MCP-based job sync (runs alongside legacy crons)
+// Start both engines
+startMCPJobCron();     // PRIMARY: MCP scraping (2h cycle, 10 sources)
+startATSBoardCron();   // SECONDARY: ATS boards (15m cycle, free APIs)
 
 // Global Error Handling Middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

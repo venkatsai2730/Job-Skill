@@ -99,7 +99,40 @@ export async function getConversationMessages(conversationId: string, limit = 10
 }
 
 // Auto-generate title from first user message
+// Maps slash commands to readable titles, and truncates regular messages
 export function generateTitle(firstMessage: string): string {
-    const clean = typeof firstMessage === "string" ? firstMessage : "New Chat";
+    const clean = typeof firstMessage === "string" ? firstMessage.trim() : "New Chat";
+    if (!clean) return "New Chat";
+
+    // Map slash commands to meaningful titles
+    const COMMAND_TITLES: Record<string, string> = {
+        "/jobs":             "Job Search & Matches",
+        "/score":            "Resume Score Analysis",
+        "/fix":              "Resume Bullet Fixes",
+        "/draft":            "Full Resume Draft",
+        "/rewrite summary":  "Summary Rewrite",
+        "/rewrite":          "Resume Rewrite",
+        "/cover":            "Cover Letter",
+        "/prep":             "Interview Preparation",
+        "/help":             "Help & Commands",
+        "/match":            "Job Match Analysis",
+        "/linkedin":         "LinkedIn Optimization",
+        "/skills":           "Skills Analysis",
+    };
+
+    // Check if the message starts with a slash command
+    const lowerClean = clean.toLowerCase();
+    for (const [cmd, title] of Object.entries(COMMAND_TITLES)) {
+        if (lowerClean === cmd || lowerClean.startsWith(cmd + " ")) {
+            // If there's text after the command, append it
+            const rest = clean.substring(cmd.length).trim();
+            if (rest && rest.length > 3) {
+                return `${title}: ${rest.substring(0, 40)}`;
+            }
+            return title;
+        }
+    }
+
+    // For regular messages, use first 60 chars
     return clean.substring(0, 60).replace(/\n/g, " ").trim() || "New Chat";
 }

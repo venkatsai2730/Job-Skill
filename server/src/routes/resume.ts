@@ -60,6 +60,8 @@ const SECTION_PATTERNS: Record<string, RegExp> = {
     education: /^(education|academic|academics|qualifications)/i,
     skills: /^(skills|technical\s+skills|core\s+competencies|competencies|technologies|tech\s+stack)/i,
     projects: /^(projects|personal\s+projects|key\s+projects|notable\s+projects|academic\s+projects)/i,
+    certifications: /^(certifications?|certificates?|professional\s+certifications?|licenses?\s*(?:&|and)?\s*certifications?)/i,
+    achievements: /^(achievements?|awards?|honors?|accomplishments?|awards?\s*(?:&|and)?\s*achievements?)/i,
 };
 
 function detectSectionBoundaries(lines: string[]): { section: string; startIdx: number }[] {
@@ -100,12 +102,24 @@ function parseExperience(textLines: string[]): ExperienceEntry[] {
             const rest = line.replace(datePart, "").replace(/[|·•,]/g, " ").trim();
             // Try to split title / company — look for common separators
             const parts = rest.split(/\s+(?:at|@|[-–—|,])\s+/i).map((s) => s.trim()).filter(Boolean);
-            current = {
-                title: parts[0] || rest || "Role",
-                company: parts[1] || "",
-                dates: datePart,
-                bullets: [],
-            };
+            
+            // Detect if parts[0] is a company name vs a job title
+            // Common resume format: "Company Name    Oct 2025 - Present"
+            // followed by "Associate Data Scientist" on the next line
+            const ROLE_KW = /\b(engineer|developer|scientist|analyst|designer|manager|lead|architect|consultant|intern|associate|senior|junior|trainee|specialist|coordinator|devops|sre|qa|tester|director|vp|head)\b/i;
+            let title = parts[0] || rest || "Role";
+            let company = parts[1] || "";
+            
+            if (!ROLE_KW.test(title) && title.length < 40) {
+                // Likely a company name, not a role — swap and leave title empty for next line
+                company = title;
+                title = "";
+            }
+            
+            current = { title, company, dates: datePart, bullets: [] };
+        } else if (current && current.title === "" && !isBullet && line.length > 3 && line.length < 60 && !dateMatch) {
+            // This line is the job title following a company+date line
+            current.title = line.replace(/^[•\-–*▪◦◆➤❖►\d.)]+\s*/, "").trim();
         } else if (current && (isBullet || (line.length > 20 && !dateMatch))) {
             const clean = line.replace(/^[•\-–*▪◦◆➤❖►\d.)]+\s*/, "").trim();
             if (clean) current.bullets.push(clean);
@@ -281,6 +295,14 @@ export function parseSections(rawText: string): ParsedSections {
                 break;
             case "projects":
                 result.projects = parseProjects(sectionLines);
+                break;
+            case "certifications":
+                // Certifications are recognized but not stored in ParsedSections
+                // This prevents them from bleeding into skills/projects
+                break;
+            case "achievements":
+                // Achievements are recognized but extracted from rawText by the scorer
+                // This prevents them from bleeding into other sections
                 break;
         }
     }

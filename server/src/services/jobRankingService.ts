@@ -128,9 +128,16 @@ export async function rankJobsForUser(
         if (resume?.parsed_data) {
             const pd = resume.parsed_data as any;
 
-            // Extract skills from parsed sections
+            // Extract skills from parsed sections — split parenthetical groups into individual skills
             const skillGroups = pd?.sections?.skills || [];
-            userSkills = skillGroups.flatMap((g: any) => g.items || []);
+            const rawSkills = skillGroups.flatMap((g: any) => g.items || []);
+            // "Python (pandas, NumPy, scikit-learn)" → ["Python", "pandas", "NumPy", "scikit-learn"]
+            userSkills = rawSkills.flatMap((s: string) => {
+                const base = s.replace(/\s*\([^)]*\)/g, '').trim();
+                const parenMatch = s.match(/\(([^)]+)\)/);
+                const parenItems = parenMatch ? parenMatch[1].split(/[,;]/).map(i => i.trim()).filter(Boolean) : [];
+                return [base, ...parenItems].filter(i => i.length > 0);
+            });
 
             // Extract project text
             const projects = pd?.sections?.projects || [];
@@ -291,7 +298,14 @@ export async function getUserSkillsForMatching(userId: string): Promise<string[]
         if (resume?.parsed_data) {
             const pd = resume.parsed_data as any;
             const skillGroups = pd?.sections?.skills || [];
-            return skillGroups.flatMap((g: any) => g.items || []);
+            const rawSkills = skillGroups.flatMap((g: any) => g.items || []);
+            // Split "Python (pandas, NumPy)" → ["Python", "pandas", "NumPy"]
+            return rawSkills.flatMap((s: string) => {
+                const base = s.replace(/\s*\([^)]*\)/g, '').trim();
+                const parenMatch = s.match(/\(([^)]+)\)/);
+                const parenItems = parenMatch ? parenMatch[1].split(/[,;]/).map((i: string) => i.trim()).filter(Boolean) : [];
+                return [base, ...parenItems].filter((i: string) => i.length > 0);
+            });
         }
     } catch { /* ignore */ }
     return [];
