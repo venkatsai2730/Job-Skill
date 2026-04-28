@@ -43,7 +43,7 @@ const DashboardLayout = () => {
   return (
     <div className="min-h-screen app-bg flex flex-col">
       {/* TOP NAVBAR */}
-      <header className="sticky top-0 z-50 glass border-b border-border h-16 shrink-0">
+      <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm h-16 shrink-0">
         <div className="w-full px-6 lg:px-10 h-full">
           <div className="flex items-center justify-between h-full">
             <Link to="/" className="flex items-center gap-2.5 shrink-0">

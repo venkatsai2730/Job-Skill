@@ -13,6 +13,12 @@ import { api } from "../lib/api";
 import { toast } from "sonner";
 
 // ── Types ──────────────────────────────────────────────
+interface AgentStepUI {
+    tool: string;
+    thought: string;
+    reflection?: string;
+}
+
 interface ChatMessage {
     id: string;
     role: "user" | "bot";
@@ -21,6 +27,9 @@ interface ChatMessage {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     data?: any;
     timestamp?: number;
+    toolsUsed?: string[];
+    steps?: AgentStepUI[];
+    intent?: string;
 }
 
 interface ChatbotResponse {
@@ -170,18 +179,72 @@ function ScoreRing({ score, size = 72 }: { score: number; size?: number }) {
     );
 }
 
-// ── Typing Indicator (3-dot pulse) ───────────────────────
-function TypingDots() {
+// ── Typing/Thinking Indicator ────────────────────────────
+function TypingDots({ thinkingText }: { thinkingText?: string }) {
     return (
-        <div className="flex items-center gap-1 px-4 py-3">
-            {[0, 1, 2].map(i => (
-                <motion.span
-                    key={i}
-                    className="w-2 h-2 rounded-full bg-blue-500"
-                    animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1, 0.85] }}
-                    transition={{ duration: 1.0, repeat: Infinity, delay: i * 0.15 }}
-                />
-            ))}
+        <div className="flex items-center gap-2 px-4 py-3">
+            <div className="flex items-center gap-1">
+                {[0, 1, 2].map(i => (
+                    <motion.span
+                        key={i}
+                        className="w-2 h-2 rounded-full bg-blue-500"
+                        animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1, 0.85] }}
+                        transition={{ duration: 1.0, repeat: Infinity, delay: i * 0.15 }}
+                    />
+                ))}
+            </div>
+            {thinkingText && (
+                <span className="text-[11px] text-blue-500 font-medium animate-pulse">
+                    {thinkingText}
+                </span>
+            )}
+        </div>
+    );
+}
+
+// ── Tool Badge (for tools used) ──────────────────────────
+const TOOL_LABELS: Record<string, string> = {
+    get_resume_score: "📊 Resume Score",
+    fix_resume_bullet: "✏️ Bullet Fix",
+    get_resume_keywords: "🔑 Keywords",
+    get_skill_gap: "📋 Skill Gap",
+    rewrite_resume_section: "✍️ Rewrite",
+    search_jobs: "🔍 Job Search",
+    get_top_matched_jobs: "⭐ Top Matches",
+    explain_job_match: "🎯 Match Explain",
+    generate_cover_letter: "✉️ Cover Letter",
+    generate_interview_questions: "❓ Questions",
+    evaluate_interview_answer: "📝 Evaluate",
+    mock_interview: "🎤 Mock Interview",
+    generate_roadmap: "🗺️ Roadmap",
+    optimize_linkedin: "🔗 LinkedIn",
+    get_salary_insights: "💰 Salary",
+    recall_user_preference: "🧠 Memory",
+    save_user_preference: "💾 Save",
+};
+
+function ToolsBadge({ tools }: { tools: string[] }) {
+    const [expanded, setExpanded] = useState(false);
+    if (!tools || tools.length === 0) return null;
+    return (
+        <div className="mt-1.5">
+            <button
+                onClick={() => setExpanded(!expanded)}
+                className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-blue-500 transition-colors"
+            >
+                <Zap className="w-3 h-3" />
+                {tools.length} tool{tools.length > 1 ? 's' : ''} used
+                <ChevronRight className={`w-3 h-3 transition-transform ${expanded ? 'rotate-90' : ''}`} />
+            </button>
+            {expanded && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                    {tools.map((t, i) => (
+                        <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] bg-blue-50 text-blue-600 border border-blue-100">
+                            {TOOL_LABELS[t] || t}
+                        </span>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }
@@ -255,6 +318,9 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
         setInput("");
     };
 
+    // ── Thinking state ───────────────────────────────────
+    const [thinkingText, setThinkingText] = useState<string | undefined>(undefined);
+
     // ── Handlers ─────────────────────────────────────────
     const handleSend = async (text: string = input, autoCmd?: string) => {
         if (!text.trim() && !autoCmd) return;
@@ -270,32 +336,102 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
         setMessages(prev => [...prev, { id: userMsgId, role: "user", content: displayText, timestamp: Date.now() }]);
         setInput("");
         setLoading(true);
+        setThinkingText("Analyzing your request...");
 
         try {
             const explicitCommand = autoCmd ? autoCmd.replace("/", "") : undefined;
+            const token = localStorage.getItem("auth_token");
+            const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const res: any = await api.post("/api/chatbot/resume-chatbot", {
-                message: messageText,
-                command: explicitCommand,
-                payload: {
-                    jobDescription: jobDescription || undefined,
-                }
+            // Try SSE streaming first
+            const sseResponse = await fetch(`${API_URL}/api/chatbot/resume-chatbot`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                    ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({
+                    message: messageText,
+                    command: explicitCommand,
+                    useAgent: true,
+                    payload: { jobDescription: jobDescription || undefined },
+                }),
             });
 
-            // The API returns { type, command, message, data } at the top level
-            const botMessage = res.message || res.data?.message || "Here is what I found:";
-            const botCommand = res.command || res.data?.command;
-            const botData = res.data;
+            const contentType = sseResponse.headers.get("content-type") || "";
 
-            setMessages(prev => [...prev, {
-                id: (Date.now() + 1).toString(),
-                role: "bot",
-                content: botMessage,
-                command: botCommand,
-                data: botData,
-                timestamp: Date.now(),
-            }]);
+            if (contentType.includes("text/event-stream") && sseResponse.body) {
+                // ── SSE Path: Stream agent events ─────────────────
+                const reader = sseResponse.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+                let finalMessage = "";
+                let toolsUsed: string[] = [];
+                let steps: AgentStepUI[] = [];
+                let intent = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop() || "";
+
+                    for (const line of lines) {
+                        if (!line.startsWith("data: ")) continue;
+                        try {
+                            const event = JSON.parse(line.slice(6));
+                            if (event.type === "thinking") {
+                                setThinkingText(event.message || "Thinking...");
+                            } else if (event.type === "steps") {
+                                steps = event.steps || [];
+                                const toolNames = steps.map((s: AgentStepUI) => s.tool).filter(Boolean);
+                                if (toolNames.length > 0) {
+                                    setThinkingText(`Using ${TOOL_LABELS[toolNames[toolNames.length - 1]] || toolNames[toolNames.length - 1]}...`);
+                                }
+                            } else if (event.type === "message") {
+                                finalMessage = event.content || "";
+                                toolsUsed = event.toolsUsed || [];
+                                intent = event.intent || "";
+                            } else if (event.type === "done") {
+                                break;
+                            }
+                        } catch { /* skip parse errors */ }
+                    }
+                }
+
+                setMessages(prev => [...prev, {
+                    id: (Date.now() + 1).toString(),
+                    role: "bot",
+                    content: finalMessage || "I processed your request.",
+                    command: intent,
+                    toolsUsed,
+                    steps,
+                    intent,
+                    data: { reply: finalMessage, toolsUsed, intent },
+                    timestamp: Date.now(),
+                }]);
+            } else {
+                // ── JSON fallback path ────────────────────────────
+                const res = await sseResponse.json();
+                const botMessage = res.message || res.data?.message || "Here is what I found:";
+                const botCommand = res.command || res.data?.command;
+                const botData = res.data;
+
+                setMessages(prev => [...prev, {
+                    id: (Date.now() + 1).toString(),
+                    role: "bot",
+                    content: botMessage,
+                    command: botCommand,
+                    data: botData,
+                    toolsUsed: botData?.toolsUsed || [],
+                    steps: botData?.steps || [],
+                    intent: botData?.intent || botCommand,
+                    timestamp: Date.now(),
+                }]);
+            }
 
         } catch (err: unknown) {
             console.error("Chatbot API Error:", err);
@@ -312,6 +448,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
             toast.error("Chatbot failed to respond.");
         } finally {
             setLoading(false);
+            setThinkingText(undefined);
         }
     };
 
@@ -665,6 +802,9 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
                                                 <>
                                                     <MarkdownContent content={msg.content} />
                                                     {renderComplexData(msg)}
+                                                    {msg.toolsUsed && msg.toolsUsed.length > 0 && (
+                                                        <ToolsBadge tools={msg.toolsUsed} />
+                                                    )}
                                                 </>
                                             )}
                                         </div>
@@ -684,7 +824,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
                                         className="flex items-start"
                                     >
                                         <div className="rounded-2xl rounded-bl-md bg-white/60 backdrop-blur-sm border border-gray-200/50 shadow-sm">
-                                            <TypingDots />
+                                            <TypingDots thinkingText={thinkingText} />
                                         </div>
                                     </motion.div>
                                 )}

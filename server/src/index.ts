@@ -12,6 +12,7 @@ import linkedinRoutes from "./routes/linkedin.js";
 import geocodeRoutes from "./routes/geocode.js";
 import chatbotRoutes from "./routes/chatbot.js";
 import { fetchAtsJobs, fetchRssJobs, fetchScraperJobs, fetchJSearchCronJobs, autoExpireJobs, verifyTopJobs } from "./services/jobFetcher.js";
+import { startMCPJobCron } from "./mcp/jobSyncCron.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -87,6 +88,7 @@ function startJobFetchCron() {
 }
 
 startJobFetchCron();
+startMCPJobCron(); // v2.0: MCP-based job sync (runs alongside legacy crons)
 
 // Global Error Handling Middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

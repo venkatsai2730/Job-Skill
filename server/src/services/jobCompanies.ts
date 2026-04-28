@@ -116,9 +116,11 @@ export const JSEARCH_CRON_QUERIES = [
     // Fresher/Entry level India
     { query: "junior developer", location: "India" },
     { query: "fresher engineer", location: "India" },
-    { query: "associate engineer", location: "India" },
+    { query: "graduate engineer trainee", location: "India" },
+    { query: "software engineer intern", location: "India" },
+    { query: "associate software engineer", location: "India" },
     { query: "trainee developer", location: "India" },
-    { query: "0-2 years experience developer", location: "India" },
+    { query: "0-1 years experience developer", location: "India" },
 
     // Tech role queries
     { query: "react developer", location: "India" },

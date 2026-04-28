@@ -8,6 +8,10 @@
         "start": "node dist/index.js"
     },
     "dependencies": {
+        "@langchain/core": "^1.1.41",
+        "@langchain/langgraph": "^1.2.9",
+        "@langfuse/client": "^5.2.0",
+        "@qdrant/js-client-rest": "^1.17.0",
         "@supabase/supabase-js": "^2.97.0",
         "@types/cheerio": "^0.22.35",
         "bcryptjs": "^2.4.3",

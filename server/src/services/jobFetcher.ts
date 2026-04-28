@@ -143,7 +143,29 @@ export async function searchJSearchLive(query: string, location: string, limit =
     const cacheKey = `${(query || "").toLowerCase().trim()}|${(location || "").toLowerCase().trim()}`;
     const cached = jsearchCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < JSEARCH_CACHE_TTL) return cached.data.slice(0, limit);
-    const jobs = await fetchJSearchJobs(query || "software", location || "Remote", 1, 1);
+    let jobs = await fetchJSearchJobs(query || "software", location || "Remote", 1, 1);
+    
+    // Fallback if JSearch rate limited or missing key
+    if (jobs.length === 0) {
+        try {
+            console.log(`[JobFetcher] Falling back to MCP scrapers for live search`);
+            const { callMCPTool } = await import("../mcp/mcpClient.js");
+            const mcpJobs = await callMCPTool("builtin_scraper", "search_jobs", { query, location, limit });
+            jobs = mcpJobs.map(j => ({
+                title: j.title,
+                company: j.company,
+                location: j.location,
+                job_url: j.job_url,
+                source: "mcp",
+                posted_at: j.posted_at || new Date().toISOString(),
+                description: j.description || "",
+                category: j.category || detectCategory(j.title)
+            }));
+        } catch (err) {
+            console.warn("[JobFetcher] MCP Fallback failed", err);
+        }
+    }
+
     jsearchCache.set(cacheKey, { timestamp: Date.now(), data: jobs });
     return jobs.slice(0, limit);
 }
@@ -213,6 +235,7 @@ async function fetchNaukriRssJobs(): Promise<RawJob[]> {
                         location: "India",
                         job_url: item.link || "",
                         source: "rss" as const,
+                        category: feedUrl.includes("fresher") ? "Internships & Fresher" : undefined,
                         posted_at: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
                         description: (item.description || "").replace(/<[^>]*>/g, " ").substring(0, 15000),
                     };
@@ -287,10 +310,18 @@ export function extractExperience(text: string): { min: number | null; max: numb
     return { min: null, max: null };
 }
 
-function detectCategory(title: string, category?: string): string {
+export function detectCategory(title: string, category?: string): string {
     if (category) return category;
     const t = title.toLowerCase();
-    if (t.includes("intern") || t.includes("fresher") || t.includes("trainee")) return "Internships & Fresher";
+    
+    // Strict blocklist: Do not categorize as fresher if it contains senior keywords
+    const seniorKw = ["senior", "sr ", "sr.", "lead", "staff", "principal", "architect", "manager", "director", "vp", "head", "expert", "general management", "vp "];
+    const isSenior = seniorKw.some(kw => t.includes(kw));
+
+    if (!isSenior && (t.includes("intern") || t.includes("fresher") || t.includes("trainee") || t.includes("0-1"))) {
+        return "Internships & Fresher";
+    }
+    
     if (t.includes("data") || t.includes("analytics")) return "Data & Analytics";
     if (t.includes("design") || t.includes("ui") || t.includes("ux")) return "Design (UI/UX)";
     if (t.includes("product manager") || t.includes("pm")) return "Product Management";
