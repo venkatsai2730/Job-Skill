@@ -289,9 +289,20 @@ async function fetchRemoteOkJobs(): Promise<RawJob[]> {
 }
 
 // ── Helpers ─────────────────────────────────────────────────
+// Normalize a skill string: lowercase, strip dots and spaces
+// "React.js" → "reactjs", "Node JS" → "nodejs", "Machine Learning" → "machinelearning"
+function normalizeSkill(s: string): string {
+    return s.toLowerCase().replace(/[\s.]+/g, '').replace(/[^a-z0-9#]/g, '');
+}
+
 function extractSkills(text: string): string[] {
     const lower = (text || "").toLowerCase();
-    return SKILL_PATTERNS.filter(s => lower.includes(s));
+    // Match against normalized patterns — also handle variant spellings
+    return SKILL_PATTERNS.filter(s => {
+        const normalized = normalizeSkill(s);
+        const textNorm = lower.replace(/[\s.]+/g, '');
+        return textNorm.includes(normalized);
+    });
 }
 
 function extractSalary(text: string): { min: number | null; max: number | null } {
@@ -310,29 +321,67 @@ export function extractExperience(text: string): { min: number | null; max: numb
     return { min: null, max: null };
 }
 
+// ── Tech Title Detection ────────────────────────────────────
+// Used by detectCategory, fresher filters, and Internshala scraper
+// to distinguish tech jobs from non-tech ones.
+const TECH_TITLE_KEYWORDS = /\b(engineer|developer|sde|swe|programmer|coder|software|data\s*scien|devops|sre|qa|tester|sdet|frontend|front[\s-]?end|backend|back[\s-]?end|fullstack|full[\s-]?stack|machine\s*learn|ml\b|ai\b|deep\s*learn|nlp|cloud|cyber|security|python|java|react|angular|vue|node|web\s*dev|mobile\s*dev|android|ios|swift|kotlin|flutter|tech|it\s|computing|sap|erp|database|dba|network|system\s*admin|embedded|firmware|hardware|vlsi|semiconductor|devrel|devsecops|blockchain|smart\s*contract|robotics|automation)\b/i;
+
+// Non-tech roles that should never appear in the tech/fresher feed
+const NON_TECH_TITLE_KEYWORDS = /\b(telecaller|fundraising|charity|event\s*manage|real\s*estate|teaching|tutor|content\s*writ|blog\s*writ|video\s*edit|graphic\s*design|fashion|textile|apparel|legal|law\b|advocate|counsel|ca\s*article|chartered\s*account|company\s*secretary|audit|taxation|finance\s*analyst|equity\s*analyst|investment\s*bank|stock\s*brok|insurance|loan|mortgage|wealth\s*manage|client\s*acqui|business\s*develop|business\s*strat|project\s*manage[^r]|operations\s*manage|general\s*manage|human\s*resource|recruitment|talent\s*acqui|staffing|placement|hospitality|hotel|restaurant|food\s*tech|delivery\s*boy|delivery\s*exec|rider|warehouse|logistics|supply\s*chain|procurement|purchase|store\s*manage|retail|customer\s*success|customer\s*support|call\s*center|bpo|medical|pharma|clinical|nursing|doctor|dentist|physiotherap)\b/i;
+
+/**
+ * Returns true if the job title looks like a tech/engineering role.
+ * Used to gate the Fresher category — only tech internships should appear.
+ */
+export function isTechTitle(title: string): boolean {
+    const t = title.toLowerCase();
+    // If it matches a non-tech keyword, it's not tech
+    if (NON_TECH_TITLE_KEYWORDS.test(t)) return false;
+    // If it matches a tech keyword, it's tech
+    if (TECH_TITLE_KEYWORDS.test(t)) return true;
+    // Ambiguous titles (e.g. "Intern", "Trainee") — default to non-tech
+    // unless they also contain a tech word
+    return false;
+}
+
 export function detectCategory(title: string, category?: string): string {
     if (category) return category;
     const t = title.toLowerCase();
     
-    // Strict blocklist: Do not categorize as fresher if it contains senior keywords
-    const seniorKw = ["senior", "sr ", "sr.", "lead", "staff", "principal", "architect", "manager", "director", "vp", "head", "expert", "general management", "vp "];
+    // ── Non-tech categories first (prevent defaulting to "Software Development") ──
+    if (/\b(telecaller|call\s*center|bpo)\b/i.test(t)) return "Customer Support / BPO";
+    if (/\b(sales|marketing|digital\s*marketing|seo|sem|content\s*market|brand)\b/i.test(t)) return "Sales & Marketing";
+    if (/\b(hr\b|human\s*resource|recruiter|talent\s*acqui|staffing|placement)\b/i.test(t)) return "HR & Recruitment";
+    if (/\b(finance|accounting|ca\s*article|chartered|equity|investment|banking|loan|audit|taxation)\b/i.test(t)) return "Finance & Accounting";
+    if (/\b(legal|law\b|advocate|counsel|compliance|attorney)\b/i.test(t)) return "Legal";
+    if (/\b(fundraising|charity|ngo|social\s*work|community)\b/i.test(t)) return "Non-Profit / NGO";
+    if (/\b(video\s*edit|graphic\s*design|motion\s*graphic|animation|photography|content\s*creat|copywrite|blog\s*writ|content\s*writ)\b/i.test(t)) return "Creative & Content";
+    if (/\b(business\s*develop|business\s*strat|client\s*acqui|project\s*manage)\b/i.test(t)) return "Business Development";
+    if (/\b(real\s*estate|property|teaching|tutor|faculty|professor|education)\b/i.test(t)) return "Education & Others";
+    if (/\b(medical|pharma|clinical|nursing|doctor|health)\b/i.test(t)) return "Healthcare";
+    if (/\b(logistics|supply\s*chain|warehouse|procurement|operations)\b/i.test(t)) return "Operations & Logistics";
+    if (/\b(customer\s*success|customer\s*support|support\s*exec|helpdesk)\b/i.test(t)) return "Customer Support / BPO";
+    
+    // ── Senior keyword block ──
+    const seniorKw = ["senior", "sr ", "sr.", "lead", "staff", "principal", "architect", "manager", "director", "vp", "head", "expert", "general management"];
     const isSenior = seniorKw.some(kw => t.includes(kw));
 
-    // Expanded fresher detection — catches junior, associate, graduate, campus, GET, entry-level
+    // ── Fresher detection — ONLY for tech roles ──
     const fresherPattern = /\b(intern|fresher|trainee|0[\s-]?1|junior|jr\.?|associate|graduate\s*engineer|campus|entry[\s-]?level|get\b|apprentice)\b/i;
-    if (!isSenior && fresherPattern.test(t)) {
+    if (!isSenior && fresherPattern.test(t) && isTechTitle(title)) {
         return "Internships & Fresher";
     }
     
-    if (t.includes("data") || t.includes("analytics")) return "Data & Analytics";
-    if (t.includes("design") || t.includes("ui") || t.includes("ux")) return "Design (UI/UX)";
-    if (t.includes("product manager") || t.includes("pm")) return "Product Management";
-    if (t.includes("devops") || t.includes("cloud") || t.includes("sre")) return "DevOps & Cloud";
-    if (t.includes("qa") || t.includes("test") || t.includes("sdet")) return "QA & Testing";
-    if (t.includes("sales") || t.includes("marketing")) return "Sales & Marketing";
-    if (t.includes("hr") || t.includes("recruiter")) return "HR & Recruitment";
-    if (t.includes("support") || t.includes("bpo")) return "Customer Support / BPO";
-    return "Software Development";
+    // ── Tech category detection ──
+    if (/\b(data|analytics|bi\b|business\s*intelligence)\b/i.test(t) && isTechTitle(title)) return "Data & Analytics";
+    if (/\b(design|ui|ux)\b/i.test(t) && isTechTitle(title)) return "Design (UI/UX)";
+    if (/\b(product\s*manager|pm\b)\b/i.test(t)) return "Product Management";
+    if (/\b(devops|cloud|sre|infrastructure)\b/i.test(t)) return "DevOps & Cloud";
+    if (/\b(qa|test|sdet)\b/i.test(t)) return "QA & Testing";
+    
+    // Default: only label as "Software Development" if title actually looks tech
+    if (isTechTitle(title)) return "Software Development";
+    return "Other";
 }
 
 function extractCityState(locationStr: string): { city: string; state: string; country: string } {
@@ -708,7 +757,7 @@ export async function searchJobs(filters: {
         .from("job_listings")
         .select("*")
         .order("posted_at", { ascending: false })
-        .limit(1500);
+        .limit(3000);
 
     if (!migrationMissing) {
         q = q.eq("is_active", true);  // ALWAYS filter active only (if col exists)
@@ -774,7 +823,7 @@ export async function searchJobs(filters: {
             .from("job_listings")
             .select("*")
             .order("posted_at", { ascending: false })
-            .limit(1500);
+            .limit(3000);
             
         // Re-apply ALL filters (not just query)
         if (filters.query) {
@@ -809,12 +858,20 @@ export async function searchJobs(filters: {
     if (filters.category) {
         const cat = filters.category;
         const fresherPattern = /\b(intern|fresher|trainee|junior|jr\.?|associate|graduate|campus|entry[\s-]?level|apprentice)\b/i;
+        const seniorKw = ["senior", "sr ", "sr.", "lead", "staff", "principal", "architect", "manager", "director", "vp", "head", "expert"];
         
         if (cat === "Internships & Fresher") {
             jobs = jobs.filter(job => {
+                const title = job.title || "";
+                const titleLower = title.toLowerCase();
+                // STRICT BLOCK: Senior keywords → never a fresher job
+                if (seniorKw.some(kw => titleLower.includes(kw))) return false;
+                // TECH GATE: Must be a tech-related title
+                if (!isTechTitle(title)) return false;
+
                 if ((job.category || "").includes("Fresher")) return true;
                 if (job.seniority_level === "intern" || job.seniority_level === "entry") return true;
-                if (fresherPattern.test(job.title || "")) return true;
+                if (fresherPattern.test(titleLower)) return true;
                 return false;
             });
         } else if (cat === "Remote") {
@@ -1013,18 +1070,7 @@ export async function searchJobs(filters: {
     // Pagination
     const from = (page - 1) * limit;
     const to = from + limit;
-    let paginated = jobs.slice(from, to);
-
-    // HARD RULE: Enforce max per-company limit per page (relaxed when few results)
-    const maxPerPage = jobs.length < 40 ? 4 : 2;
-    const companyPageCount = new Map<string, number>();
-    paginated = paginated.filter(job => {
-        const key = (job.company || "").toLowerCase();
-        const count = companyPageCount.get(key) || 0;
-        if (count >= maxPerPage) return false;
-        companyPageCount.set(key, count + 1);
-        return true;
-    });
+    const paginated = jobs.slice(from, to);
 
     return { data: paginated, total: jobs.length };
 }

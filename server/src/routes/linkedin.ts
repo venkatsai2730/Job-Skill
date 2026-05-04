@@ -3,6 +3,7 @@ import { authenticateToken, AuthRequest } from "../middleware/auth.js";
 import { getAIReply, inferSemanticSkills, optimizeLinkedIn } from "../services/chatService.js";
 import { computeAdvancedATS, ParsedSections } from "../lib/advanced-scorer.js";
 import { normalizeSynonyms } from "../lib/synonym-map.js";
+import { logActivity } from "../services/activityService.js";
 
 const router = Router();
 
@@ -206,6 +207,14 @@ router.post("/optimize", authenticateToken, async (req: AuthRequest, res: Respon
             provider: result.provider,
             model: result.model,
         });
+
+        // Log activity (non-blocking)
+        logActivity({
+            user_id: req.user!.userId,
+            type: "linkedin_optimized",
+            title: "LinkedIn profile optimized",
+            meta: {},
+        }).catch(() => {});
     } catch (error: any) {
         console.error("[LinkedIn Optimize] Error:", error.message);
         res.status(500).json({ error: error.message || "Failed to optimize LinkedIn profile" });

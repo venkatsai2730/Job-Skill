@@ -22,7 +22,7 @@ interface JobQuery {
 }
 
 const JOB_QUERIES: JobQuery[] = [
-    // ── Fresher / Intern (India) ─────────────────────────────
+    // ── Fresher / Intern (India) — Tech-specific queries ─────
     { term: "Software Engineer Intern", location: "India", seniority: "intern" },
     { term: "SDE Intern", location: "India", seniority: "intern" },
     { term: "Data Science Intern", location: "India", seniority: "intern" },
@@ -36,6 +36,18 @@ const JOB_QUERIES: JobQuery[] = [
     { term: "Campus Hire Engineer", location: "India", seniority: "entry" },
     { term: "Junior Web Developer", location: "India", seniority: "entry" },
     { term: "Fresher Data Analyst", location: "India", seniority: "entry" },
+    // ── Additional tech-specific intern queries ──────────────
+    { term: "Python Developer Intern", location: "India", seniority: "intern" },
+    { term: "React Developer Intern", location: "India", seniority: "intern" },
+    { term: "Machine Learning Intern", location: "India", seniority: "intern" },
+    { term: "Cloud Engineer Intern", location: "India", seniority: "intern" },
+    { term: "DevOps Intern", location: "India", seniority: "intern" },
+    { term: "Backend Developer Intern", location: "India", seniority: "intern" },
+    { term: "Frontend Developer Intern", location: "India", seniority: "intern" },
+    { term: "Full Stack Developer Intern", location: "India", seniority: "intern" },
+    { term: "Java Developer Intern", location: "India", seniority: "intern" },
+    { term: "QA Intern", location: "India", seniority: "intern" },
+    { term: "Cybersecurity Intern", location: "India", seniority: "intern" },
 
     // ── Fresher / Intern (India metros) ──────────────────────
     { term: "Fresher Developer", location: "Bangalore", seniority: "entry" },

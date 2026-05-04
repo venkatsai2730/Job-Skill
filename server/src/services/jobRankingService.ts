@@ -310,3 +310,129 @@ export async function getUserSkillsForMatching(userId: string): Promise<string[]
     } catch { /* ignore */ }
     return [];
 }
+
+// ── rankJobsForUserWithSkills ──────────────────────────────────
+// Like rankJobsForUser but accepts pre-loaded user data to avoid double DB fetch.
+// This is the preferred function to call from chat.ts /jobs handler.
+export async function rankJobsForUserWithSkills(
+    userId: string,
+    jobs: JobListing[],
+    preloadedSkills: string[],   // already normalized (lowercase, no spaces)
+    preloadedExpYears: number,
+    limit: number = 20
+): Promise<RankedJob[]> {
+    if (!jobs || jobs.length === 0) return [];
+
+    // Normalize the pre-loaded skills consistently
+    const userSkills = preloadedSkills.map(s => s.toLowerCase().replace(/[\s.]+/g, ''));
+
+    // Get ATS score and title from resume (still need one quick fetch for these)
+    let userATSScore: number = 50;
+    let userTitle: string = "";
+    let userProjects: string[] = [];
+
+    try {
+        const { data: resume } = await supabaseAdmin
+            .from("resumes")
+            .select("parsed_data")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+        if (resume?.parsed_data) {
+            const pd = resume.parsed_data as any;
+            userATSScore = pd?.ats?.score ?? pd?.ats?.overall_score ?? 50;
+            const expEntries = pd?.sections?.experience || [];
+            if (expEntries.length > 0) userTitle = expEntries[0]?.title || "";
+            const projects = pd?.sections?.projects || [];
+            userProjects = projects.map((p: any) =>
+                `${p.name || ""} ${p.description || ""} ${(p.tech || []).join(" ")}`
+            );
+        }
+    } catch { /* use defaults */ }
+
+    if (userSkills.length === 0) {
+        return jobs.slice(0, limit).map(j => ({
+            ...j,
+            match_score: 50,
+            matched_skills: [],
+            skill_gap: [],
+        }));
+    }
+
+    const ranked: RankedJob[] = jobs.map(job => {
+        // Normalize job skills the same way
+        const jobSkillsRaw = job.required_skills || job.skills || [];
+        const jobSkills = jobSkillsRaw.map((s: string) => s.toLowerCase().replace(/[\s.]+/g, ''));
+
+        // ── Signal 1: Skill Overlap ────────────────────────────
+        // Also scan description for skill mentions (DB skills[] is often sparse)
+        const descNorm = (job.description || "").toLowerCase().replace(/[\s.]+/g, '');
+        const titleNorm = (job.title || "").toLowerCase().replace(/[\s.]+/g, '');
+
+        const matchedFromArray = userSkills.filter(s =>
+            jobSkills.some(js => js.includes(s) || s.includes(js))
+        );
+        const matchedFromDesc = userSkills.filter(s =>
+            !matchedFromArray.includes(s) && (descNorm.includes(s) || titleNorm.includes(s))
+        );
+
+        // Weight array match higher than description mention
+        const totalMatched = matchedFromArray.length + Math.floor(matchedFromDesc.length * 0.5);
+        const skillOverlap = userSkills.length > 0
+            ? Math.min(100, (totalMatched / userSkills.length) * 100)
+            : 50;
+
+        // ── Signal 2: Title Match ──────────────────────────────
+        const titleMatch = computeTitleSimilarity(userTitle, job.title);
+
+        // ── Signal 3: Seniority Fit ────────────────────────────
+        const userLevel = preloadedExpYears <= 1 ? "intern"
+            : preloadedExpYears <= 3 ? "entry"
+            : preloadedExpYears <= 6 ? "mid"
+            : "senior";
+        const jobSeniority = job.seniority_level || job.seniority || "entry";
+        const levelDiff = Math.abs(seniorityIndex(jobSeniority) - seniorityIndex(userLevel));
+        const seniorityFit = levelDiff === 0 ? 100 : levelDiff === 1 ? 60 : 20;
+
+        // ── Signal 4: Project Relevance ────────────────────────
+        const projectText = userProjects.join(" ").toLowerCase();
+        const jobText = `${job.title} ${job.description || ""}`.toLowerCase();
+        const techOverlap = extractTechTerms(projectText).filter(t => jobText.includes(t));
+        const projectRelevance = Math.min(100, techOverlap.length * 15);
+
+        // ── Signal 5: Recency ──────────────────────────────────
+        const hoursOld = (Date.now() - new Date(job.posted_at).getTime()) / 3600000;
+        const recencyBonus = Math.max(0, 100 - hoursOld * 2);
+
+        const matchScore = Math.round(
+            Math.min(100, skillOverlap) * 0.40 +
+            Math.min(100, titleMatch) * 0.20 +
+            seniorityFit * 0.20 +
+            Math.min(100, projectRelevance) * 0.15 +
+            Math.min(100, recencyBonus) * 0.05
+        );
+
+        // Human-readable matched skills (original form)
+        const matchedSkillsDisplay = (job.required_skills || job.skills || [])
+            .filter((js: string) => userSkills.some(us => js.toLowerCase().replace(/[\s.]+/g, '').includes(us) || us.includes(js.toLowerCase().replace(/[\s.]+/g, ''))))
+            .slice(0, 10);
+
+        const skillGap = (job.required_skills || job.skills || [])
+            .filter((js: string) => !userSkills.some(us => js.toLowerCase().replace(/[\s.]+/g, '').includes(us) || us.includes(js.toLowerCase().replace(/[\s.]+/g, ''))))
+            .slice(0, 10);
+
+        return {
+            ...job,
+            match_score: Math.max(5, Math.min(100, matchScore)),
+            matched_skills: matchedSkillsDisplay,
+            skill_gap: skillGap,
+        };
+    });
+
+    return ranked
+        .sort((a, b) => b.match_score - a.match_score)
+        .slice(0, limit);
+}
+
