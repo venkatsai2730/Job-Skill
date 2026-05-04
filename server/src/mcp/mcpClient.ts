@@ -217,6 +217,13 @@ async function scrapeInternshala(query: string, limit: number): Promise<ScrapedJ
                 const jobUrl = link ? (link.startsWith("http") ? link : `https://internshala.com${link}`) : "";
 
                 if (title && title.length > 3 && jobUrl) {
+                    // TECH GATE: Only include tech internships
+                    // Internshala returns ALL internships (marketing, HR, finance etc.)
+                    // Filter non-tech at scrape time to keep the DB clean
+                    const isTechRole = /\b(engineer|developer|sde|software|data|devops|qa|tester|frontend|backend|fullstack|machine\s*learn|ml\b|ai\b|python|java|react|node|web\s*dev|android|ios|cloud|cyber|security|tech|it\b|network|database|embedded|automation|sre|sdet)\b/i.test(title);
+                    const isNonTech = /\b(telecaller|fundrais|charity|marketing|sales|hr\b|human\s*resource|legal|finance|account|video\s*edit|graphic\s*design|content\s*writ|blog\s*writ|business\s*develop|business\s*strat|client\s*acqui|customer\s*success|real\s*estate|teaching|tutor|event\s*manag|hospitality|medical|pharma|fashion)\b/i.test(title);
+                    if (isNonTech || !isTechRole) return; // skip non-tech
+
                     jobs.push({
                         title, company: company || "Various Companies", location: loc,
                         description: `${title} at ${company || "Various Companies"} — Internshala`,

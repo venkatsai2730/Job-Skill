@@ -14,6 +14,7 @@ import { parseLatex } from "../lib/latex-parser.js";
 import { generateLatex } from "../lib/latex-generator.js";
 import { enrichMissingSkills } from "../lib/learning-resources.js";
 import { inferSemanticSkills, applyResumeFix } from "../services/chatService.js";
+import { logActivity } from "../services/activityService.js";
 
 const router = Router();
 router.use(authenticateToken);
@@ -520,6 +521,24 @@ router.post("/upload", async (req: AuthRequest, res: Response) => {
         if (dbError) {
             res.status(400).json({ error: dbError.message });
             return;
+        }
+
+        // ── Log activity event (non-blocking) ──
+        if (parsedData?.ats?.score) {
+            const score = parsedData.ats.score;
+            logActivity({
+                user_id: req.user!.userId,
+                type: "ats_score",
+                title: `AI Resume scan completed — ATS score: ${score}%`,
+                meta: { score, fileName },
+            });
+        } else {
+            logActivity({
+                user_id: req.user!.userId,
+                type: "resume_upload",
+                title: `Resume uploaded: ${fileName}`,
+                meta: { fileName },
+            });
         }
 
         res.json({ resume: resumeRow, parsed: parsedData });

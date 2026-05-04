@@ -515,7 +515,16 @@ export default function Jobs() {
   // ── Category Sections Data ──
   const categoryFilters: Record<string, (j: JobListing) => boolean> = {
     "💻 Tech Jobs Near You": (j) => ["Software Development", "Data & Analytics", "DevOps & Cloud"].includes(j.category || ""),
-    "🎓 Fresher & Internship": (j) => (j.category === "Internships & Fresher") || (j.seniority_level === "intern" || j.seniority_level === "entry") || /\b(intern|fresher|trainee|junior|jr\.?|associate|graduate|entry[\s-]?level|apprentice)\b/i.test(j.title),
+    "🎓 Fresher & Internship": (j) => {
+      const title = j.title || "";
+      const titleLower = title.toLowerCase();
+      // TECH GATE: must be a tech role
+      const isTech = /\b(engineer|developer|sde|software|data|devops|qa|tester|frontend|backend|fullstack|machine.?learn|ml\b|ai\b|python|java|react|node|web.?dev|android|ios|cloud|cyber|security|tech|it\b|network|database|embedded|automation|sre|sdet)\b/i.test(titleLower);
+      const isNonTech = /\b(telecaller|fundrais|charity|marketing|sales|hr\b|human.?resource|legal|finance|account|video.?edit|graphic.?design|content.?writ|blog.?writ|business.?develop|business.?strat|client.?acqui|customer.?success|real.?estate|teaching|tutor|event.?manag|hospitality|medical|pharma|fashion)\b/i.test(titleLower);
+      if (isNonTech || !isTech) return false;
+      // Must also be a fresher/intern level
+      return (j.category === "Internships & Fresher") || (j.seniority_level === "intern" || j.seniority_level === "entry") || /\b(intern|fresher|trainee|junior|jr\.?|associate|graduate|entry[\s-]?level|apprentice)\b/i.test(titleLower);
+    },
     "🌍 Remote Worldwide": (j) => (j.location || "").toLowerCase().includes("remote"),
     "🏢 Top Companies Hiring": (j) => ["google", "microsoft", "amazon", "flipkart", "swiggy", "zomato", "razorpay", "cred"].some(c => (j.company || "").toLowerCase().includes(c)),
   };
