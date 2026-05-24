@@ -494,7 +494,7 @@ export async function callMCPTool(
 ): Promise<ScrapedJob[]> {
     const query = args.search_term || args.query || "Software Engineer";
     const location = args.location || "India";
-    const limit = args.results_wanted || args.limit || 25;
+    const limit = args.results_wanted || args.limit || 50;
 
     console.log(`[MCP] Scraping: "${query}" in ${location} (limit ${limit})`);
 

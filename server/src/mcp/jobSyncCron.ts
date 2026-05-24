@@ -151,7 +151,7 @@ export async function syncJobsViaMCP(): Promise<{ total: number; errors: number 
                     const jobs = await callMCPTool("builtin_scraper", "search_jobs", {
                         search_term: query.term,
                         location: query.location,
-                        results_wanted: 30,
+                        results_wanted: 50,
                     });
 
                     if (!Array.isArray(jobs) || jobs.length === 0) return { fetched: 0, stored: 0, errors: 0 };

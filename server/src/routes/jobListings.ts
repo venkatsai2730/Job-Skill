@@ -28,7 +28,8 @@ router.get("/", async (req: AuthRequest, res: Response) => {
 
         const { query, location, skills, experience_max, limit, page, preferred_location, city, country, user_id, category } = req.query;
 
-        const parsedLimit = limit ? parseInt(limit as string) : 40;
+        const hasUser = !!user_id;
+        const parsedLimit = limit ? parseInt(limit as string) : (hasUser ? 200 : 40);
         const parsedPage = page ? parseInt(page as string) : 1;
         const parsedExpMax = experience_max !== undefined && experience_max !== "" 
             ? parseInt(experience_max as string) 
@@ -103,7 +104,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
         let totalCount = result.total;
 
         // If DB results are too few, supplement with MCP live scraping (no API keys)
-        if (allJobs.length < 10 && (location || city || query)) {
+        if (allJobs.length < 50 && (location || city || query)) {
             const searchLocation = (location || city || "") as string;
             const searchQuery = (query || "") as string;
             
@@ -119,10 +120,11 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                 : [searchQuery || "software engineer"];
 
             const existingUrls = new Set(allJobs.map((j: any) => j.job_url));
+            const targetCount = hasUser ? 100 : 20; // Fetch more when user has a resume
             
             for (const q of queries) {
-                if (allJobs.length >= 20) break; // enough results
-                const liveJobs = await mcpLiveSearch(q, searchLocation, 20);
+                if (allJobs.length >= targetCount) break; // enough results
+                const liveJobs = await mcpLiveSearch(q, searchLocation, 50);
 
                 if (liveJobs.length > 0) {
                     let newJobs = liveJobs
@@ -187,9 +189,16 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             }
         }
 
+        // Ensure selection_chance exists on all jobs (defaults for non-ranked)
+        const finalJobs = rankedJobs.map((j: any) => ({
+            ...j,
+            selection_chance: j.selection_chance ?? 0,
+            selection_reason: j.selection_reason ?? "",
+        }));
+
         const responseData = {
-            jobs: rankedJobs,
-            count: rankedJobs.length,
+            jobs: finalJobs,
+            count: finalJobs.length,
             total: totalCount,
             user_skills: userSkillsForResponse,
         };

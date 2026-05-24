@@ -28,6 +28,9 @@ interface JobListing {
   // v2.0: Smart ranking fields
   matched_skills?: string[];
   skill_gap?: string[];
+  // v3.0: Selection chance
+  selection_chance?: number;
+  selection_reason?: string;
 }
 
 interface TrackedJob {
@@ -101,6 +104,39 @@ function MatchScoreBadge({ score }: { score?: number }) {
   );
 }
 
+// ── Selection Chance Badge ────────────────────────────────
+function SelectionChanceBadge({ chance, reason }: { chance?: number; reason?: string }) {
+  if (!chance || chance <= 0) return null;
+  const [showTip, setShowTip] = useState(false);
+  let emoji: string, label: string, cls: string, bgCls: string;
+  if (chance >= 60) {
+    emoji = "🔥"; label = "High Chance"; cls = "text-emerald-400"; bgCls = "bg-emerald-500/15 border-emerald-500/20";
+  } else if (chance >= 30) {
+    emoji = "✨"; label = "Good Chance"; cls = "text-blue-400"; bgCls = "bg-blue-500/15 border-blue-500/20";
+  } else if (chance >= 15) {
+    emoji = "💡"; label = "Moderate"; cls = "text-yellow-400"; bgCls = "bg-yellow-500/15 border-yellow-500/20";
+  } else {
+    emoji = "📊"; label = "Competitive"; cls = "text-gray-400"; bgCls = "bg-gray-500/15 border-gray-500/20";
+  }
+  return (
+    <div className="relative inline-block">
+      <button
+        onMouseEnter={() => setShowTip(true)}
+        onMouseLeave={() => setShowTip(false)}
+        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${bgCls} ${cls} flex items-center gap-1 cursor-help`}
+      >
+        {emoji} {chance}% {label}
+      </button>
+      {showTip && reason && (
+        <div className="absolute bottom-7 left-0 z-50 w-56 bg-gray-50 border border-border rounded-xl p-3 shadow-xl text-[11px] text-gray-700">
+          <p className="font-bold text-gray-800 mb-1">Estimated Selection Chance</p>
+          <p>{reason}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Activity Badge ────────────────────────────────────────
 function ActivityBadge({ postedAt }: { postedAt: string }) {
   const daysAgo = Math.floor((Date.now() - new Date(postedAt).getTime()) / (1000 * 60 * 60 * 24));
@@ -171,6 +207,7 @@ export function JobCard({ job, userSkills, onSave, onMatch }: { job: JobListing,
       <div className="flex items-center gap-1.5 flex-wrap mb-3">
         <SeniorityBadge level={job.seniority_level} />
         <MatchScoreBadge score={job.match_score} />
+        <SelectionChanceBadge chance={job.selection_chance} reason={job.selection_reason} />
         <ActivityBadge postedAt={job.posted_at} />
       </div>
 
@@ -326,7 +363,7 @@ export default function Jobs() {
     setLoadingFeed(true);
     if (reset) setPage(1);
     try {
-      const defaultLimit = overrides?.category ? "60" : "40";
+      const defaultLimit = overrides?.category ? "60" : (getUserId() ? "200" : "40");
       const params = new URLSearchParams({ page: currentPage.toString(), limit: overrides?.limit || defaultLimit });
       const q = overrides?.query ?? search;
       const loc = overrides?.location ?? location;
@@ -363,7 +400,8 @@ export default function Jobs() {
 
   const handleApplyFilters = () => { fetchFeedJobs(true, 1); };
   const handlePageChange = (newPage: number) => {
-    const totalPages = Math.ceil(totalJobs / 40);
+    const perPage = getUserId() ? 50 : 40;
+    const totalPages = Math.ceil(totalJobs / perPage);
     if (newPage < 1 || newPage > totalPages) return;
     fetchFeedJobs(false, newPage);
   };
@@ -717,12 +755,13 @@ export default function Jobs() {
               </div>
 
               {/* Pagination */}
-              {Math.ceil(totalJobs / 40) > 1 && (
+              {Math.ceil(totalJobs / (getUserId() ? 50 : 40)) > 1 && (
                 <div className="flex justify-center items-center gap-3 mt-12 mb-6">
                   <button onClick={() => handlePageChange(page - 1)} disabled={page === 1} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Previous</button>
                   <div className="flex items-center gap-1.5 px-2">
-                    {Array.from({ length: Math.min(5, Math.ceil(totalJobs / 40)) }, (_, i) => {
-                      const totalPages = Math.ceil(totalJobs / 40);
+                    {Array.from({ length: Math.min(5, Math.ceil(totalJobs / (getUserId() ? 50 : 40))) }, (_, i) => {
+                      const perPage = getUserId() ? 50 : 40;
+                      const totalPages = Math.ceil(totalJobs / perPage);
                       let pageNum: number;
                       if (totalPages <= 5) pageNum = i + 1;
                       else if (page <= 3) pageNum = i + 1;
@@ -736,7 +775,7 @@ export default function Jobs() {
                       );
                     })}
                   </div>
-                  <button onClick={() => handlePageChange(page + 1)} disabled={page === Math.ceil(totalJobs / 40)} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Next</button>
+                  <button onClick={() => handlePageChange(page + 1)} disabled={page === Math.ceil(totalJobs / (getUserId() ? 50 : 40))} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Next</button>
                 </div>
               )}
               </>
