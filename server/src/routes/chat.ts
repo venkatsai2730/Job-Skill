@@ -65,6 +65,16 @@ function extractRoleKeywords(role: string): string[] {
     return [...new Set(keywords)];
 }
 
+function detectUserDegreeFromResume(parsedData: any): "phd" | "masters" | "bachelors" | "none" {
+    if (!parsedData || !parsedData.sections) return "none";
+    const education = parsedData.sections.education || [];
+    const text = (education.map((e: any) => (e.degree || "") + " " + (e.school || "")).join(" ") + " " + (parsedData.rawText || "")).toLowerCase();
+    if (/\b(ph\.?d\.?|doctor\s+of\s+philosophy|doctorate)\b/i.test(text)) return "phd";
+    if (/\b(m\.?s\.?|m\.?a\.?|m\.?b\.?a\.?|m\.?tech|m\.?e\.?|master|masters)\b/i.test(text)) return "masters";
+    if (/\b(b\.?s\.?|b\.?a\.?|b\.?tech|b\.?e\.?|bachelor|bachelors)\b/i.test(text)) return "bachelors";
+    return "none";
+}
+
 // ── Format a single job card for chat display ───────────────
 function formatJobCard(j: any, index: number): string {
     const salary = j.salary_min && j.salary_max
@@ -196,7 +206,7 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
 
         // Inject resume and profile context into the latest user message
         const ctx = await getResumeContext(req.user!.userId);
-        const userProfile = await getUserProfile(req.user!.userId);
+        let userProfile = await getUserProfile(req.user!.userId);
         let contextPrefix = "";
         
         if (ctx?.resumeText && ctx.resumeText.length > 20) {
@@ -244,6 +254,15 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
                     });
                     res.json(result);
                     return;
+                }
+
+                // ─── Proactive Self-Healing: Sync Profile On-the-fly ──────
+                if (ctx?.parsedData && (!userProfile || !userProfile.skills?.length || userProfile.experience_years === 0)) {
+                    console.log(`[Chat /jobs] Self-healing profile for user ${req.user!.userId} from existing resume.`);
+                    const { upsertUserProfileFromResume } = await import("./resume.js");
+                    await upsertUserProfileFromResume(req.user!.userId, ctx.parsedData).catch(() => {});
+                    // Reload profile
+                    userProfile = await getUserProfile(req.user!.userId);
                 }
 
                 // ─── Extract + normalize skills ──────────────────────────
@@ -390,9 +409,23 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
                 const roleKws = extractRoleKeywords(userRole || "software");
                 const titleMatchTerms = [...new Set([...roleKws, ...domainSkills.slice(0, 5)])];
 
+                const userDegree = detectUserDegreeFromResume(ctx?.parsedData);
+
                 const relevant = rankedJobs
                     .filter((j: any) => {
                         const tl = (j.title || "").toLowerCase();
+
+                        // 1. Strict PhD Mismatch Filter
+                        const isPhdJob = /\b(phd|ph\.d|doctorate)\b/i.test(tl);
+                        if (isPhdJob && userDegree !== "phd") return false;
+
+                        // 2. Strict Seniority Mismatch Filter for entry level
+                        const isSeniorRole = /\b(senior|sr\.?|lead|staff|principal|manager|director|vp|architect|head)\b/i.test(tl);
+                        const isStaffRole = /\b(staff|principal|director|vp|head)\b/i.test(tl);
+                        if (isSeniorRole && userExpYears < 2) return false;
+                        if (isStaffRole && userExpYears < 4) return false;
+
+                        // 3. Match terms filter
                         return titleMatchTerms.some(kw => tl.includes(kw));
                     })
                     .sort((a: any, b: any) => (b.match_score || 0) - (a.match_score || 0))

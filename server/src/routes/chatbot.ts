@@ -7,7 +7,7 @@ import {
     generateCoverLetter, scoreJobMatch, answerScreeningQuestions, optimizeLinkedIn,
     inferSemanticSkills, rewriteResumeSection, generateImprovedDraft
 } from "../services/chatService.js";
-import { parseSections } from "./resume.js";
+import { parseSections, upsertUserProfileFromResume } from "./resume.js";
 import { computeAdvancedATS } from "../lib/advanced-scorer.js";
 import { generateLatex } from "../lib/latex-generator.js";
 import { searchJobs } from "../services/jobFetcher.js";
@@ -476,6 +476,11 @@ router.post("/analyze-resume", authenticateToken, async (req: AuthRequest, res: 
                     storage_path: `${userId}/chat-${Date.now()}-${fileName || "resume"}`,
                     parsed_data: parsedData,
                 });
+
+            // Sync to user_profiles
+            await upsertUserProfileFromResume(userId, parsedData).catch(syncErr => {
+                console.warn("[analyze-resume] Profile sync failed:", syncErr.message);
+            });
         } catch (saveErr: any) {
             console.warn("[analyze-resume] DB save failed (non-fatal):", saveErr.message);
         }

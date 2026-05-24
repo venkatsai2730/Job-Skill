@@ -6,6 +6,7 @@
 import { supabaseAdmin } from "../config/supabase.js";
 import { USE_HYBRID_JOB_RANKING } from "../config/featureFlags.js";
 import { retrieveSimilarJobs } from "../rag/retrieve.js";
+import { scoreTrackAlignment } from "./recommendationEngine.js";
 
 // ── Types ─────────────────────────────────────────────────────
 export interface JobListing {
@@ -71,6 +72,14 @@ function extractTechTerms(text: string): string[] {
         }
     }
     return Array.from(found);
+}
+
+function detectUserDegreeFromData(sections: any, rawText: string): "phd" | "masters" | "bachelors" | "none" {
+    const text = (((sections?.education || []).map((e: any) => (e.degree || "") + " " + (e.school || "")).join(" ") + " " + (rawText || ""))).toLowerCase();
+    if (/\b(ph\.?d\.?|doctor\s+of\s+philosophy|doctorate)\b/i.test(text)) return "phd";
+    if (/\b(m\.?s\.?|m\.?a\.?|m\.?b\.?a\.?|m\.?tech|m\.?e\.?|master|masters)\b/i.test(text)) return "masters";
+    if (/\b(b\.?s\.?|b\.?a\.?|b\.?tech|b\.?e\.?|bachelor|bachelors)\b/i.test(text)) return "bachelors";
+    return "none";
 }
 
 // ── Compute Selection Chance (1-99%) ──────────────────────────
@@ -189,6 +198,8 @@ export async function rankJobsForUser(
     let userProjects: string[] = [];
     let userATSScore: number = 50;
     let userTitle: string = "";
+    let userDegree: "phd" | "masters" | "bachelors" | "none" = "none";
+    let userExpYears: number = 0;
 
     try {
         const { data: resume } = await supabaseAdmin
@@ -227,6 +238,9 @@ export async function rankJobsForUser(
             if (expEntries.length > 0) {
                 userTitle = expEntries[0]?.title || "";
             }
+
+            // Extract user degree from resume sections
+            userDegree = detectUserDegreeFromData(pd.sections, pd.rawText || "");
         }
     } catch {
         // No resume — return jobs with neutral score
@@ -240,7 +254,7 @@ export async function rankJobsForUser(
         }));
     }
 
-    // Also try user profile for additional skills
+    // Also try user profile for additional skills and experience years
     try {
         const { data: profile } = await supabaseAdmin
             .from("user_profiles")
@@ -248,9 +262,12 @@ export async function rankJobsForUser(
             .eq("user_id", userId)
             .single();
 
-        if (profile?.skills && Array.isArray(profile.skills)) {
-            const profileSkills = profile.skills.filter((s: any) => typeof s === "string");
-            userSkills = Array.from(new Set([...userSkills, ...profileSkills]));
+        if (profile) {
+            if (profile.skills && Array.isArray(profile.skills)) {
+                const profileSkills = profile.skills.filter((s: any) => typeof s === "string");
+                userSkills = Array.from(new Set([...userSkills, ...profileSkills]));
+            }
+            userExpYears = Number(profile.experience_years) || 0;
         }
     } catch { /* no profile */ }
 
@@ -348,7 +365,61 @@ export async function rankJobsForUser(
             !userSkills.some(us => us.toLowerCase().includes(js.toLowerCase()) || js.toLowerCase().includes(us.toLowerCase()))
         );
 
-        const finalMatchScore = Math.max(5, Math.min(100, matchScore));
+        let forcedSelectionChance: number | null = null;
+        let forcedSelectionReason: string | null = null;
+        let finalMatchScore = Math.max(5, Math.min(100, matchScore));
+
+        const jobTitleLower = (job.title || "").toLowerCase();
+        const companyLower = (job.company || "").toLowerCase();
+
+        // 1. Strict PhD check
+        const isPhdJob = /\b(phd|ph\.d|doctorate)\b/i.test(jobTitleLower);
+        if (isPhdJob && userDegree !== "phd") {
+            finalMatchScore = Math.max(5, finalMatchScore - 75);
+            forcedSelectionChance = 1;
+            forcedSelectionReason = "Requires PhD degree, which does not match your academic profile.";
+        }
+
+        // 2. Master's requirement check
+        const isMastersJob = /\b(ms|m\.s|masters)\b/i.test(jobTitleLower);
+        if (!isPhdJob && isMastersJob && userDegree === "bachelors" && !jobTitleLower.includes("bs")) {
+            finalMatchScore = Math.max(5, finalMatchScore - 40);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 10);
+            forcedSelectionReason = forcedSelectionReason || "Requires Master's degree (academic mismatch)";
+        }
+
+        // 3. Seniority level check for junior candidates
+        const isSeniorRole = /\b(senior|sr\.?|lead|staff|principal|manager|director|vp|architect|head)\b/i.test(jobTitleLower);
+        const isStaffRole = /\b(staff|principal|director|vp|head)\b/i.test(jobTitleLower);
+
+        if (isSeniorRole && userExpYears < 2) {
+            finalMatchScore = Math.max(5, finalMatchScore - 45);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 2);
+            forcedSelectionReason = forcedSelectionReason || "Requires senior-level experience";
+        } else if (isStaffRole && userExpYears < 4) {
+            finalMatchScore = Math.max(5, finalMatchScore - 65);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 1);
+            forcedSelectionReason = forcedSelectionReason || "Requires advanced staff-level leadership experience";
+        }
+
+        // 4. Tier-1 Hyper-competitive bar check
+        const isTier1Company = ["openai", "anthropic", "stripe", "figma", "netflix", "apple", "google", "meta", "microsoft", "amazon", "uber"].some(
+            t1 => companyLower.includes(t1)
+        );
+        if (isTier1Company && userExpYears < 2) {
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 15);
+            forcedSelectionReason = forcedSelectionReason || "Hyper-competitive tier-1 hiring bar for junior candidates.";
+        }
+
+        // 5. Career Track Alignment Check (AI-powered Recommendation Engine)
+        const alignmentResult = scoreTrackAlignment(userSkills, userTitle, {
+            title: job.title,
+            description: job.description || "",
+            skills: jobSkills,
+            company: job.company
+        });
+        
+        finalMatchScore = Math.max(5, Math.min(100, finalMatchScore + alignmentResult.scoreModifier));
 
         // Compute selection chance
         const { chance, reason } = computeSelectionChance(
@@ -356,13 +427,18 @@ export async function rankJobsForUser(
             skillOverlap, jobSeniority,
         );
 
+        const selectionChance = forcedSelectionChance !== null ? forcedSelectionChance : chance;
+        const selectionReason = forcedSelectionReason !== null 
+            ? forcedSelectionReason 
+            : `${alignmentResult.trackReason}, ${reason}`;
+
         return {
             ...job,
             match_score: finalMatchScore,
             matched_skills: matchedSkills.slice(0, 10),
             skill_gap: skillGap.slice(0, 10),
-            selection_chance: chance,
-            selection_reason: reason,
+            selection_chance: selectionChance,
+            selection_reason: selectionReason,
         };
     });
 
@@ -418,6 +494,7 @@ export async function rankJobsForUserWithSkills(
     let userATSScore: number = 50;
     let userTitle: string = "";
     let userProjects: string[] = [];
+    let userDegree: "phd" | "masters" | "bachelors" | "none" = "none";
 
     try {
         const { data: resume } = await supabaseAdmin
@@ -437,6 +514,7 @@ export async function rankJobsForUserWithSkills(
             userProjects = projects.map((p: any) =>
                 `${p.name || ""} ${p.description || ""} ${(p.tech || []).join(" ")}`
             );
+            userDegree = detectUserDegreeFromData(pd.sections, pd.rawText || "");
         }
     } catch { /* use defaults */ }
 
@@ -513,7 +591,61 @@ export async function rankJobsForUserWithSkills(
             .filter((js: string) => !userSkills.some(us => js.toLowerCase().replace(/[\s.]+/g, '').includes(us) || us.includes(js.toLowerCase().replace(/[\s.]+/g, ''))))
             .slice(0, 10);
 
-        const finalMatchScore = Math.max(5, Math.min(100, matchScore));
+        let forcedSelectionChance: number | null = null;
+        let forcedSelectionReason: string | null = null;
+        let finalMatchScore = Math.max(5, Math.min(100, matchScore));
+
+        const jobTitleLower = (job.title || "").toLowerCase();
+        const companyLower = (job.company || "").toLowerCase();
+
+        // 1. Strict PhD check
+        const isPhdJob = /\b(phd|ph\.d|doctorate)\b/i.test(jobTitleLower);
+        if (isPhdJob && userDegree !== "phd") {
+            finalMatchScore = Math.max(5, finalMatchScore - 75);
+            forcedSelectionChance = 1;
+            forcedSelectionReason = "Requires PhD degree, which does not match your academic profile.";
+        }
+
+        // 2. Master's requirement check
+        const isMastersJob = /\b(ms|m\.s|masters)\b/i.test(jobTitleLower);
+        if (!isPhdJob && isMastersJob && userDegree === "bachelors" && !jobTitleLower.includes("bs")) {
+            finalMatchScore = Math.max(5, finalMatchScore - 40);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 10);
+            forcedSelectionReason = forcedSelectionReason || "Requires Master's degree (academic mismatch)";
+        }
+
+        // 3. Seniority level check for junior candidates
+        const isSeniorRole = /\b(senior|sr\.?|lead|staff|principal|manager|director|vp|architect|head)\b/i.test(jobTitleLower);
+        const isStaffRole = /\b(staff|principal|director|vp|head)\b/i.test(jobTitleLower);
+
+        if (isSeniorRole && preloadedExpYears < 2) {
+            finalMatchScore = Math.max(5, finalMatchScore - 45);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 2);
+            forcedSelectionReason = forcedSelectionReason || "Requires senior-level experience";
+        } else if (isStaffRole && preloadedExpYears < 4) {
+            finalMatchScore = Math.max(5, finalMatchScore - 65);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 1);
+            forcedSelectionReason = forcedSelectionReason || "Requires advanced staff-level leadership experience";
+        }
+
+        // 4. Tier-1 Hyper-competitive bar check
+        const isTier1Company = ["openai", "anthropic", "stripe", "figma", "netflix", "apple", "google", "meta", "microsoft", "amazon", "uber"].some(
+            t1 => companyLower.includes(t1)
+        );
+        if (isTier1Company && preloadedExpYears < 2) {
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 15);
+            forcedSelectionReason = forcedSelectionReason || "Hyper-competitive tier-1 hiring bar for junior candidates.";
+        }
+
+        // 5. Career Track Alignment Check (AI-powered Recommendation Engine)
+        const alignmentResult = scoreTrackAlignment(userSkills, userTitle, {
+            title: job.title,
+            description: job.description || "",
+            skills: job.skills || [],
+            company: job.company
+        });
+        
+        finalMatchScore = Math.max(5, Math.min(100, finalMatchScore + alignmentResult.scoreModifier));
 
         // Compute selection chance
         const { chance, reason } = computeSelectionChance(
@@ -521,13 +653,18 @@ export async function rankJobsForUserWithSkills(
             skillOverlap, jobSeniority,
         );
 
+        const selectionChance = forcedSelectionChance !== null ? forcedSelectionChance : chance;
+        const selectionReason = forcedSelectionReason !== null 
+            ? forcedSelectionReason 
+            : `${alignmentResult.trackReason}, ${reason}`;
+
         return {
             ...job,
             match_score: finalMatchScore,
             matched_skills: matchedSkillsDisplay,
             skill_gap: skillGap,
-            selection_chance: chance,
-            selection_reason: reason,
+            selection_chance: selectionChance,
+            selection_reason: selectionReason,
         };
     });
 

@@ -321,6 +321,156 @@ export function parseSections(rawText: string): ParsedSections {
     return result;
 }
 
+// ── Profile Extraction & Sync Helpers ──────────────────────────
+export function calculateExperienceYears(sections: any, rawText: string): number {
+    let expYears = 0;
+    const summaryText = ((sections?.summary || "") + " " + rawText.substring(0, 1500)).toLowerCase();
+    const expRegexes = [
+        /(\d+)\+?\s*years?\s+(?:of\s+)?(?:production\s+)?(?:ml|machine\s+learning|data\s+science|software|sde|technical)?\s*experience/i,
+        /(\d+)\+?\s*years?\s+(?:of\s+)?experience/i,
+        /experience[:\s]*(\d+)\+?\s*years?/i
+    ];
+
+    for (const regex of expRegexes) {
+        const match = summaryText.match(regex);
+        if (match) {
+            const val = parseFloat(match[1]);
+            if (val > 0 && val < 30) {
+                expYears = val;
+                break;
+            }
+        }
+    }
+
+    let calculatedSpan = 0;
+    const experienceEntries = sections?.experience || [];
+    if (experienceEntries.length > 0) {
+        let minYear = new Date().getFullYear();
+        let maxYear = 0;
+        let hasPresent = false;
+
+        for (const exp of experienceEntries) {
+            const dateStr = (exp.dates || "").toLowerCase();
+            const years = dateStr.match(/\b(19|20)\d{2}\b/g);
+            if (years) {
+                const parsedYears = years.map((y: string) => parseInt(y, 10));
+                for (const yr of parsedYears) {
+                    if (yr < minYear) minYear = yr;
+                    if (yr > maxYear) maxYear = yr;
+                }
+            }
+            if (dateStr.includes("present") || dateStr.includes("current")) {
+                hasPresent = true;
+            }
+        }
+
+        const endYear = hasPresent ? new Date().getFullYear() : (maxYear || new Date().getFullYear());
+        if (maxYear > 0 && minYear < new Date().getFullYear()) {
+            calculatedSpan = Math.max(0, endYear - minYear);
+        }
+    }
+
+    let finalExp = Math.max(expYears, calculatedSpan);
+    if (finalExp === 0 && (summaryText.includes("1+ year") || summaryText.includes("1 year"))) {
+        finalExp = 1;
+    }
+    return Math.max(0, Math.min(30, finalExp));
+}
+
+export function detectUserDegree(sections: any, rawText: string): "phd" | "masters" | "bachelors" | "none" {
+    const text = (((sections?.education || []).map((e: any) => e.degree + " " + e.school).join(" ") + " " + rawText)).toLowerCase();
+    
+    if (/\b(ph\.?d\.?|doctor\s+of\s+philosophy|doctorate)\b/i.test(text)) {
+        return "phd";
+    }
+    if (/\b(m\.?s\.?|m\.?a\.?|m\.?b\.?a\.?|m\.?tech|m\.?e\.?|master|masters)\b/i.test(text)) {
+        return "masters";
+    }
+    if (/\b(b\.?s\.?|b\.?a\.?|b\.?tech|b\.?e\.?|bachelor|bachelors)\b/i.test(text)) {
+        return "bachelors";
+    }
+    return "none";
+}
+
+export function detectSeniorityLevel(expYears: number, currentRole: string): string {
+    const roleLower = (currentRole || "").toLowerCase();
+    if (roleLower.includes("senior") || roleLower.includes("sr.") || roleLower.includes("sr ")) return "senior";
+    if (roleLower.includes("lead") || roleLower.includes("staff") || roleLower.includes("principal")) return "senior";
+    if (roleLower.includes("intern") || roleLower.includes("co-op")) return "intern";
+    if (roleLower.includes("fresher") || roleLower.includes("trainee") || roleLower.includes("associate")) return "entry";
+    
+    if (expYears <= 1) return "intern";
+    if (expYears <= 3) return "entry";
+    if (expYears <= 6) return "mid";
+    return "senior";
+}
+
+export async function upsertUserProfileFromResume(userId: string, parsedData: any): Promise<void> {
+    try {
+        if (!parsedData || !parsedData.sections) return;
+
+        const sections = parsedData.sections;
+        const rawText = parsedData.rawText || "";
+
+        // 1. Extract clean skills
+        const skillGroups = sections.skills || [];
+        const rawSkills = skillGroups.flatMap((g: any) => g.items || []);
+        const cleanSkills = rawSkills.flatMap((s: string) => {
+            const base = s.replace(/\s*\([^)]*\)/g, '').trim();
+            const parenMatch = s.match(/\(([^)]+)\)/);
+            const parenItems = parenMatch ? parenMatch[1].split(/[,;]/).map((i: string) => i.trim()).filter(Boolean) : [];
+            return [base, ...parenItems].filter(i => i.length > 0);
+        });
+        const inferred = parsedData.ats?.inferredSkills || [];
+        const allSkills = Array.from(new Set([...cleanSkills, ...inferred]));
+
+        // 2. Extract experience years
+        const expYears = calculateExperienceYears(sections, rawText);
+
+        // 3. Detect highest degree
+        const degree = detectUserDegree(sections, rawText);
+        const educationStr = sections.education?.[0]?.degree || (degree !== "none" ? degree.toUpperCase() : "");
+
+        // 4. Current job title
+        const currentRole = sections.experience?.[0]?.title || "";
+
+        // 5. Seniority level
+        const seniorityLevel = detectSeniorityLevel(expYears, currentRole);
+
+        // 6. Target roles based on current role
+        const targetRoles = currentRole ? [currentRole] : [];
+
+        // 7. Preferred locations
+        const preferredLocations = sections.experience?.[0]?.company ? [sections.experience?.[0]?.company] : [];
+
+        // Perform the upsert into user_profiles
+        const profileData = {
+            user_id: userId,
+            skills: allSkills,
+            experience_years: expYears,
+            education: educationStr,
+            current_role: currentRole,
+            target_roles: targetRoles,
+            preferred_locations: preferredLocations,
+            seniority_level: seniorityLevel,
+            updated_at: new Date().toISOString()
+        };
+
+        const { error } = await supabaseAdmin
+            .from("user_profiles")
+            .upsert(profileData, { onConflict: "user_id" });
+
+        if (error) {
+            console.error("[upsertUserProfileFromResume] Error upserting profile:", error.message);
+        } else {
+            console.log(`[upsertUserProfileFromResume] Profile upserted for user ${userId}: ${expYears} yrs experience, degree ${degree}, role ${currentRole}`);
+        }
+    } catch (err: any) {
+        console.error("[upsertUserProfileFromResume] Unexpected error:", err.message);
+    }
+}
+
+
 import { computeAdvancedATS, AdvancedATSResult } from "../lib/advanced-scorer.js";
 import { scoreJobMatch, buildResumeFromScratch } from "../services/chatService.js";
 import { LATEX_TEMPLATES } from "../lib/latex-templates.js";
@@ -521,6 +671,13 @@ router.post("/upload", async (req: AuthRequest, res: Response) => {
         if (dbError) {
             res.status(400).json({ error: dbError.message });
             return;
+        }
+
+        // ── Auto-Sync to user_profiles ──
+        if (parsedData) {
+            await upsertUserProfileFromResume(req.user!.userId, parsedData).catch(err => {
+                console.error("[Resume Upload] Non-fatal profile sync error:", err.message);
+            });
         }
 
         // ── Log activity event (non-blocking) ──
