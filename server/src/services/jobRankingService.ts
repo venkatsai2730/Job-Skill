@@ -37,6 +37,8 @@ export interface RankedJob extends JobListing {
     match_score: number;
     matched_skills: string[];
     skill_gap: string[];
+    selection_chance: number; // 1-99% estimated selection probability
+    selection_reason: string; // human-readable explanation
 }
 
 // ── Tech terms dictionary for project relevance ───────────────
@@ -69,6 +71,78 @@ function extractTechTerms(text: string): string[] {
         }
     }
     return Array.from(found);
+}
+
+// ── Compute Selection Chance (1-99%) ──────────────────────────
+// Estimates realistic probability of getting selected based on
+// match quality, competition level, seniority fit, and recency.
+const BIG_COMPANIES = new Set([
+    "google", "microsoft", "amazon", "meta", "apple", "netflix", "uber",
+    "flipkart", "swiggy", "zomato", "paytm", "phonepe", "razorpay",
+    "infosys", "tcs", "wipro", "hcl", "cognizant", "accenture", "deloitte",
+    "jpmorgan", "goldman sachs", "morgan stanley", "barclays",
+    "samsung", "oracle", "ibm", "intel", "nvidia", "salesforce", "adobe",
+    "walmart", "target", "spotify", "stripe", "airbnb", "twitter", "snap",
+]);
+
+function computeSelectionChance(
+    matchScore: number,
+    seniorityFit: number,
+    company: string,
+    hoursOld: number,
+    skillOverlapPct: number,
+    jobSeniority: string,
+): { chance: number; reason: string } {
+    // 1. Base chance from match score (40% weight)
+    // matchScore 0-100 → base 1-50
+    const matchBase = Math.max(1, Math.min(50, matchScore * 0.5));
+
+    // 2. Seniority fit bonus (25% weight)
+    // seniorityFit is 100/60/20 → bonus 0-25
+    const seniorityBonus = (seniorityFit / 100) * 25;
+
+    // 3. Competition penalty (20% weight)
+    // Big companies: high competition → penalty
+    const companyLower = (company || "").toLowerCase();
+    const isBigCompany = BIG_COMPANIES.has(companyLower) ||
+        [...BIG_COMPANIES].some(bc => companyLower.includes(bc));
+    const competitionPenalty = isBigCompany ? -15 : 0; // MNCs are harder
+    const smallCompanyBonus = !isBigCompany ? 10 : 0; // Startups are easier
+
+    // 4. Recency bonus (15% weight)
+    // Jobs posted < 24h ago → full bonus; > 7 days → no bonus
+    const recencyBonus = hoursOld < 24 ? 15 : hoursOld < 72 ? 10 : hoursOld < 168 ? 5 : 0;
+
+    // 5. Skill overlap multiplier
+    // If > 70% skills match, boost; if < 30%, penalize
+    const skillMultiplier = skillOverlapPct > 70 ? 1.2 : skillOverlapPct > 40 ? 1.0 : 0.7;
+
+    // 6. Seniority level penalty for very senior roles
+    const seniorPenalty = ["senior", "lead", "staff", "principal"].includes(jobSeniority.toLowerCase()) ? -10 : 0;
+    const internBonus = ["intern", "entry"].includes(jobSeniority.toLowerCase()) ? 8 : 0;
+
+    let rawChance = (matchBase + seniorityBonus + competitionPenalty + smallCompanyBonus + recencyBonus + seniorPenalty + internBonus) * skillMultiplier;
+
+    // Clamp to 1-99
+    const chance = Math.max(1, Math.min(99, Math.round(rawChance)));
+
+    // Generate human-readable reason
+    const reasons: string[] = [];
+    if (matchScore >= 70) reasons.push("Strong skill match");
+    else if (matchScore >= 40) reasons.push("Moderate skill match");
+    else reasons.push("Limited skill overlap");
+
+    if (seniorityFit >= 80) reasons.push("great seniority fit");
+    else if (seniorityFit >= 50) reasons.push("acceptable seniority level");
+    else reasons.push("seniority mismatch");
+
+    if (isBigCompany) reasons.push("high competition (large company)");
+    else reasons.push("lower competition (smaller company)");
+
+    if (hoursOld < 48) reasons.push("recently posted");
+    else if (hoursOld > 168) reasons.push("posted over a week ago");
+
+    return { chance, reason: reasons.join(", ") };
 }
 
 // ── Compute title similarity (tokenized Jaccard) ──────────────
@@ -161,6 +235,8 @@ export async function rankJobsForUser(
             match_score: 50,
             matched_skills: [],
             skill_gap: [],
+            selection_chance: 0,
+            selection_reason: "",
         }));
     }
 
@@ -184,6 +260,8 @@ export async function rankJobsForUser(
             match_score: 50,
             matched_skills: [],
             skill_gap: [],
+            selection_chance: 0,
+            selection_reason: "",
         }));
     }
 
@@ -270,11 +348,21 @@ export async function rankJobsForUser(
             !userSkills.some(us => us.toLowerCase().includes(js.toLowerCase()) || js.toLowerCase().includes(us.toLowerCase()))
         );
 
+        const finalMatchScore = Math.max(5, Math.min(100, matchScore));
+
+        // Compute selection chance
+        const { chance, reason } = computeSelectionChance(
+            finalMatchScore, seniorityFit, job.company, hoursOld,
+            skillOverlap, jobSeniority,
+        );
+
         return {
             ...job,
-            match_score: Math.max(5, Math.min(100, matchScore)),
+            match_score: finalMatchScore,
             matched_skills: matchedSkills.slice(0, 10),
             skill_gap: skillGap.slice(0, 10),
+            selection_chance: chance,
+            selection_reason: reason,
         };
     });
 
@@ -358,6 +446,8 @@ export async function rankJobsForUserWithSkills(
             match_score: 50,
             matched_skills: [],
             skill_gap: [],
+            selection_chance: 0,
+            selection_reason: "",
         }));
     }
 
@@ -423,11 +513,21 @@ export async function rankJobsForUserWithSkills(
             .filter((js: string) => !userSkills.some(us => js.toLowerCase().replace(/[\s.]+/g, '').includes(us) || us.includes(js.toLowerCase().replace(/[\s.]+/g, ''))))
             .slice(0, 10);
 
+        const finalMatchScore = Math.max(5, Math.min(100, matchScore));
+
+        // Compute selection chance
+        const { chance, reason } = computeSelectionChance(
+            finalMatchScore, seniorityFit, job.company, hoursOld,
+            skillOverlap, jobSeniority,
+        );
+
         return {
             ...job,
-            match_score: Math.max(5, Math.min(100, matchScore)),
+            match_score: finalMatchScore,
             matched_skills: matchedSkillsDisplay,
             skill_gap: skillGap,
+            selection_chance: chance,
+            selection_reason: reason,
         };
     });
 

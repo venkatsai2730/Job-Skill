@@ -749,7 +749,7 @@ export async function searchJobs(filters: {
     user_experience_years?: number;
     user_seniority?: string;
 }) {
-    const limit = Math.min(filters.limit || 40, 100);
+    const limit = Math.min(filters.limit || 40, 300);
     const page = filters.page || 1;
     const effectiveLocation = filters.location || filters.city || "";
 
