@@ -779,8 +779,15 @@ ${sparseUserInput}`,
 export async function inferSemanticSkills(resumeText: string) {
     const messages = [{
         role: "user",
-        content: `Analyze this resume and infer hidden/implied skills that are not explicitly listed in the skills section but are clearly demonstrated in the experience/projects.
-Return ONLY a valid JSON array of strings (e.g., ["Skill A", "Skill B"]). Do not use markdown fences.
+        content: `Analyze this resume and extract ALL technical skills — both explicitly listed AND implied/demonstrated through projects, experience, and achievements.
+
+Pay special attention to:
+1. Skills used in PROJECTS (e.g., if someone built "a real-time chat app using WebSockets" → infer: WebSocket, Real-time Systems, Socket Programming)
+2. Skills implied by EXPERIENCE descriptions (e.g., "deployed microservices on AWS" → infer: AWS, Microservices, Cloud Deployment, CI/CD)
+3. Tools/frameworks mentioned anywhere in the resume even if not in the skills section
+4. Domain knowledge implied by project context (e.g., "built ML pipeline for fraud detection" → infer: Machine Learning, Fraud Detection, Data Pipeline)
+
+Return ONLY a valid JSON array of strings (e.g., ["Skill A", "Skill B"]). Do not use markdown fences. Include ONLY technical/professional skills, not soft skills.
 
 **Resume Text:**
 ${resumeText}`

@@ -224,8 +224,20 @@ export async function rankJobsForUser(
                 return [base, ...parenItems].filter(i => i.length > 0);
             });
 
-            // Extract project text
+            // ── Also include LLM-inferred skills from projects/experience ──
+            const inferredSkills: string[] = pd?.ats?.inferredSkills || [];
+            if (inferredSkills.length > 0) {
+                userSkills = Array.from(new Set([...userSkills, ...inferredSkills]));
+            }
+
+            // ── Extract skills directly from project tech stacks ──
             const projects = pd?.sections?.projects || [];
+            const projectTechSkills = projects.flatMap((p: any) => (p.tech || []).map((t: string) => t.trim())).filter(Boolean);
+            if (projectTechSkills.length > 0) {
+                userSkills = Array.from(new Set([...userSkills, ...projectTechSkills]));
+            }
+
+            // Extract project text
             userProjects = projects.map((p: any) =>
                 `${p.name || ""} ${p.description || ""} ${(p.tech || []).join(" ")}`
             );
@@ -290,9 +302,18 @@ export async function rankJobsForUser(
         const matchedSkills = userSkills.filter(s =>
             jobSkills.some(js => js.toLowerCase().includes(s.toLowerCase()) || s.toLowerCase().includes(js.toLowerCase()))
         );
+        // Also check description for skill mentions (many jobs have sparse skills[] arrays)
+        const descLower = (job.description || "").toLowerCase();
+        const titleLower = (job.title || "").toLowerCase();
+        const descMatchedSkills = userSkills.filter(s => {
+            if (s.length < 3) return false;
+            return !matchedSkills.includes(s) && (descLower.includes(s.toLowerCase()) || titleLower.includes(s.toLowerCase()));
+        });
+        const totalMatchedCount = matchedSkills.length + Math.floor(descMatchedSkills.length * 0.5);
+        
         const skillOverlap = jobSkills.length > 0
-            ? (matchedSkills.length / jobSkills.length) * 100
-            : 50;
+            ? Math.min(100, (totalMatchedCount / Math.max(jobSkills.length, 1)) * 100)
+            : (totalMatchedCount > 0 ? Math.min(100, totalMatchedCount * 12) : 5); // If no job skills listed, use desc matches; if nothing matches, score very low (5 not 50)
 
         // ── Signal 2: Title Match ──────────────────────────────
         const titleMatch = computeTitleSimilarity(userTitle, job.title);
@@ -464,12 +485,21 @@ export async function getUserSkillsForMatching(userId: string): Promise<string[]
             const skillGroups = pd?.sections?.skills || [];
             const rawSkills = skillGroups.flatMap((g: any) => g.items || []);
             // Split "Python (pandas, NumPy)" → ["Python", "pandas", "NumPy"]
-            return rawSkills.flatMap((s: string) => {
+            const explicitSkills = rawSkills.flatMap((s: string) => {
                 const base = s.replace(/\s*\([^)]*\)/g, '').trim();
                 const parenMatch = s.match(/\(([^)]+)\)/);
                 const parenItems = parenMatch ? parenMatch[1].split(/[,;]/).map((i: string) => i.trim()).filter(Boolean) : [];
                 return [base, ...parenItems].filter((i: string) => i.length > 0);
             });
+
+            // Include LLM-inferred skills from projects/experience
+            const inferredSkills: string[] = pd?.ats?.inferredSkills || [];
+
+            // Include skills from project tech stacks
+            const projects = pd?.sections?.projects || [];
+            const projectTechSkills = projects.flatMap((p: any) => (p.tech || []).map((t: string) => t.trim())).filter(Boolean);
+
+            return Array.from(new Set([...explicitSkills, ...inferredSkills, ...projectTechSkills]));
         }
     } catch { /* ignore */ }
     return [];

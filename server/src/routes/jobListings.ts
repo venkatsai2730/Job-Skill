@@ -20,15 +20,19 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 router.get("/", async (req: AuthRequest, res: Response) => {
     try {
         const cacheKey = req.originalUrl;
-        const cached = routeCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-            res.json(cached.data);
-            return;
+        // Only use cache for unauthenticated/anonymous requests
+        // Authenticated users get fresh personalized results every time
+        const hasUser = !!(req.query.user_id);
+        if (!hasUser) {
+            const cached = routeCache.get(cacheKey);
+            if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+                res.json(cached.data);
+                return;
+            }
         }
 
         const { query, location, skills, experience_max, limit, page, preferred_location, city, country, user_id, category } = req.query;
 
-        const hasUser = !!user_id;
         const parsedLimit = limit ? parseInt(limit as string) : (hasUser ? 200 : 40);
         const parsedPage = page ? parseInt(page as string) : 1;
         const parsedExpMax = experience_max !== undefined && experience_max !== "" 
@@ -39,6 +43,8 @@ router.get("/", async (req: AuthRequest, res: Response) => {
         let userSkills: string[] = [];
         let userExperienceYears: number | undefined;
         let userSeniority: string | undefined;
+        let userPrimaryDomain: string | null = null;
+        let userCurrentRole: string = "";
 
         if (user_id) {
             try {
@@ -58,28 +64,94 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             }
 
             // Fallback: try to get skills from latest resume parsed data
-            if (userSkills.length === 0) {
-                try {
-                    const { data: resume } = await supabaseAdmin
-                        .from("resumes")
-                        .select("parsed_data")
-                        .eq("user_id", user_id as string)
-                        .order("created_at", { ascending: false })
-                        .limit(1)
-                        .single();
+            // ALWAYS enrich from resume (profile may be stale or missing project/inferred skills)
+            try {
+                const { data: resume } = await supabaseAdmin
+                    .from("resumes")
+                    .select("parsed_data")
+                    .eq("user_id", user_id as string)
+                    .order("created_at", { ascending: false })
+                    .limit(1)
+                    .single();
 
-                    if (resume?.parsed_data) {
-                        const pd = resume.parsed_data as any;
-                        const skillGroups = pd?.sections?.skills || [];
-                        userSkills = skillGroups.flatMap((g: any) => g.items || []);
-                        // Infer experience from resume sections
+                if (resume?.parsed_data) {
+                    const pd = resume.parsed_data as any;
+                    const skillGroups = pd?.sections?.skills || [];
+                    // Split parenthetical groups: "Python (pandas, NumPy)" → ["Python", "pandas", "NumPy"]
+                    const resumeExplicitSkills = skillGroups.flatMap((g: any) => g.items || []).flatMap((s: string) => {
+                        const base = s.replace(/\s*\([^)]*\)/g, '').trim();
+                        const parenMatch = s.match(/\(([^)]+)\)/);
+                        const parenItems = parenMatch ? parenMatch[1].split(/[,;]/).map((i: string) => i.trim()).filter(Boolean) : [];
+                        return [base, ...parenItems].filter(i => i.length > 0);
+                    });
+                    
+                    // Also include LLM-inferred skills (from projects/experience)
+                    const inferredSkills: string[] = pd?.ats?.inferredSkills || [];
+
+                    // Also include skills from project tech stacks
+                    const projects = pd?.sections?.projects || [];
+                    const projectTechSkills = projects.flatMap((p: any) => (p.tech || []).map((t: string) => t.trim())).filter(Boolean);
+
+                    // Merge all sources
+                    const allResumeSkills = [...resumeExplicitSkills, ...inferredSkills, ...projectTechSkills];
+                    if (allResumeSkills.length > 0) {
+                        userSkills = Array.from(new Set([...userSkills, ...allResumeSkills]));
+                    }
+
+                    // Infer experience from resume sections if not already set
+                    if (!userExperienceYears) {
                         const expEntries = pd?.sections?.experience || [];
                         if (expEntries.length > 0) {
-                            userExperienceYears = Math.min(expEntries.length * 2, 15); // rough estimate
+                            userExperienceYears = Math.min(expEntries.length * 2, 15);
                         }
                     }
-                } catch { /* no resume */ }
-            }
+
+                    // ── Domain Detection (from same resume fetch) ──
+                    userCurrentRole = pd?.sections?.experience?.[0]?.title || "";
+                    const summary = pd?.sections?.summary || "";
+                    const roleAndSummary = `${userCurrentRole} ${summary}`.toLowerCase();
+                    
+                    if (/\b(data\s*scien|machine\s*learn|ml\s*engineer|ai\s*engineer|deep\s*learn|nlp|data\s*analyst|analytics)/i.test(roleAndSummary)) {
+                        userPrimaryDomain = "data-science-ml";
+                    } else if (/\b(frontend|front.?end|react|angular|vue|ui\s*developer|web\s*developer)/i.test(roleAndSummary)) {
+                        userPrimaryDomain = "frontend";
+                    } else if (/\b(backend|back.?end|server|api\s*developer|node|java\s*developer|python\s*developer)/i.test(roleAndSummary)) {
+                        userPrimaryDomain = "backend";
+                    } else if (/\b(full.?stack|fullstack)/i.test(roleAndSummary)) {
+                        userPrimaryDomain = "fullstack";
+                    } else if (/\b(devops|sre|cloud\s*engineer|infrastructure|platform\s*engineer)/i.test(roleAndSummary)) {
+                        userPrimaryDomain = "devops";
+                    } else if (/\b(data\s*engineer|etl|pipeline|spark|airflow|warehouse)/i.test(roleAndSummary)) {
+                        userPrimaryDomain = "data-engineering";
+                    }
+                }
+            } catch { /* no resume */ }
+        }
+
+        // Clean and deduplicate skills before passing to search
+        // Remove any skills that are too short or contain parentheses (not properly split)
+        if (userSkills.length > 0) {
+            userSkills = Array.from(new Set(
+                userSkills
+                    .flatMap(s => {
+                        // Split any remaining parenthetical groups
+                        if (s.includes('(')) {
+                            const base = s.replace(/\s*\([^)]*\)/g, '').trim();
+                            const parenMatch = s.match(/\(([^)]+)\)/);
+                            const parenItems = parenMatch ? parenMatch[1].split(/[,;]/).map(i => i.trim()).filter(Boolean) : [];
+                            return [base, ...parenItems];
+                        }
+                        return [s];
+                    })
+                    .map(s => s.trim())
+                    .filter(s => s.length >= 2 && s.length <= 50)
+            ));
+        }
+
+        // Debug: Log what skills are being used for matching
+        if (user_id && userSkills.length > 0) {
+            console.log(`[JobListings] User ${(user_id as string).substring(0, 8)}... matching with ${userSkills.length} skills: ${userSkills.slice(0, 15).join(", ")}${userSkills.length > 15 ? '...' : ''}`);
+            console.log(`[JobListings] Domain: ${userPrimaryDomain || 'unknown'}, Role: ${userCurrentRole || 'unknown'}, Experience: ${userExperienceYears || 'unknown'} yrs`);
         }
 
         // Search the DB with all advanced features
@@ -87,7 +159,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             query: query as string,
             location: location as string,
             skills: skills ? (skills as string).split(",") : undefined,
-            experience_max: parsedExpMax,
+            experience_max: parsedExpMax ?? userExperienceYears,
             limit: parsedLimit,
             page: parsedPage,
             preferred_location: preferred_location as string,
@@ -98,6 +170,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             user_skills: userSkills.length > 0 ? userSkills : undefined,
             user_experience_years: userExperienceYears,
             user_seniority: userSeniority,
+            user_primary_domain: userPrimaryDomain || undefined,
         });
 
         let allJobs = result.data;
@@ -202,7 +275,10 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             total: totalCount,
             user_skills: userSkillsForResponse,
         };
-        routeCache.set(cacheKey, { timestamp: Date.now(), data: responseData });
+        // Only cache anonymous (non-personalized) responses
+        if (!user_id) {
+            routeCache.set(cacheKey, { timestamp: Date.now(), data: responseData });
+        }
         res.json(responseData);
     } catch (err: any) {
         res.status(500).json({ error: err.message });
