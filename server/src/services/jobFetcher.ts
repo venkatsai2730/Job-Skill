@@ -710,26 +710,69 @@ export { autoExpireJobs, verifyTopJobs };
 
 // ── Company Interleaving Algorithm ──────────────────────────
 function interleaveByCompany(jobs: any[], maxPerCompanyPerPage: number = 2): any[] {
-    const companyBuckets = new Map<string, any[]>();
-    for (const job of jobs) {
-        const key = (job.company || "").toLowerCase();
-        if (!companyBuckets.has(key)) companyBuckets.set(key, []);
-        companyBuckets.get(key)!.push(job);
-    }
-    const result: any[] = [];
-    const companyCount = new Map<string, number>();
-    let hasMore = true;
-    while (hasMore) {
-        hasMore = false;
-        for (const [company, bucket] of companyBuckets) {
-            if (bucket.length > 0) {
-                hasMore = true;
-                const job = bucket.shift()!;
-                result.push(job);
-                companyCount.set(company, (companyCount.get(company) || 0) + 1);
+    // Only interleave within score bands to preserve relevance ordering
+    // Jobs with similar scores (within 15 points) get interleaved; 
+    // higher-scoring jobs always appear before lower-scoring ones
+    if (jobs.length === 0) return [];
+    
+    const hasScores = jobs[0]?.match_score !== undefined;
+    if (!hasScores) {
+        // No scores — use simple round-robin
+        const companyBuckets = new Map<string, any[]>();
+        for (const job of jobs) {
+            const key = (job.company || "").toLowerCase();
+            if (!companyBuckets.has(key)) companyBuckets.set(key, []);
+            companyBuckets.get(key)!.push(job);
+        }
+        const result: any[] = [];
+        let hasMore = true;
+        while (hasMore) {
+            hasMore = false;
+            for (const [, bucket] of companyBuckets) {
+                if (bucket.length > 0) {
+                    hasMore = true;
+                    result.push(bucket.shift()!);
+                }
             }
         }
+        return result;
     }
+
+    // Score-aware interleaving: group into bands of 15 points, interleave within each band
+    const BAND_SIZE = 15;
+    const result: any[] = [];
+    let i = 0;
+    
+    while (i < jobs.length) {
+        const bandStart = jobs[i].match_score || 0;
+        const bandEnd = bandStart - BAND_SIZE;
+        
+        // Collect all jobs in this score band
+        const band: any[] = [];
+        while (i < jobs.length && (jobs[i].match_score || 0) > bandEnd) {
+            band.push(jobs[i]);
+            i++;
+        }
+        
+        // Interleave within the band (limit per company)
+        const companyCount = new Map<string, number>();
+        const deferred: any[] = [];
+        
+        for (const job of band) {
+            const key = (job.company || "").toLowerCase();
+            const count = companyCount.get(key) || 0;
+            if (count < maxPerCompanyPerPage) {
+                result.push(job);
+                companyCount.set(key, count + 1);
+            } else {
+                deferred.push(job);
+            }
+        }
+        
+        // Add deferred jobs at the end of this band (still better than next band)
+        result.push(...deferred);
+    }
+    
     return result;
 }
 
@@ -748,6 +791,7 @@ export async function searchJobs(filters: {
     user_skills?: string[];
     user_experience_years?: number;
     user_seniority?: string;
+    user_primary_domain?: string;
 }) {
     const limit = Math.min(filters.limit || 40, 300);
     const page = filters.page || 1;
@@ -810,6 +854,63 @@ export async function searchJobs(filters: {
 
     if (filters.skills && filters.skills.length > 0) {
         q = q.overlaps("skills", filters.skills);
+    }
+
+    // ── DB-Level Relevance Filter: Use user_skills to filter by title/description ──
+    // This ensures we only pull jobs that mention at least ONE of the user's core skills
+    // in the title or description, dramatically reducing irrelevant results.
+    // Only applies for "For You" feed (no explicit search query).
+    if (filters.user_skills && filters.user_skills.length > 0 && !filters.query) {
+        // Domain-specific skill prioritization
+        // A Data Scientist should filter by ML/Python skills, NOT by React/HTML
+        const DOMAIN_SKILLS: Record<string, string[]> = {
+            "data-science-ml": ["machine learning", "data science", "deep learning", "tensorflow", "pytorch", "xgboost", "sagemaker", "scikit-learn", "pandas", "numpy", "langchain", "natural language processing", "data scientist", "mlflow", "computer vision", "neural network", "anomaly detection", "time series", "feature engineering"],
+            "frontend": ["react", "angular", "vue", "javascript", "typescript", "nextjs", "frontend", "tailwind", "redux", "webpack", "vite"],
+            "backend": ["node", "express", "django", "flask", "fastapi", "spring", "golang", "rust", "microservices", "postgresql", "mongodb"],
+            "fullstack": ["react", "node", "typescript", "javascript", "fullstack", "full stack", "mongodb", "postgresql", "nextjs", "express"],
+            "devops": ["docker", "kubernetes", "terraform", "jenkins", "devops", "infrastructure", "ansible", "ci/cd pipeline"],
+            "data-engineering": ["apache spark", "airflow", "kafka", "data pipeline", "snowflake", "databricks", "data engineer", "hadoop", "dbt"],
+        };
+
+        let coreSkills: string[];
+        
+        if (filters.user_primary_domain && DOMAIN_SKILLS[filters.user_primary_domain]) {
+            // Use domain-specific skills for DB filtering (much more targeted)
+            const domainSkills = DOMAIN_SKILLS[filters.user_primary_domain];
+            // Only include domain skills that the user actually has
+            const userSkillsLower = filters.user_skills.map(s => s.toLowerCase().trim());
+            coreSkills = domainSkills.filter(ds => 
+                userSkillsLower.some(us => us.includes(ds) || ds.includes(us))
+            ).slice(0, 8);
+            
+            // If we couldn't match enough domain skills, add the domain name itself as a search term
+            if (coreSkills.length < 3) {
+                const domainTerms: Record<string, string[]> = {
+                    "data-science-ml": ["data scientist", "machine learning", "ml engineer", "ai engineer", "deep learning"],
+                    "frontend": ["frontend", "front end", "react developer", "ui developer"],
+                    "backend": ["backend", "back end", "api developer", "server"],
+                    "fullstack": ["full stack", "fullstack"],
+                    "devops": ["devops", "cloud engineer", "sre", "infrastructure"],
+                    "data-engineering": ["data engineer", "etl", "data pipeline"],
+                };
+                coreSkills = [...coreSkills, ...(domainTerms[filters.user_primary_domain] || [])].slice(0, 8);
+            }
+        } else {
+            // No domain detected — use top skills but exclude generic web/devops terms
+            const genericTerms = new Set(["html", "css", "git", "linux", "agile", "scrum", "sql", "c", "r", "docker", "ci/cd", "javascript", "react", "node"]);
+            coreSkills = filters.user_skills
+                .filter(s => s.length >= 3 && !genericTerms.has(s.toLowerCase().trim()))
+                .map(s => s.toLowerCase().trim())
+                .slice(0, 10);
+        }
+        
+        if (coreSkills.length > 0) {
+            const skillFilters = coreSkills.flatMap(skill => [
+                `title.ilike.%${skill}%`,
+                `description.ilike.%${skill}%`
+            ]);
+            q = q.or(skillFilters.join(","));
+        }
     }
 
     const { data, error } = await q;
@@ -927,25 +1028,83 @@ export async function searchJobs(filters: {
     // ── In-Memory: Resume Match Scoring ──
     const hasUserProfile = filters.user_skills && filters.user_skills.length > 0;
     if (hasUserProfile) {
-        const userSkillsList = (filters.user_skills || []).map(s => s.toLowerCase());
-        const userSkillsSet = new Set(userSkillsList);
+        const userSkillsList = (filters.user_skills || []).map(s => s.toLowerCase().trim());
+        // Normalize skills for fuzzy matching (remove dots, spaces, "js" suffix variations)
+        const normalizeSkill = (s: string) => s.toLowerCase().replace(/[.\-\s]+/g, "").replace(/js$/, "").trim();
+        const userSkillsNormalized = userSkillsList.map(normalizeSkill);
+        const userSkillsSet = new Set(userSkillsNormalized);
         const userExp = filters.user_experience_years || 0;
         const userCity = (filters.city || "").toLowerCase();
 
         jobs = jobs.map(job => {
             // Skill matching: check both skills[] array AND description text
-            const jobSkills = (job.skills || []).map((s: string) => s.toLowerCase());
-            const arrayOverlap = jobSkills.filter((s: string) => userSkillsSet.has(s)).length;
+            const jobSkills = (job.skills || []).map((s: string) => s.toLowerCase().trim());
+            const jobSkillsNormalized = jobSkills.map(normalizeSkill);
+            
+            // Fuzzy array overlap: normalized comparison
+            const arrayOverlap = jobSkillsNormalized.filter((s: string) => 
+                userSkillsSet.has(s) || userSkillsNormalized.some(us => us.includes(s) || s.includes(us))
+            ).length;
 
             // Also scan description for user skills (catches jobs with sparse skill tags)
+            // Use word boundary matching to avoid false positives
             const descLower = (job.description || "").toLowerCase();
             const titleLower = (job.title || "").toLowerCase();
-            const descOverlap = userSkillsList.filter(s => descLower.includes(s) || titleLower.includes(s)).length;
+            const descOverlap = userSkillsList.filter(s => {
+                if (s.length < 3) return false; // skip very short skills to avoid false matches
+                // Use word boundary check for longer skill names
+                const escaped = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+                return regex.test(descLower) || regex.test(titleLower);
+            }).length;
 
             // Combined skill score: array match weighted higher, desc match as bonus
             const totalPossible = Math.max(userSkillsList.length, 1);
-            const combinedOverlap = Math.min(totalPossible, arrayOverlap + Math.floor(descOverlap * 0.5));
+            const combinedOverlap = Math.min(totalPossible, arrayOverlap + Math.floor(descOverlap * 0.6));
             const skillScore = (combinedOverlap / totalPossible) * 100;
+
+            // Check if job title/domain is relevant to user's PRIMARY domain
+            const titleLowerForMatch = (job.title || "").toLowerCase();
+            
+            // Domain relevance check based on user's primary domain
+            let domainRelevance = 0; // -1 = mismatch, 0 = neutral, 1 = match
+            if (filters.user_primary_domain) {
+                const DOMAIN_TITLE_PATTERNS: Record<string, { match: RegExp; mismatch: RegExp }> = {
+                    "data-science-ml": {
+                        match: /\b(data\s*scien|machine\s*learn|ml\s+engineer|deep\s*learn|nlp\s*engineer|llm|data\s*analyst|research\s*scien|computer\s*vision|neural|python\s*dev|ai\s+engineer)/i,
+                        mismatch: /\b(frontend|front.?end|devops|dev\s*ops|cloud\s*eng|aws\s*dev|qa\b|quality\s*assur|security|cyber|info.?sec|network\s*eng|sys.?admin|ui.?ux|ux\s*design|ios\s*dev|android|flutter|swift|salesforce|sap\b|erp|helpdesk|support\s*eng|full.?stack|web\s*dev|team\s*memb)/i,
+                    },
+                    "frontend": {
+                        match: /\b(frontend|front.?end|react|angular|vue|ui\s*dev|web\s*dev|javascript\s*dev)/i,
+                        mismatch: /\b(data\s*scien|machine\s*learn|devops|backend|security|cyber|network|sys.?admin|dba)/i,
+                    },
+                    "backend": {
+                        match: /\b(backend|back.?end|server|api\s*dev|node\s*dev|java\s*dev|python\s*dev|golang|microservice)/i,
+                        mismatch: /\b(frontend|ui.?ux|design|security|cyber|network|data\s*scien|machine\s*learn)/i,
+                    },
+                    "devops": {
+                        match: /\b(devops|dev\s*ops|sre|cloud\s*eng|infrastructure|platform\s*eng|kubernetes|terraform)/i,
+                        mismatch: /\b(frontend|data\s*scien|machine\s*learn|ui.?ux|design|qa\b|security|cyber)/i,
+                    },
+                    "data-engineering": {
+                        match: /\b(data\s*engineer|etl|pipeline\s*eng|spark|airflow|warehouse|analytics\s*eng)/i,
+                        mismatch: /\b(frontend|devops|security|cyber|qa\b|ui.?ux|ios|android)/i,
+                    },
+                    "fullstack": {
+                        match: /\b(full.?stack|software\s*engineer|software\s*dev|sde|web\s*dev)/i,
+                        mismatch: /\b(data\s*scien|machine\s*learn|devops|security|cyber|network|sys.?admin)/i,
+                    },
+                };
+                
+                const patterns = DOMAIN_TITLE_PATTERNS[filters.user_primary_domain];
+                if (patterns) {
+                    if (patterns.match.test(titleLowerForMatch)) {
+                        domainRelevance = 1; // Title matches user's domain
+                    } else if (patterns.mismatch.test(titleLowerForMatch)) {
+                        domainRelevance = -1; // Title is clearly a different domain
+                    }
+                }
+            }
 
             const expMin = job.experience_min || 0;
             const expMax = job.experience_max || expMin + 3;
@@ -954,10 +1113,51 @@ export async function searchJobs(filters: {
             const jobLoc = (job.location || "").toLowerCase();
             const locScore = userCity && jobLoc.includes(userCity) ? 100 : (jobLoc.includes("remote") ? 70 : 30);
 
-            const matchScore = Math.round(skillScore * 0.5 + expScore * 0.3 + locScore * 0.2);
+            // Skill weight is dominant (65%) — irrelevant jobs MUST score low
+            let matchScore = Math.round(skillScore * 0.65 + expScore * 0.20 + locScore * 0.15);
+            
+            // Penalty: if ZERO skills matched (both array and description), cap score very low
+            if (combinedOverlap === 0) {
+                matchScore = Math.min(matchScore, 8);
+            }
+            
+            // Domain-based adjustment: boost matching domain, heavily penalize mismatches
+            if (domainRelevance === 1) {
+                matchScore = Math.min(100, matchScore + 20); // Strong boost: "Data Scientist" for a DS user
+            } else if (domainRelevance === -1) {
+                matchScore = Math.max(1, matchScore - 50); // Very heavy penalty: "DevOps/Security/Cloud" for a DS user
+            }
+
             return { ...job, match_score: matchScore };
         });
+
+        // Filter out jobs with very low match scores to remove truly irrelevant results
+        const minMatchThreshold = 20;
+        const relevantJobs = jobs.filter(job => (job.match_score || 0) >= minMatchThreshold);
+        // Only apply filter if we still have enough results
+        if (relevantJobs.length >= 15) {
+            jobs = relevantJobs;
+        }
     }
+
+    // ── Deduplication: Remove duplicate jobs (same title + company) ──
+    // Keep the one with the highest match_score or most recent posting
+    const seen = new Map<string, any>();
+    for (const job of jobs) {
+        const key = `${(job.title || "").toLowerCase().trim()}|${(job.company || "").toLowerCase().trim()}`;
+        const existing = seen.get(key);
+        if (!existing) {
+            seen.set(key, job);
+        } else {
+            // Keep the one with higher match_score, or more recent if scores are equal
+            const existingScore = existing.match_score || 0;
+            const newScore = job.match_score || 0;
+            if (newScore > existingScore || (newScore === existingScore && new Date(job.posted_at || 0) > new Date(existing.posted_at || 0))) {
+                seen.set(key, job);
+            }
+        }
+    }
+    jobs = Array.from(seen.values());
 
     // ── Sorting: Match score (if resume) → Location proximity → Date ──
     const userCity = (filters.location || filters.city || "").toLowerCase().trim();
@@ -978,9 +1178,17 @@ export async function searchJobs(filters: {
         const aLoc = (a.location || "").toLowerCase();
         const bLoc = (b.location || "").toLowerCase();
 
-        // TIER 1: Explicit Location Search
-        // If the user explicitly searched for a location (e.g. "Hyderabad"), 
-        // exact city matches MUST beat everything else, regardless of match_score.
+        // TIER 1: Resume Match Score (HIGHEST PRIORITY when user has a profile)
+        // Skill relevance is the most important signal — users want jobs matching their skills
+        if (hasUserProfile) {
+            const aScore = a.match_score || 0;
+            const bScore = b.match_score || 0;
+            const scoreDiff = bScore - aScore;
+            // Strong score difference (≥15pt) always wins over location
+            if (Math.abs(scoreDiff) >= 15) return scoreDiff;
+        }
+
+        // TIER 2: Location Match (within similar match scores)
         if (isExplicitLocationSearch && cleanCity) {
             const aCityMatch = aLoc.includes(cleanCity) ? 1 : 0;
             const bCityMatch = bLoc.includes(cleanCity) ? 1 : 0;
@@ -999,14 +1207,13 @@ export async function searchJobs(filters: {
             }
         }
 
-        // TIER 2: Resume Match Score
-        // High match scores (≥10pt difference) take priority after explicit location is satisfied
+        // TIER 3: Match Score (any difference matters now)
         if (hasUserProfile) {
             const scoreDiff = (b.match_score || 0) - (a.match_score || 0);
-            if (Math.abs(scoreDiff) >= 10) return scoreDiff;
+            if (scoreDiff !== 0) return scoreDiff;
         }
 
-        // TIER 3: Search Text Relevance
+        // TIER 4: Search Text Relevance
         if (qLower) {
             const aTitle = (a.title || "").toLowerCase();
             const bTitle = (b.title || "").toLowerCase();
@@ -1022,12 +1229,6 @@ export async function searchJobs(filters: {
             const aExact = aTitle === qLower ? 1 : 0;
             const bExact = bTitle === qLower ? 1 : 0;
             if (aExact !== bExact) return bExact - aExact;
-        }
-
-        // TIER 4: Match Score Tiebreaker
-        if (hasUserProfile) {
-            const scoreDiff = (b.match_score || 0) - (a.match_score || 0);
-            if (scoreDiff !== 0) return scoreDiff;
         }
 
         // TIER 5: Default Location Proximity (if not explicitly searched)
@@ -1063,8 +1264,8 @@ export async function searchJobs(filters: {
 
     // ── Company Interleaving (before pagination) ──
     // Apply interleaving, but preserve score-based ordering when resume matching
-    // Use higher per-company limit when total results are low (e.g., fresher searches)
-    const maxPerCompany = jobs.length < 40 ? 4 : 2;
+    // Use higher per-company limit when user has profile (score-sorted) or results are low
+    const maxPerCompany = hasUserProfile ? 5 : (jobs.length < 40 ? 4 : 2);
     jobs = interleaveByCompany(jobs, maxPerCompany);
 
     // Pagination

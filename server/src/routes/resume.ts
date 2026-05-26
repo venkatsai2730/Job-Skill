@@ -233,6 +233,9 @@ function parseProjects(textLines: string[]): ProjectEntry[] {
     const entries: ProjectEntry[] = [];
     let current: ProjectEntry | null = null;
 
+    // Common tech keywords to detect in project descriptions
+    const TECH_KEYWORDS = /\b(react|angular|vue|next\.?js|node\.?js|express|django|flask|spring|fastapi|graphql|rest|mongodb|postgresql|mysql|redis|docker|kubernetes|aws|azure|gcp|python|javascript|typescript|java|golang|rust|kotlin|swift|flutter|tensorflow|pytorch|pandas|numpy|firebase|supabase|tailwind|html|css|sass|webpack|vite|git|linux|nginx|selenium|cypress|jest|socket\.?io|websocket|kafka|rabbitmq|elasticsearch|prisma|sequelize|mongoose|blockchain|solidity|figma|tableau|powerbi|opencv|scikit|bert|gpt|langchain|openai|streamlit|gradio|huggingface|transformers|nltk|spacy|matplotlib|seaborn|plotly|airflow|spark|hadoop|databricks|snowflake|dbt|terraform|ansible|jenkins|github\s*actions|gitlab\s*ci|circleci|vercel|netlify|heroku|render|railway|stripe|twilio|sendgrid|auth0|clerk|jwt|oauth|graphql|trpc|drizzle|zod|shadcn)\b/gi;
+
     for (const line of textLines) {
         const isBullet = /^[•\-–*▪◦◆➤❖►]/.test(line) || /^\d+[.)]\s/.test(line);
         // Heuristic: short lines that aren't bullets are project names
@@ -241,22 +244,30 @@ function parseProjects(textLines: string[]): ProjectEntry[] {
             current = { name: line.trim(), description: "", tech: [] };
         } else if (current) {
             const clean = line.replace(/^[•\-–*▪◦◆➤❖►\d.)]+\s*/, "").trim();
-            // Try to detect tech stack lines
-            const techMatch = clean.match(/\b(?:tech|technologies|stack|built\s+with|using)[:\s]*(.*)/i);
+            // Try to detect tech stack lines (explicit "Tech:" prefix)
+            const techMatch = clean.match(/\b(?:tech|technologies|stack|built\s+with|using|tools)[:\s]*(.*)/i);
             if (techMatch) {
                 current.tech = techMatch[1].split(/[,;|•]/).map((s) => s.trim()).filter(Boolean);
             } else if (clean) {
                 current.description += (current.description ? " " : "") + clean;
+                // Also extract tech keywords from description text
+                const foundTech = clean.match(TECH_KEYWORDS);
+                if (foundTech) {
+                    const newTech = foundTech.map(t => t.trim());
+                    current.tech = Array.from(new Set([...current.tech, ...newTech]));
+                }
             }
         }
     }
     if (current) entries.push(current);
 
     if (entries.length === 0 && textLines.length > 0) {
+        const fullText = textLines.join(" ");
+        const foundTech = fullText.match(TECH_KEYWORDS) || [];
         entries.push({
             name: "Project",
-            description: textLines.join(" "),
-            tech: [],
+            description: fullText,
+            tech: Array.from(new Set(foundTech.map(t => t.trim()))),
         });
     }
 

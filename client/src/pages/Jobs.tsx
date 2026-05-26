@@ -566,10 +566,10 @@ export default function Jobs() {
     "🌍 Remote Worldwide": (j) => (j.location || "").toLowerCase().includes("remote"),
     "🏢 Top Companies Hiring": (j) => ["google", "microsoft", "amazon", "flipkart", "swiggy", "zomato", "razorpay", "cred"].some(c => (j.company || "").toLowerCase().includes(c)),
   };
-  const techJobs = feedJobs.filter(categoryFilters["💻 Tech Jobs Near You"]);
-  const fresherJobs = feedJobs.filter(categoryFilters["🎓 Fresher & Internship"]);
-  const remoteJobs = feedJobs.filter(categoryFilters["🌍 Remote Worldwide"]);
-  const topCompanyJobs = feedJobs.filter(categoryFilters["🏢 Top Companies Hiring"]);
+  const techJobs = feedJobs.filter(categoryFilters["💻 Tech Jobs Near You"]).sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
+  const fresherJobs = feedJobs.filter(categoryFilters["🎓 Fresher & Internship"]).sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
+  const remoteJobs = feedJobs.filter(categoryFilters["🌍 Remote Worldwide"]).sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
+  const topCompanyJobs = feedJobs.filter(categoryFilters["🏢 Top Companies Hiring"]).sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
 
   // Get all jobs for the active category filter
   // Use server-fetched category jobs when available, fall back to client-side filtering
