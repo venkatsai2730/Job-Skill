@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef } from "react";
-import { Star, MapPin, DollarSign, Clock, Bot, ExternalLink, Filter, ChevronDown, BookmarkPlus, Search, Briefcase, Navigation, Info, Shield, AlertTriangle, ChevronRight } from "lucide-react";
+import { Star, MapPin, DollarSign, Clock, Bot, ExternalLink, Filter, ChevronDown, BookmarkPlus, Search, Briefcase, Navigation, Info, Shield, AlertTriangle, ChevronRight, ToggleLeft, ToggleRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+
+// ═══════════════════════════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════════════════════════
 
 interface JobListing {
   id: string;
@@ -19,18 +23,23 @@ interface JobListing {
   source: string;
   posted_at: string;
   description: string;
-  // New fields
   seniority_level?: string;
   match_score?: number;
   confidence_score?: number;
   is_active?: boolean;
   category?: string;
-  // v2.0: Smart ranking fields
   matched_skills?: string[];
   skill_gap?: string[];
-  // v3.0: Selection chance
   selection_chance?: number;
   selection_reason?: string;
+  // ── Domain-aware fields (v3.0) ──
+  job_domain?: string;
+  job_domain_label?: string;
+  relevance_score?: number;
+  domain_match?: boolean;
+  shortlisting_chance?: number;
+  shortlisting_band?: string;
+  shortlisting_reason?: string;
 }
 
 interface TrackedJob {
@@ -56,6 +65,41 @@ interface GeoLocation {
   lon: number;
 }
 
+interface ApiMeta {
+  user_domain: string;
+  user_domain_label: string;
+  total_primary: number;
+  total_cross: number;
+  relevance_threshold: number;
+  user_skills_count: number;
+  related_domains?: { domain: string; label: string }[];
+}
+
+// ── Legacy API response (anonymous users) ──
+interface LegacyApiResponse {
+  jobs: JobListing[];
+  total: number;
+  user_skills?: string[];
+}
+
+// ── Domain-aware API response (authenticated users) ──
+interface DomainAwareApiResponse {
+  primary_jobs: JobListing[];
+  cross_domain_jobs: JobListing[];
+  meta: ApiMeta;
+  user_skills?: string[];
+}
+
+type ApiResponse = LegacyApiResponse | DomainAwareApiResponse;
+
+function isDomainAwareResponse(res: ApiResponse): res is DomainAwareApiResponse {
+  return "primary_jobs" in res && "meta" in res;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+
 const STATS = [
   { icon: "📋", label: "Total", value: "0" },
   { icon: "✅", label: "Active", value: "0" },
@@ -71,7 +115,21 @@ const COLUMNS = [
   { name: "Offer", status: "Offer", color: "text-emerald-400" },
 ];
 
-// ── Seniority Badge Component ─────────────────────────────
+// Domain → section header emoji + title
+const DOMAIN_SECTION_TITLES: Record<string, { emoji: string; title: string }> = {
+  "data-science-ml": { emoji: "🧠", title: "Data Science & ML Roles Near You" },
+  "data-analytics": { emoji: "📊", title: "Data Analytics Roles Near You" },
+  "frontend": { emoji: "⚛️", title: "Frontend Roles Near You" },
+  "backend": { emoji: "🔧", title: "Backend Roles Near You" },
+  "mobile": { emoji: "📱", title: "Mobile Development Roles Near You" },
+  "devops": { emoji: "☁️", title: "DevOps & Cloud Roles Near You" },
+  "generic-fresher": { emoji: "🎓", title: "Fresher & Entry-Level Roles Near You" },
+};
+
+// ═══════════════════════════════════════════════════════════════
+// BADGE COMPONENTS
+// ═══════════════════════════════════════════════════════════════
+
 function SeniorityBadge({ level }: { level?: string }) {
   const config: Record<string, { emoji: string; label: string; cls: string }> = {
     intern: { emoji: "🟣", label: "Intern", cls: "bg-purple-500/15 text-purple-400 border-purple-500/20" },
@@ -89,7 +147,6 @@ function SeniorityBadge({ level }: { level?: string }) {
   );
 }
 
-// ── Match Score Badge ─────────────────────────────────────
 function MatchScoreBadge({ score }: { score?: number }) {
   if (score === undefined || score === 0) return null;
   let emoji: string, label: string, cls: string;
@@ -104,7 +161,6 @@ function MatchScoreBadge({ score }: { score?: number }) {
   );
 }
 
-// ── Selection Chance Badge ────────────────────────────────
 function SelectionChanceBadge({ chance, reason }: { chance?: number; reason?: string }) {
   if (!chance || chance <= 0) return null;
   const [showTip, setShowTip] = useState(false);
@@ -137,7 +193,6 @@ function SelectionChanceBadge({ chance, reason }: { chance?: number; reason?: st
   );
 }
 
-// ── Activity Badge ────────────────────────────────────────
 function ActivityBadge({ postedAt }: { postedAt: string }) {
   const daysAgo = Math.floor((Date.now() - new Date(postedAt).getTime()) / (1000 * 60 * 60 * 24));
   if (daysAgo <= 7) return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">🟢 Active</span>;
@@ -145,7 +200,55 @@ function ActivityBadge({ postedAt }: { postedAt: string }) {
   return null;
 }
 
-// ── "Why this job?" Tooltip ───────────────────────────────
+// ── Domain Pill — shows if job is in/outside user's domain ──
+function DomainPill({ job, userDomain, userDomainLabel }: { job: JobListing; userDomain?: string; userDomainLabel?: string }) {
+  if (!userDomain || !job.job_domain) return null;
+  const isMatch = job.domain_match ?? (job.job_domain === userDomain);
+  if (isMatch) {
+    return (
+      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center gap-1">
+        ✅ Matches your domain: {userDomainLabel || userDomain}
+      </span>
+    );
+  }
+  return (
+    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200 flex items-center gap-1">
+      ↗️ {job.job_domain_label || job.job_domain}
+    </span>
+  );
+}
+
+// ── Shortlisting Band Badge ──
+function ShortlistBadge({ band, chance, reason }: { band?: string; chance?: number; reason?: string }) {
+  if (!band || !chance || chance <= 0) return null;
+  const [showTip, setShowTip] = useState(false);
+  const config: Record<string, { emoji: string; cls: string; bgCls: string }> = {
+    "High": { emoji: "🔥", cls: "text-emerald-400", bgCls: "bg-emerald-500/15 border-emerald-500/20" },
+    "Medium": { emoji: "✨", cls: "text-blue-400", bgCls: "bg-blue-500/15 border-blue-500/20" },
+    "Low": { emoji: "💡", cls: "text-yellow-400", bgCls: "bg-yellow-500/15 border-yellow-500/20" },
+    "Very Low": { emoji: "📊", cls: "text-gray-400", bgCls: "bg-gray-500/15 border-gray-500/20" },
+  };
+  const c = config[band] || config["Very Low"];
+  return (
+    <div className="relative inline-block">
+      <button
+        onMouseEnter={() => setShowTip(true)}
+        onMouseLeave={() => setShowTip(false)}
+        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${c.bgCls} ${c.cls} flex items-center gap-1 cursor-help`}
+      >
+        {c.emoji} Shortlisting: {band}
+      </button>
+      {showTip && reason && (
+        <div className="absolute bottom-7 left-0 z-50 w-56 bg-gray-50 border border-border rounded-xl p-3 shadow-xl text-[11px] text-gray-700">
+          <p className="font-bold text-gray-800 mb-1">Shortlisting Chance: {chance}%</p>
+          <p>{reason}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── "Why this job?" Tooltip ───────────────────────────────────
 function WhyThisJob({ job, userSkills }: { job: JobListing; userSkills: string[] }) {
   const [open, setOpen] = useState(false);
   if (!userSkills || userSkills.length === 0) return null;
@@ -169,6 +272,10 @@ function WhyThisJob({ job, userSkills }: { job: JobListing; userSkills: string[]
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// UTILITY FUNCTIONS
+// ═══════════════════════════════════════════════════════════════
+
 export const formatSalary = (min: number | null, max: number | null) => {
   if (!min && !max) return "Not specified";
   if (min && !max) return `${Math.round(min / 1000)}k+`;
@@ -182,7 +289,18 @@ export const formatTimeAgo = (dateStr: string) => {
   return `${Math.floor(hours / 24)}d ago`;
 };
 
-export function JobCard({ job, userSkills, onSave, onMatch }: { job: JobListing, userSkills: string[], onSave: (j: JobListing) => void, onMatch: (j: JobListing) => void }) {
+// ═══════════════════════════════════════════════════════════════
+// JOB CARD COMPONENT
+// ═══════════════════════════════════════════════════════════════
+
+export function JobCard({ job, userSkills, onSave, onMatch, userDomain, userDomainLabel }: {
+  job: JobListing;
+  userSkills: string[];
+  onSave: (j: JobListing) => void;
+  onMatch: (j: JobListing) => void;
+  userDomain?: string;
+  userDomainLabel?: string;
+}) {
   return (
     <div className="glass-card-hover p-5 flex flex-col group relative bg-white/60 backdrop-blur-md">
       <div className="absolute top-4 right-4 flex items-center gap-1.5">
@@ -204,9 +322,12 @@ export function JobCard({ job, userSkills, onSave, onMatch }: { job: JobListing,
         </div>
       </div>
 
+      {/* Badges row */}
       <div className="flex items-center gap-1.5 flex-wrap mb-3">
+        <DomainPill job={job} userDomain={userDomain} userDomainLabel={userDomainLabel} />
         <SeniorityBadge level={job.seniority_level} />
         <MatchScoreBadge score={job.match_score} />
+        <ShortlistBadge band={job.shortlisting_band} chance={job.shortlisting_chance} reason={job.shortlisting_reason} />
         <SelectionChanceBadge chance={job.selection_chance} reason={job.selection_reason} />
         <ActivityBadge postedAt={job.posted_at} />
       </div>
@@ -255,28 +376,25 @@ export function JobCard({ job, userSkills, onSave, onMatch }: { job: JobListing,
   );
 }
 
-// ── Category Section for Featured Jobs ────────────────────
-function CategorySection({ title, jobs, onSeeAll, userSkills, onSave, onMatch }: { title: string; jobs: JobListing[]; onSeeAll: () => void; userSkills: string[]; onSave: (j: JobListing) => void; onMatch: (j: JobListing) => void }) {
-  if (jobs.length === 0) return null;
-  return (
-    <div className="mb-8">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-bold text-foreground">{title}</h3>
-        <button onClick={onSeeAll} className="text-blue-500 text-[13px] font-semibold hover:underline flex items-center gap-1">
-          See all <ChevronRight className="w-4 h-4" />
-        </button>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {jobs.slice(0, 4).map(job => <JobCard key={job.id} job={job} userSkills={userSkills} onSave={onSave} onMatch={onMatch} />)}
-      </div>
-    </div>
-  );
-}
+// ═══════════════════════════════════════════════════════════════
+// MAIN JOBS PAGE COMPONENT
+// ═══════════════════════════════════════════════════════════════
 
 export default function Jobs() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("feed");
+
+  // ── Domain-aware state ──
+  const [primaryJobs, setPrimaryJobs] = useState<JobListing[]>([]);
+  const [crossDomainJobs, setCrossDomainJobs] = useState<JobListing[]>([]);
+  const [userDomain, setUserDomain] = useState<string | null>(null);
+  const [userDomainLabel, setUserDomainLabel] = useState<string | null>(null);
+  const [showCrossDomain, setShowCrossDomain] = useState(true);
+  const [hasDomainData, setHasDomainData] = useState(false);
+
+  // ── Legacy state (anonymous / backward compat) ──
   const [feedJobs, setFeedJobs] = useState<JobListing[]>([]);
+
   const [trackedJobs, setTrackedJobs] = useState<TrackedJob[]>([]);
   const [loadingFeed, setLoadingFeed] = useState(true);
   const [loadingTracked, setLoadingTracked] = useState(true);
@@ -289,12 +407,6 @@ export default function Jobs() {
   const [skills, setSkills] = useState("");
   const [preferredLocation, setPreferredLocation] = useState("");
   const [userSkills, setUserSkills] = useState<string[]>([]);
-  const [feedSubTab, setFeedSubTab] = useState<"for-you" | "browse" | "remote">("for-you");
-  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
-  const [categoryJobs, setCategoryJobs] = useState<JobListing[]>([]);
-  const [loadingCategory, setLoadingCategory] = useState(false);
-  const [categoryTotal, setCategoryTotal] = useState(0);
-  const [categoryPage, setCategoryPage] = useState(1);
 
   const [geoLocation, setGeoLocation] = useState<GeoLocation | null>(null);
   const [geoStatus, setGeoStatus] = useState<"detecting" | "detected" | "denied" | "idle">("idle");
@@ -303,7 +415,7 @@ export default function Jobs() {
   // Get user ID from localStorage
   const getUserId = () => {
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("auth_token");
       if (!token) return null;
       const payload = JSON.parse(atob(token.split(".")[1]));
       return payload.userId || payload.sub || null;
@@ -336,7 +448,6 @@ export default function Jobs() {
     } else { fallbackToTimezone(); }
 
     fetchTrackedJobs();
-    // Load user skills for "Why this job?" tooltip
     loadUserSkills();
   }, []);
 
@@ -387,9 +498,29 @@ export default function Jobs() {
       const userId = getUserId();
       if (userId) params.append("user_id", userId);
 
-      const res = await api.get<{ jobs: JobListing[], total: number }>(`/api/job-listings?${params.toString()}`);
-      setFeedJobs(res.jobs || []);
-      setTotalJobs(res.total || 0);
+      const res = await api.get<ApiResponse>(`/api/job-listings?${params.toString()}`);
+
+      // Handle domain-aware response vs legacy response
+      if (isDomainAwareResponse(res)) {
+        setPrimaryJobs(res.primary_jobs || []);
+        setCrossDomainJobs(res.cross_domain_jobs || []);
+        setUserDomain(res.meta.user_domain);
+        setUserDomainLabel(res.meta.user_domain_label);
+        setHasDomainData(true);
+        setTotalJobs(res.meta.total_primary + res.meta.total_cross);
+        // Also set feedJobs for backward compat (used by some sub-components)
+        setFeedJobs([...res.primary_jobs, ...res.cross_domain_jobs]);
+      } else {
+        // Legacy response (anonymous)
+        setFeedJobs(res.jobs || []);
+        setTotalJobs(res.total || 0);
+        setHasDomainData(false);
+        setPrimaryJobs([]);
+        setCrossDomainJobs([]);
+        setUserDomain(null);
+        setUserDomainLabel(null);
+      }
+
       setPage(currentPage);
     } catch {
       toast.error("Failed to load real-time job feed");
@@ -406,71 +537,6 @@ export default function Jobs() {
     fetchFeedJobs(false, newPage);
   };
 
-  // Fetch jobs for a specific category from the server (not client-side filtering)
-  const fetchCategoryJobs = async (serverCategory: string, pageNum = 1) => {
-    setLoadingCategory(true);
-    try {
-      const params = new URLSearchParams({ page: pageNum.toString(), limit: "60", category: serverCategory });
-      if (location) params.append("location", location);
-      if (experience) params.append("experience_max", experience);
-      
-      const resolvedCity = geoLocation?.city || "";
-      const resolvedCountry = geoLocation?.country || "";
-      if (resolvedCity) params.append("city", resolvedCity);
-      if (resolvedCountry) params.append("country", resolvedCountry);
-      if (preferredLocation) params.append("preferred_location", preferredLocation);
-
-      const userId = getUserId();
-      if (userId) params.append("user_id", userId);
-
-      const res = await api.get<{ jobs: JobListing[], total: number }>(`/api/job-listings?${params.toString()}`);
-      setCategoryJobs(res.jobs || []);
-      setCategoryTotal(res.total || 0);
-      setCategoryPage(pageNum);
-    } catch {
-      toast.error("Failed to load category jobs");
-    } finally {
-      setLoadingCategory(false);
-    }
-  };
-
-  const handleCategoryPageChange = (newPage: number) => {
-    if (!categoryFilter) return;
-    const serverCat = CATEGORY_TO_SERVER[categoryFilter];
-    if (!serverCat) return;
-    const totalPages = Math.ceil(categoryTotal / 60);
-    if (newPage < 1 || newPage > totalPages) return;
-    fetchCategoryJobs(serverCat, newPage);
-  };
-
-  // Map UI category names to server category filter values
-  const CATEGORY_TO_SERVER: Record<string, string> = {
-    "💻 Tech Jobs Near You": "Software Development",
-    "🎓 Fresher & Internship": "Internships & Fresher",
-    "🌍 Remote Worldwide": "Remote",
-    "🏢 Top Companies Hiring": "", // handled client-side (no server category)
-  };
-
-  const handleSeeAll = (uiCategory: string) => {
-    setCategoryFilter(uiCategory);
-    const serverCat = CATEGORY_TO_SERVER[uiCategory];
-    if (serverCat) {
-      // Fetch from server with category filter for a full page of results
-      fetchCategoryJobs(serverCat, 1);
-    } else {
-      // For "Top Companies", filter client-side (no server category)
-      setCategoryJobs([]);
-      setCategoryTotal(0);
-    }
-  };
-
-  const handleBackToCategories = () => {
-    setCategoryFilter(null);
-    setCategoryJobs([]);
-    setCategoryTotal(0);
-    setCategoryPage(1);
-  };
-
   const fetchTrackedJobs = async () => {
     setLoadingTracked(true);
     try {
@@ -479,19 +545,6 @@ export default function Jobs() {
     } catch {
       toast.error("Failed to load tracked applications");
     } finally { setLoadingTracked(false); }
-  };
-
-  const formatSalary = (min: number | null, max: number | null) => {
-    if (!min && !max) return "Not specified";
-    if (min && !max) return `$${Math.round(min / 1000)}k+`;
-    if (!min && max) return `Up to $${Math.round(max / 1000)}k`;
-    return `$${Math.round(min! / 1000)}k - $${Math.round(max! / 1000)}k`;
-  };
-
-  const formatTimeAgo = (dateStr: string) => {
-    const hours = Math.floor((Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60));
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.floor(hours / 24)}d ago`;
   };
 
   const calculateStats = () => {
@@ -548,34 +601,20 @@ export default function Jobs() {
     );
   };
 
+  const onMatchJob = (j: JobListing) => {
+    const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${(j.skills || []).join(", ")}.`;
+    navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`);
+  };
+
   const displayStats = calculateStats();
 
-  // ── Category Sections Data ──
-  const categoryFilters: Record<string, (j: JobListing) => boolean> = {
-    "💻 Tech Jobs Near You": (j) => ["Software Development", "Data & Analytics", "DevOps & Cloud"].includes(j.category || ""),
-    "🎓 Fresher & Internship": (j) => {
-      const title = j.title || "";
-      const titleLower = title.toLowerCase();
-      // TECH GATE: must be a tech role
-      const isTech = /\b(engineer|developer|sde|software|data|devops|qa|tester|frontend|backend|fullstack|machine.?learn|ml\b|ai\b|python|java|react|node|web.?dev|android|ios|cloud|cyber|security|tech|it\b|network|database|embedded|automation|sre|sdet)\b/i.test(titleLower);
-      const isNonTech = /\b(telecaller|fundrais|charity|marketing|sales|hr\b|human.?resource|legal|finance|account|video.?edit|graphic.?design|content.?writ|blog.?writ|business.?develop|business.?strat|client.?acqui|customer.?success|real.?estate|teaching|tutor|event.?manag|hospitality|medical|pharma|fashion)\b/i.test(titleLower);
-      if (isNonTech || !isTech) return false;
-      // Must also be a fresher/intern level
-      return (j.category === "Internships & Fresher") || (j.seniority_level === "intern" || j.seniority_level === "entry") || /\b(intern|fresher|trainee|junior|jr\.?|associate|graduate|entry[\s-]?level|apprentice)\b/i.test(titleLower);
-    },
-    "🌍 Remote Worldwide": (j) => (j.location || "").toLowerCase().includes("remote"),
-    "🏢 Top Companies Hiring": (j) => ["google", "microsoft", "amazon", "flipkart", "swiggy", "zomato", "razorpay", "cred"].some(c => (j.company || "").toLowerCase().includes(c)),
-  };
-  const techJobs = feedJobs.filter(categoryFilters["💻 Tech Jobs Near You"]).sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
-  const fresherJobs = feedJobs.filter(categoryFilters["🎓 Fresher & Internship"]).sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
-  const remoteJobs = feedJobs.filter(categoryFilters["🌍 Remote Worldwide"]).sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
-  const topCompanyJobs = feedJobs.filter(categoryFilters["🏢 Top Companies Hiring"]).sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
-
-  // Get all jobs for the active category filter
-  // Use server-fetched category jobs when available, fall back to client-side filtering
-  const categoryFilteredJobs = categoryFilter
-    ? (categoryJobs.length > 0 ? categoryJobs : feedJobs.filter(categoryFilters[categoryFilter] || (() => true)))
-    : [];
+  // Get primary section title
+  const primarySectionTitle = (() => {
+    if (!userDomain) return "✨ Top Matches For You";
+    const config = DOMAIN_SECTION_TITLES[userDomain];
+    if (config) return `${config.emoji} ${config.title}`;
+    return "✨ Top Matches For You";
+  })();
 
   return (
     <div className="p-6 md:p-10 max-w-[1600px] mx-auto min-h-screen flex flex-col">
@@ -609,22 +648,27 @@ export default function Jobs() {
 
         {/* FEED CONTENT */}
         <TabsContent value="feed" className="flex-1 mt-0 outline-none flex flex-col">
-          {/* Sub-tabs: For You / Browse All / Remote */}
-          <div className="flex items-center gap-2 mb-5">
-            {(["for-you", "browse", "remote"] as const).map(tab => {
-              const labels = { "for-you": "✨ For You", "browse": "📋 Browse All", "remote": "🌍 Remote" };
-              return (
-                <button key={tab} onClick={() => setFeedSubTab(tab)}
-                  className={`px-4 py-2 rounded-full text-[13px] font-semibold transition-all border ${
-                    feedSubTab === tab
-                      ? "bg-blue-500/15 text-blue-500 border-blue-500/30"
-                      : "bg-white text-gray-600 border-border hover:bg-gray-50 hover:text-foreground"
-                  }`}>
-                  {labels[tab]}
-                </button>
-              );
-            })}
+          {/* Domain toggle + Location detection banner */}
+          <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              {/* No sub-tabs needed in domain-aware mode — primary/cross split replaces them */}
+            </div>
+            {/* Cross-domain toggle */}
+            {hasDomainData && (
+              <button
+                onClick={() => setShowCrossDomain(!showCrossDomain)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-full text-[13px] font-semibold transition-all border ${
+                  showCrossDomain
+                    ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
+                    : "bg-gray-50 text-gray-500 border-border hover:bg-gray-100"
+                }`}
+              >
+                {showCrossDomain ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+                Include jobs outside your domain
+              </button>
+            )}
           </div>
+
           {/* Location Detection Banner */}
           {geoStatus === "detected" && geoLocation && (
             <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-[13px] font-medium">
@@ -686,71 +730,79 @@ export default function Jobs() {
 
           {loadingFeed ? (
             <div className="flex items-center justify-center py-20"><div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full" /></div>
-          ) : feedJobs.length === 0 ? (
+          ) : (primaryJobs.length === 0 && crossDomainJobs.length === 0 && feedJobs.length === 0) ? (
             <div className="text-center py-20 bg-white border border-border rounded-2xl">
               <h3 className="text-lg font-medium text-gray-800">No jobs match your filters</h3>
               <p className="text-gray-600 mt-2">Try adjusting your search criteria broadly to find more roles.</p>
               <button onClick={() => { setSearch(""); setLocation(""); setExperience(""); setSkills(""); fetchFeedJobs(true, 1, undefined, undefined, undefined, { query: "", location: "", experience: "", skills: "", category: "" }); }} className="mt-4 text-blue-500 hover:underline text-sm font-medium">Clear Filters</button>
             </div>
-          ) : (
+          ) : hasDomainData ? (
             <>
-              {/* Category Expanded View */}
-              {categoryFilter ? (
-                <div className="mb-6">
-                  <div className="flex items-center gap-3 mb-6">
-                    <button onClick={handleBackToCategories} className="flex items-center gap-1.5 text-blue-500 hover:text-blue-600 font-semibold text-sm transition-colors">
-                      ← Back to all categories
-                    </button>
-                    <span className="text-gray-300">|</span>
-                    <h3 className="text-lg font-bold text-foreground">{categoryFilter}</h3>
-                    <span className="text-gray-500 text-sm">({categoryTotal > 0 ? categoryTotal : categoryFilteredJobs.length} jobs)</span>
+              {/* ═══════════════════════════════════════════════════ */}
+              {/* SECTION 1: PRIMARY DOMAIN JOBS                     */}
+              {/* ═══════════════════════════════════════════════════ */}
+              <div className="mb-10">
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <h2 className="text-xl font-bold text-foreground">{primarySectionTitle}</h2>
+                    <p className="text-gray-500 text-[13px] mt-0.5">
+                      {primaryJobs.length > 0
+                        ? `${primaryJobs.length} jobs matching your ${userDomainLabel || "domain"} profile`
+                        : `No strong matches in ${userDomainLabel || "your domain"} yet`
+                      }
+                    </p>
                   </div>
-                  {loadingCategory ? (
-                    <div className="flex items-center justify-center py-20"><div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full" /></div>
-                  ) : (
-                    <>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {categoryFilteredJobs.map(job => <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />)}
-                      </div>
-                      {categoryFilteredJobs.length === 0 && (
-                        <div className="text-center py-12 bg-white border border-border rounded-2xl">
-                          <p className="text-gray-500">No jobs found in this category right now.</p>
-                        </div>
-                      )}
-                      {/* Category Pagination */}
-                      {categoryTotal > 60 && (
-                        <div className="flex justify-center items-center gap-3 mt-12 mb-6">
-                          <button onClick={() => handleCategoryPageChange(categoryPage - 1)} disabled={categoryPage === 1} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Previous</button>
-                          <span className="text-sm text-gray-500">Page {categoryPage} of {Math.ceil(categoryTotal / 60)}</span>
-                          <button onClick={() => handleCategoryPageChange(categoryPage + 1)} disabled={categoryPage >= Math.ceil(categoryTotal / 60)} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Next</button>
-                        </div>
-                      )}
-                    </>
-                  )}
                 </div>
-              ) : (
-                <>
-              {/* Category Sections */}
-              {page === 1 && !search && (
-                <div className="mb-4">
-                  <CategorySection title="💻 Tech Jobs Near You" jobs={techJobs} onSeeAll={() => handleSeeAll("💻 Tech Jobs Near You")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
-                  <CategorySection title="🎓 Fresher & Internship" jobs={fresherJobs} onSeeAll={() => handleSeeAll("🎓 Fresher & Internship")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
-                  <CategorySection title="🌍 Remote Worldwide" jobs={remoteJobs} onSeeAll={() => handleSeeAll("🌍 Remote Worldwide")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
-                  <CategorySection title="🏢 Top Companies Hiring" jobs={topCompanyJobs} onSeeAll={() => handleSeeAll("🏢 Top Companies Hiring")} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
+
+                {primaryJobs.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {primaryJobs.map((job) => (
+                      <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} userDomain={userDomain || undefined} userDomainLabel={userDomainLabel || undefined} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="bg-gradient-to-r from-blue-500/5 to-purple-500/5 border border-blue-200/30 rounded-2xl p-8 text-center">
+                    <div className="text-3xl mb-3">🔍</div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-2">
+                      We didn't find strong matches in {userDomainLabel || "your domain"} yet
+                    </h3>
+                    <p className="text-gray-500 text-[14px] max-w-md mx-auto">
+                      Try broadening your location or check back later — new jobs are fetched every 15 minutes.
+                      Meanwhile, here are other tech roles near you.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* ═══════════════════════════════════════════════════ */}
+              {/* SECTION 2: CROSS-DOMAIN JOBS                       */}
+              {/* ═══════════════════════════════════════════════════ */}
+              {showCrossDomain && crossDomainJobs.length > 0 && (
+                <div className="mb-10">
+                  <div className="flex items-center justify-between mb-5">
+                    <div>
+                      <h2 className="text-xl font-bold text-foreground">🌐 Other Tech Roles Near You</h2>
+                      <p className="text-gray-500 text-[13px] mt-0.5">
+                        Outside your main domain — explore broader opportunities ({crossDomainJobs.length} jobs)
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {crossDomainJobs.map((job) => (
+                      <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} userDomain={userDomain || undefined} userDomainLabel={userDomainLabel || undefined} />
+                    ))}
+                  </div>
                 </div>
               )}
-
-              {/* Main Job Grid */}
+            </>
+          ) : (
+            <>
+              {/* ═══════════════════════════════════════════════════ */}
+              {/* LEGACY VIEW (anonymous / no domain data)           */}
+              {/* ═══════════════════════════════════════════════════ */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {(feedSubTab === "for-you"
-                  ? feedJobs.filter(j => (j.match_score || 0) > 0).length > 0
-                    ? feedJobs.filter(j => (j.match_score || 0) > 0)
-                    : feedJobs
-                  : feedSubTab === "remote"
-                    ? feedJobs.filter(j => (j.location || "").toLowerCase().includes("remote"))
-                    : feedJobs
-                ).map((job) => (
-                  <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={(j: JobListing) => { const prompt = `Analyze my fit for the ${j.title} role at ${j.company}. Skills: ${j.skills.join(", ")}.`; navigate(`/dashboard/chat?prompt=${encodeURIComponent(prompt)}`); }} />
+                {feedJobs.map((job) => (
+                  <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} />
                 ))}
               </div>
 
@@ -777,8 +829,6 @@ export default function Jobs() {
                   </div>
                   <button onClick={() => handlePageChange(page + 1)} disabled={page === Math.ceil(totalJobs / (getUserId() ? 50 : 40))} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Next</button>
                 </div>
-              )}
-              </>
               )}
             </>
           )}

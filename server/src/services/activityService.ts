@@ -47,7 +47,7 @@ export async function logActivity(event: Omit<ActivityEvent, "id" | "created_at"
 export async function getUserActivity(userId: string, limit = 15): Promise<ActivityEvent[]> {
     const { data, error } = await supabaseAdmin
         .from("user_activity")
-        .select("id, type, title, meta, created_at")
+        .select("id, user_id, type, title, meta, created_at")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(limit);
