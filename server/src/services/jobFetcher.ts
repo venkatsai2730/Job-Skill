@@ -14,6 +14,7 @@ import {
 } from "./jobCompanies.js";
 import { classifySeniorityWithAI, classifySeniorityFromTitle, resetAICallCounter } from "./jobClassifier.js";
 import { fetchFreshersWorldJobs, fetchApnaJobs, fetchIndeedRssJobs, fetchGlassdoorRssJobs } from "./jobScrapers.js";
+import { classifyJobDomain, isTechTitle } from "./jobDomainClassifier.js";
 
 // ── Types ───────────────────────────────────────────────────
 interface RawJob {
@@ -21,7 +22,7 @@ interface RawJob {
     company: string;
     location: string;
     job_url: string;
-    source: "greenhouse" | "lever" | "ashby" | "scrape" | "jsearch" | "rss";
+    source: "greenhouse" | "lever" | "ashby" | "scrape" | "jsearch" | "rss" | "mcp";
     posted_at: string | null;
     description?: string;
     category?: string;
@@ -321,28 +322,7 @@ export function extractExperience(text: string): { min: number | null; max: numb
     return { min: null, max: null };
 }
 
-// ── Tech Title Detection ────────────────────────────────────
-// Used by detectCategory, fresher filters, and Internshala scraper
-// to distinguish tech jobs from non-tech ones.
-const TECH_TITLE_KEYWORDS = /\b(engineer|developer|sde|swe|programmer|coder|software|data\s*scien|devops|sre|qa|tester|sdet|frontend|front[\s-]?end|backend|back[\s-]?end|fullstack|full[\s-]?stack|machine\s*learn|ml\b|ai\b|deep\s*learn|nlp|cloud|cyber|security|python|java|react|angular|vue|node|web\s*dev|mobile\s*dev|android|ios|swift|kotlin|flutter|tech|it\s|computing|sap|erp|database|dba|network|system\s*admin|embedded|firmware|hardware|vlsi|semiconductor|devrel|devsecops|blockchain|smart\s*contract|robotics|automation)\b/i;
 
-// Non-tech roles that should never appear in the tech/fresher feed
-const NON_TECH_TITLE_KEYWORDS = /\b(telecaller|fundraising|charity|event\s*manage|real\s*estate|teaching|tutor|content\s*writ|blog\s*writ|video\s*edit|graphic\s*design|fashion|textile|apparel|legal|law\b|advocate|counsel|ca\s*article|chartered\s*account|company\s*secretary|audit|taxation|finance\s*analyst|equity\s*analyst|investment\s*bank|stock\s*brok|insurance|loan|mortgage|wealth\s*manage|client\s*acqui|business\s*develop|business\s*strat|project\s*manage[^r]|operations\s*manage|general\s*manage|human\s*resource|recruitment|talent\s*acqui|staffing|placement|hospitality|hotel|restaurant|food\s*tech|delivery\s*boy|delivery\s*exec|rider|warehouse|logistics|supply\s*chain|procurement|purchase|store\s*manage|retail|customer\s*success|customer\s*support|call\s*center|bpo|medical|pharma|clinical|nursing|doctor|dentist|physiotherap)\b/i;
-
-/**
- * Returns true if the job title looks like a tech/engineering role.
- * Used to gate the Fresher category — only tech internships should appear.
- */
-export function isTechTitle(title: string): boolean {
-    const t = title.toLowerCase();
-    // If it matches a non-tech keyword, it's not tech
-    if (NON_TECH_TITLE_KEYWORDS.test(t)) return false;
-    // If it matches a tech keyword, it's tech
-    if (TECH_TITLE_KEYWORDS.test(t)) return true;
-    // Ambiguous titles (e.g. "Intern", "Trainee") — default to non-tech
-    // unless they also contain a tech word
-    return false;
-}
 
 export function detectCategory(title: string, category?: string): string {
     if (category) return category;
@@ -469,6 +449,8 @@ async function storeJobs(jobs: RawJob[]): Promise<number> {
                 upsertPayload.country = locParts.country;
                 upsertPayload.category = category;
                 upsertPayload.employment_type = job.employment_type || "full-time";
+                // Domain classification at ingestion time
+                upsertPayload.job_domain = classifyJobDomain(job.title, job.description || "", skills);
             }
 
             const { error } = await supabaseAdmin
@@ -879,22 +861,24 @@ export async function searchJobs(filters: {
             const domainSkills = DOMAIN_SKILLS[filters.user_primary_domain];
             // Only include domain skills that the user actually has
             const userSkillsLower = filters.user_skills.map(s => s.toLowerCase().trim());
-            coreSkills = domainSkills.filter(ds => 
+            const matchedSkills = domainSkills.filter(ds => 
                 userSkillsLower.some(us => us.includes(ds) || ds.includes(us))
-            ).slice(0, 8);
+            );
+
+            // Broad terms to always match against titles to capture all actual roles in that domain
+            const domainTerms: Record<string, string[]> = {
+                "data-science-ml": ["data scientist", "machine learning", "ml engineer", "ai engineer", "deep learning", "nlp", "computer vision", "llm"],
+                "frontend": ["frontend", "front end", "react developer", "ui developer", "web developer"],
+                "backend": ["backend", "back end", "api developer", "software engineer", "sde", "java developer", "python developer"],
+                "fullstack": ["full stack", "fullstack", "software engineer", "sde"],
+                "devops": ["devops", "cloud engineer", "sre", "infrastructure", "platform engineer"],
+                "data-engineering": ["data engineer", "etl", "data pipeline"],
+            };
+
+            const primaryTerms = domainTerms[filters.user_primary_domain] || [];
             
-            // If we couldn't match enough domain skills, add the domain name itself as a search term
-            if (coreSkills.length < 3) {
-                const domainTerms: Record<string, string[]> = {
-                    "data-science-ml": ["data scientist", "machine learning", "ml engineer", "ai engineer", "deep learning"],
-                    "frontend": ["frontend", "front end", "react developer", "ui developer"],
-                    "backend": ["backend", "back end", "api developer", "server"],
-                    "fullstack": ["full stack", "fullstack"],
-                    "devops": ["devops", "cloud engineer", "sre", "infrastructure"],
-                    "data-engineering": ["data engineer", "etl", "data pipeline"],
-                };
-                coreSkills = [...coreSkills, ...(domainTerms[filters.user_primary_domain] || [])].slice(0, 8);
-            }
+            // Combine broad domain terms with user's specific matching tools/skills
+            coreSkills = Array.from(new Set([...primaryTerms, ...matchedSkills])).slice(0, 12);
         } else {
             // No domain detected — use top skills but exclude generic web/devops terms
             const genericTerms = new Set(["html", "css", "git", "linux", "agile", "scrum", "sql", "c", "r", "docker", "ci/cd", "javascript", "react", "node"]);
@@ -906,8 +890,7 @@ export async function searchJobs(filters: {
         
         if (coreSkills.length > 0) {
             const skillFilters = coreSkills.flatMap(skill => [
-                `title.ilike.%${skill}%`,
-                `description.ilike.%${skill}%`
+                `title.ilike.%${skill}%`
             ]);
             q = q.or(skillFilters.join(","));
         }

@@ -1,5 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
-// Job Listings Routes — Real-time ATS job feed + Global Live Search
+// Job Listings Routes — Domain-aware multi-stage recommender
+//
+// Two-pool architecture:
+//   primary_jobs    → jobs matching user's domain + related domains
+//   cross_domain_jobs → other tech jobs (same location/experience)
+//
+// Anonymous users get the legacy flat { jobs, total } response.
 // ═══════════════════════════════════════════════════════════════
 
 import { Router, Response } from "express";
@@ -10,11 +16,31 @@ import { rankJobsForUser, getUserSkillsForMatching } from "../services/jobRankin
 import { supabaseAdmin } from "../config/supabase.js";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
 
+// ── New domain-aware imports ─────────────────────────────────
+import {
+    classifyJobDomain, isDomainMatch, getRelatedDomains,
+    JOB_DOMAIN_LABELS, type JobDomain, JOB_DOMAIN_VALUES,
+} from "../services/jobDomainClassifier.js";
+import {
+    computeRelevanceScore, computeSkillOverlap, computeTitleSimilarity,
+    computeLocationMatch, computeRecencyScore,
+    MIN_PRIMARY_RELEVANCE, RELAXED_PRIMARY_RELEVANCE, MIN_PRIMARY_JOBS,
+    type RelevanceSignals,
+} from "../services/relevanceScorer.js";
+import {
+    estimateShortlistingChance, type UserProfile, type ScoredJob,
+} from "../services/shortlistingChance.js";
+
 const router = Router();
 
 // Memory Cache to speed up job queries
 const routeCache = new Map<string, { timestamp: number; data: any }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// ── Infer user domain from title + skills ────────────────────
+function inferUserDomain(title: string, skills: string[]): JobDomain {
+    return classifyJobDomain(title, "", skills);
+}
 
 // GET /api/job-listings — search/browse jobs (DB + optional live JSearch merge)
 router.get("/", async (req: AuthRequest, res: Response) => {
@@ -118,23 +144,23 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                     } else if (/\b(backend|back.?end|server|api\s*developer|node|java\s*developer|python\s*developer)/i.test(roleAndSummary)) {
                         userPrimaryDomain = "backend";
                     } else if (/\b(full.?stack|fullstack)/i.test(roleAndSummary)) {
-                        userPrimaryDomain = "fullstack";
+                        userPrimaryDomain = "backend";
                     } else if (/\b(devops|sre|cloud\s*engineer|infrastructure|platform\s*engineer)/i.test(roleAndSummary)) {
                         userPrimaryDomain = "devops";
                     } else if (/\b(data\s*engineer|etl|pipeline|spark|airflow|warehouse)/i.test(roleAndSummary)) {
-                        userPrimaryDomain = "data-engineering";
+                        userPrimaryDomain = "data-analytics";
+                    } else if (/\b(android|ios|mobile|flutter|react\s*native|swift|kotlin)/i.test(roleAndSummary)) {
+                        userPrimaryDomain = "mobile";
                     }
                 }
             } catch { /* no resume */ }
         }
 
         // Clean and deduplicate skills before passing to search
-        // Remove any skills that are too short or contain parentheses (not properly split)
         if (userSkills.length > 0) {
             userSkills = Array.from(new Set(
                 userSkills
                     .flatMap(s => {
-                        // Split any remaining parenthetical groups
                         if (s.includes('(')) {
                             const base = s.replace(/\s*\([^)]*\)/g, '').trim();
                             const parenMatch = s.match(/\(([^)]+)\)/);
@@ -148,10 +174,19 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             ));
         }
 
+        // Infer user domain from classifier when regex-based detection didn't work
+        let userDomain: JobDomain | null = null;
+        if (userPrimaryDomain && JOB_DOMAIN_VALUES.includes(userPrimaryDomain as JobDomain)) {
+            userDomain = userPrimaryDomain as JobDomain;
+        } else if (user_id && userSkills.length > 0) {
+            // Use the domain classifier on the user's own profile
+            userDomain = inferUserDomain(userCurrentRole, userSkills);
+        }
+
         // Debug: Log what skills are being used for matching
         if (user_id && userSkills.length > 0) {
             console.log(`[JobListings] User ${(user_id as string).substring(0, 8)}... matching with ${userSkills.length} skills: ${userSkills.slice(0, 15).join(", ")}${userSkills.length > 15 ? '...' : ''}`);
-            console.log(`[JobListings] Domain: ${userPrimaryDomain || 'unknown'}, Role: ${userCurrentRole || 'unknown'}, Experience: ${userExperienceYears || 'unknown'} yrs`);
+            console.log(`[JobListings] Domain: ${userDomain || 'unknown'}, Role: ${userCurrentRole || 'unknown'}, Experience: ${userExperienceYears || 'unknown'} yrs`);
         }
 
         // Search the DB with all advanced features
@@ -193,10 +228,10 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                 : [searchQuery || "software engineer"];
 
             const existingUrls = new Set(allJobs.map((j: any) => j.job_url));
-            const targetCount = hasUser ? 100 : 20; // Fetch more when user has a resume
+            const targetCount = hasUser ? 100 : 20;
             
             for (const q of queries) {
-                if (allJobs.length >= targetCount) break; // enough results
+                if (allJobs.length >= targetCount) break;
                 const liveJobs = await mcpLiveSearch(q, searchLocation, 50);
 
                 if (liveJobs.length > 0) {
@@ -221,6 +256,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                             confidence_score: 50,
                             is_active: true,
                             category: detectCategory(j.title, j.category),
+                            job_domain: classifyJobDomain(j.title, j.description || "", []),
                         }));
 
                     // Apply experience filtering to live jobs before appending
@@ -229,7 +265,6 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                             const exp = extractExperience(job.description || "");
                             if (exp.min !== null && exp.min > parsedExpMax) return false;
                             
-                            // Strict title check for Entry-level/Fresher
                             if (parsedExpMax <= 2) {
                                 const title = (job.title || "").toLowerCase();
                                 const seniorKw = ["senior", "sr ", "sr.", "lead", "staff", "principal", "architect", "manager", "director", "vp", "head", "expert"];
@@ -269,6 +304,135 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             selection_reason: j.selection_reason ?? "",
         }));
 
+        // ═══════════════════════════════════════════════════════
+        // DOMAIN-AWARE SPLIT (only for authenticated users)
+        // ═══════════════════════════════════════════════════════
+        if (user_id && userDomain) {
+            const userCity = ((city || location || "") as string).toLowerCase();
+            const userCountry = ((country || preferred_location || "") as string).toLowerCase();
+            const userExp = userExperienceYears || 0;
+            const userSeniorityStr = userSeniority || (userExp <= 1 ? "intern" : userExp <= 3 ? "entry" : userExp <= 6 ? "mid" : "senior");
+
+            // Build UserProfile for shortlisting estimator
+            const userProfile: UserProfile = {
+                skills: userSkills,
+                experienceYears: userExp,
+                seniority: userSeniorityStr,
+                domain: userDomain,
+            };
+
+            // Score and classify each job
+            const scoredPrimary: any[] = [];
+            const scoredCross: any[] = [];
+
+            for (const job of finalJobs) {
+                // Classify job domain (use stored value or compute on-the-fly)
+                const jobDomain: JobDomain = (
+                    job.job_domain && JOB_DOMAIN_VALUES.includes(job.job_domain)
+                        ? job.job_domain
+                        : classifyJobDomain(job.title || "", job.description || "", job.skills || [])
+                ) as JobDomain;
+
+                const domainMatch = isDomainMatch(userDomain, jobDomain);
+
+                // Compute relevance signals
+                const { ratio: skillOverlapRatio, matchedSkills, skillGap } = computeSkillOverlap(
+                    userSkills, job.skills || [], job.description || ""
+                );
+                const titleSim = computeTitleSimilarity(userCurrentRole, job.title || "");
+                const locationMatch = computeLocationMatch(job.location || "", userCity, userCountry);
+                const recency = computeRecencyScore(job.posted_at || "");
+
+                const signals: RelevanceSignals = {
+                    domainMatch,
+                    skillOverlapRatio,
+                    titleSimilarity: titleSim,
+                    locationMatch,
+                    recencyScore: recency,
+                };
+                const relevanceScore = computeRelevanceScore(signals);
+
+                // Estimate shortlisting chance
+                const scoredJob: ScoredJob = {
+                    title: job.title || "",
+                    company: job.company || "",
+                    skills: job.skills || [],
+                    seniority_level: job.seniority_level || "unknown",
+                    job_domain: jobDomain,
+                    posted_at: job.posted_at || "",
+                    relevanceScore,
+                    skillOverlapRatio,
+                    domainMatch,
+                };
+                const shortlist = estimateShortlistingChance(userProfile, scoredJob);
+
+                // Enrich job with new fields
+                const enrichedJob = {
+                    ...job,
+                    job_domain: jobDomain,
+                    job_domain_label: JOB_DOMAIN_LABELS[jobDomain] || jobDomain,
+                    relevance_score: relevanceScore,
+                    matched_skills: matchedSkills.length > 0 ? matchedSkills : (job.matched_skills || []),
+                    skill_gap: skillGap.length > 0 ? skillGap : (job.skill_gap || []),
+                    shortlisting_chance: shortlist.chance,
+                    shortlisting_band: shortlist.band,
+                    shortlisting_reason: shortlist.reason,
+                    domain_match: domainMatch,
+                };
+
+                if (domainMatch) {
+                    scoredPrimary.push(enrichedJob);
+                } else {
+                    scoredCross.push(enrichedJob);
+                }
+            }
+
+            // Sort both pools by relevance score (descending)
+            scoredPrimary.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
+            scoredCross.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
+
+            // Apply minimum relevance threshold to primary pool
+            let primaryThreshold = MIN_PRIMARY_RELEVANCE;
+            let primaryFiltered = scoredPrimary.filter(j => (j.relevance_score || 0) >= primaryThreshold);
+
+            // Relax threshold if not enough primary jobs
+            if (primaryFiltered.length < MIN_PRIMARY_JOBS && scoredPrimary.length > primaryFiltered.length) {
+                primaryThreshold = RELAXED_PRIMARY_RELEVANCE;
+                primaryFiltered = scoredPrimary.filter(j => (j.relevance_score || 0) >= primaryThreshold);
+                console.log(`[JobListings] Relaxed primary threshold to ${primaryThreshold} (${primaryFiltered.length} jobs)`);
+            }
+
+            // If still not enough, include ALL scored primary jobs
+            if (primaryFiltered.length < MIN_PRIMARY_JOBS) {
+                primaryFiltered = scoredPrimary;
+            }
+
+            const responseData = {
+                primary_jobs: primaryFiltered,
+                cross_domain_jobs: scoredCross,
+                meta: {
+                    user_domain: userDomain,
+                    user_domain_label: JOB_DOMAIN_LABELS[userDomain] || userDomain,
+                    total_primary: primaryFiltered.length,
+                    total_cross: scoredCross.length,
+                    relevance_threshold: primaryThreshold,
+                    user_skills_count: userSkills.length,
+                    related_domains: getRelatedDomains(userDomain).map(d => ({
+                        domain: d,
+                        label: JOB_DOMAIN_LABELS[d] || d,
+                    })),
+                },
+                // Keep backward-compatible fields for any consumers
+                user_skills: userSkillsForResponse,
+            };
+
+            res.json(responseData);
+            return;
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // ANONYMOUS / LEGACY RESPONSE (backward compatible)
+        // ═══════════════════════════════════════════════════════
         const responseData = {
             jobs: finalJobs,
             count: finalJobs.length,
