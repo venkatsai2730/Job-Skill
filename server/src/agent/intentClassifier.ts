@@ -22,6 +22,7 @@ export const INTENT_TOOL_MAP: Record<string, string[]> = {
     keyword_gap:      ["get_resume_keywords"],
     skill_gap:        ["get_skill_gap"],
     resume_rewrite:   ["rewrite_resume_section"],
+    resume_edit:      ["edit_resume"],  // ← NEW: generates structured ResumePatch
 
     // Job intents
     job_search:       ["search_jobs"],
@@ -63,15 +64,18 @@ function classifyIntentRegex(message: string): ClassifiedIntent {
     const slashMatch = nl.match(/^\/(score|fix|jobs|match|prep|roadmap|skills|linkedin|salary|mock|cover|help|improve|keywords|compare|tailor|draft|rewrite|create|behavioral|technical|answer|market|apply)/);
     if (slashMatch) {
         const cmdMap: Record<string, string> = {
-            score: "score_inquiry", fix: "fix_bullet", jobs: "job_search",
+            score: "score_inquiry", jobs: "job_search",
             match: "job_explanation", prep: "interview_prep", roadmap: "career_roadmap",
             skills: "skill_gap", linkedin: "linkedin_audit", salary: "salary_query",
-            mock: "mock_interview", cover: "cover_letter", improve: "fix_bullet",
-            keywords: "keyword_gap", compare: "keyword_gap", tailor: "resume_rewrite",
-            draft: "resume_rewrite", rewrite: "resume_rewrite", create: "fix_bullet",
+            mock: "mock_interview", cover: "cover_letter",
+            keywords: "keyword_gap", compare: "keyword_gap",
             behavioral: "interview_prep", technical: "interview_prep",
             answer: "answer_feedback", market: "salary_query",
             apply: "full_job_apply", help: "general_chat",
+            // Resume editing commands → route to edit_resume tool
+            fix: "resume_edit", improve: "resume_edit",
+            create: "resume_edit", tailor: "resume_edit",
+            draft: "resume_edit", rewrite: "resume_edit",
         };
         const intentType = cmdMap[slashMatch[1]] || "general_chat";
         return {
@@ -82,14 +86,19 @@ function classifyIntentRegex(message: string): ClassifiedIntent {
         };
     }
 
-    // Natural language patterns
+    // Natural language patterns — resume editing (highest priority)
+    if (/update my|edit my|change my|modify my|rewrite my|add .* to my (resume|skills|experience|summary|projects)|remove .* from my/.test(nl)) {
+        const sectionMatch = nl.match(/(?:update|edit|change|modify|rewrite|improve)\s+(?:my\s+)?(summary|experience|skills|projects|education)/i);
+        if (sectionMatch) entities.section = sectionMatch[1].toLowerCase();
+        return { type: "resume_edit", confidence: 90, entities, requiresTools: INTENT_TOOL_MAP.resume_edit };
+    }
     if (/fix|improve|better|higher score|optimize|how to fix/.test(nl)) {
-        return { type: "fix_bullet", confidence: 80, entities, requiresTools: INTENT_TOOL_MAP.fix_bullet };
+        return { type: "resume_edit", confidence: 80, entities, requiresTools: INTENT_TOOL_MAP.resume_edit };
     }
     if (/rewrite|improve my (summary|experience|projects|skills)/.test(nl)) {
         const sectionMatch = nl.match(/improve my (\w+)/);
         if (sectionMatch) entities.section = sectionMatch[1];
-        return { type: "resume_rewrite", confidence: 80, entities, requiresTools: INTENT_TOOL_MAP.resume_rewrite };
+        return { type: "resume_edit", confidence: 80, entities, requiresTools: INTENT_TOOL_MAP.resume_edit };
     }
     if (/find jobs|show jobs|what jobs|jobs for me|job search|matching jobs|job openings/.test(nl)) {
         return { type: "job_search", confidence: 85, entities, requiresTools: INTENT_TOOL_MAP.job_search };

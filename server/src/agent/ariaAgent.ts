@@ -11,6 +11,7 @@ import { classifyIntent, planTools, reflectOnStep } from "./intentClassifier.js"
 import { executeAgentTool, getToolDescriptions } from "./tools/index.js";
 import { updateUserMemory, saveAgentSteps, formatMemoriesForPrompt } from "./agentMemory.js";
 import { USE_LANGGRAPH } from "../config/featureFlags.js";
+import type { ResumePatch } from "../types/resumePatchTypes.js";
 import type { AgentContext, AgentStep } from "./tools/index.js";
 
 // ── Response type ─────────────────────────────────────────────
@@ -20,6 +21,7 @@ export interface AgentResponse {
     toolsUsed: string[];
     intent: string;
     memories?: string;
+    resume_patch?: ResumePatch;  // ← NEW: structured patch for live resume editing
 }
 
 // ── System Prompt ─────────────────────────────────────────────
@@ -181,6 +183,15 @@ export async function runAriaAgent(ctx: AgentContext): Promise<AgentResponse> {
         // ── STEP 5: RESPOND — synthesize final answer ─────────
         const finalAnswer = await synthesizeResponse(steps, ctx, intent);
 
+        // ── Extract resume_patch if edit_resume tool was used ──
+        let resumePatch: ResumePatch | undefined;
+        for (const step of steps) {
+            if (step.tool === "edit_resume" && step.toolOutput?.resume_patch) {
+                resumePatch = step.toolOutput.resume_patch;
+                break;
+            }
+        }
+
         // ── STEP 6: MEMORIZE — save key facts ─────────────────
         try {
             await updateUserMemory(ctx.userId, steps, intent);
@@ -200,6 +211,7 @@ export async function runAriaAgent(ctx: AgentContext): Promise<AgentResponse> {
             steps,
             toolsUsed: steps.map(s => s.tool).filter(Boolean),
             intent: intent.type,
+            resume_patch: resumePatch,
         };
     } catch (err: any) {
         console.error("[Agent] Agent loop error:", err);

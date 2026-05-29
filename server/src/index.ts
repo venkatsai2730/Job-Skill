@@ -12,6 +12,7 @@ import linkedinRoutes from "./routes/linkedin.js";
 import geocodeRoutes from "./routes/geocode.js";
 import chatbotRoutes from "./routes/chatbot.js";
 import activityRoutes from "./routes/activity.js";
+import resumeDataRoutes from "./routes/resumeData.js";
 import { fetchAtsJobs, autoExpireJobs, verifyTopJobs } from "./services/jobFetcher.js";
 import { startMCPJobCron } from "./mcp/jobSyncCron.js";
 
@@ -37,6 +38,7 @@ app.use("/api/linkedin", linkedinRoutes);
 app.use("/api/geocode", geocodeRoutes);
 app.use("/api/chatbot", chatbotRoutes);
 app.use("/api/activity", activityRoutes);
+app.use("/api/resume/data", resumeDataRoutes);
 
 
 // Health check

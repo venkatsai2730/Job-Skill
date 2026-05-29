@@ -179,6 +179,7 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                         content: response.message,
                         intent: response.intent,
                         toolsUsed: response.toolsUsed,
+                        resume_patch: response.resume_patch || null,
                     })}\n\n`);
 
                     // Stream done event
@@ -193,6 +194,7 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                     type: "success",
                     command: response.intent,
                     message: response.message,
+                    resume_patch: response.resume_patch || null,
                     data: {
                         reply: response.message,
                         toolsUsed: response.toolsUsed,
@@ -201,6 +203,7 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                             thought: s.thought,
                         })),
                         intent: response.intent,
+                        resume_patch: response.resume_patch || null,
                     },
                 });
             } catch (agentErr: any) {

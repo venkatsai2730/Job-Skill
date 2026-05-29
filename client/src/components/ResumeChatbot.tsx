@@ -11,6 +11,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
 import { toast } from "sonner";
+import { DiffCard } from "./DiffCard";
+import type { ResumePatch } from "@/lib/resumeTypes";
 
 // ── Types ──────────────────────────────────────────────
 interface AgentStepUI {
@@ -30,6 +32,8 @@ interface ChatMessage {
     toolsUsed?: string[];
     steps?: AgentStepUI[];
     intent?: string;
+    resume_patch?: ResumePatch | null;
+    patchAccepted?: boolean;
 }
 
 interface ChatbotResponse {
@@ -42,6 +46,9 @@ interface ChatbotResponse {
 interface ResumeChatbotProps {
     hasParsedResume: boolean;
     jobDescription: string;
+    onResumePatch?: (patch: ResumePatch) => void;
+    onAcceptPatch?: (patch: ResumePatch) => void;
+    onUndoPatch?: () => void;
 }
 
 // ── Quick Action Categories ──────────────────────────────
@@ -221,6 +228,7 @@ const TOOL_LABELS: Record<string, string> = {
     get_salary_insights: "💰 Salary",
     recall_user_preference: "🧠 Memory",
     save_user_preference: "💾 Save",
+    edit_resume: "✏️ Resume Edit",
 };
 
 function ToolsBadge({ tools }: { tools: string[] }) {
@@ -272,7 +280,7 @@ function MarkdownContent({ content }: { content: string }) {
 // ════════════════════════════════════════════════════════════
 // ██ MAIN COMPONENT
 // ════════════════════════════════════════════════════════════
-export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbotProps) {
+export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, onAcceptPatch, onUndoPatch }: ResumeChatbotProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([{
         id: "welcome",
@@ -370,6 +378,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
                 let toolsUsed: string[] = [];
                 let steps: AgentStepUI[] = [];
                 let intent = "";
+                let sseResumePatch: ResumePatch | null = null;
 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -395,11 +404,20 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
                                 finalMessage = event.content || "";
                                 toolsUsed = event.toolsUsed || [];
                                 intent = event.intent || "";
+                                // Extract resume_patch from SSE message event
+                                if (event.resume_patch && event.resume_patch.action === "PATCH_RESUME") {
+                                    sseResumePatch = event.resume_patch;
+                                }
                             } else if (event.type === "done") {
                                 break;
                             }
                         } catch { /* skip parse errors */ }
                     }
+                }
+
+                // Notify parent of resume patch if present
+                if (sseResumePatch && onResumePatch) {
+                    onResumePatch(sseResumePatch);
                 }
 
                 setMessages(prev => [...prev, {
@@ -412,6 +430,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
                     intent,
                     data: { reply: finalMessage, toolsUsed, intent },
                     timestamp: Date.now(),
+                    resume_patch: sseResumePatch,
                 }]);
             } else {
                 // ── JSON fallback path ────────────────────────────
@@ -419,6 +438,14 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
                 const botMessage = res.message || res.data?.message || "Here is what I found:";
                 const botCommand = res.command || res.data?.command;
                 const botData = res.data;
+                const jsonResumePatch: ResumePatch | null = 
+                    (res.resume_patch?.action === "PATCH_RESUME" ? res.resume_patch : null) ||
+                    (botData?.resume_patch?.action === "PATCH_RESUME" ? botData.resume_patch : null);
+
+                // Notify parent of resume patch if present
+                if (jsonResumePatch && onResumePatch) {
+                    onResumePatch(jsonResumePatch);
+                }
 
                 setMessages(prev => [...prev, {
                     id: (Date.now() + 1).toString(),
@@ -430,6 +457,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
                     steps: botData?.steps || [],
                     intent: botData?.intent || botCommand,
                     timestamp: Date.now(),
+                    resume_patch: jsonResumePatch,
                 }]);
             }
 
@@ -801,6 +829,26 @@ export function ResumeChatbot({ hasParsedResume, jobDescription }: ResumeChatbot
                                             ) : (
                                                 <>
                                                     <MarkdownContent content={msg.content} />
+                                                    {/* Resume Patch DiffCard */}
+                                                    {msg.resume_patch && (
+                                                        <DiffCard
+                                                            patch={msg.resume_patch}
+                                                            isAccepted={!!msg.patchAccepted}
+                                                            onAccept={(patch) => {
+                                                                // Mark this message's patch as accepted
+                                                                setMessages(prev => prev.map(m => 
+                                                                    m.id === msg.id ? { ...m, patchAccepted: true } : m
+                                                                ));
+                                                                onAcceptPatch?.(patch);
+                                                            }}
+                                                            onUndo={() => {
+                                                                setMessages(prev => prev.map(m =>
+                                                                    m.id === msg.id ? { ...m, patchAccepted: false } : m
+                                                                ));
+                                                                onUndoPatch?.();
+                                                            }}
+                                                        />
+                                                    )}
                                                     {renderComplexData(msg)}
                                                     {msg.toolsUsed && msg.toolsUsed.length > 0 && (
                                                         <ToolsBadge tools={msg.toolsUsed} />
