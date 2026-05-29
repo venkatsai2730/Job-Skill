@@ -4,6 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { resumeTools } from "./resumeTools.js";
+import { resumeEditTools } from "./resumeEditTool.js";
 import { jobTools } from "./jobTools.js";
 import { interviewTools } from "./interviewTools.js";
 import { careerTools } from "./careerTools.js";
@@ -40,6 +41,7 @@ export interface AgentStep {
 // ── Unified Tool Registry ─────────────────────────────────────
 export const ARIA_TOOLS: AgentTool[] = [
     ...resumeTools,
+    ...resumeEditTools,
     ...jobTools,
     ...interviewTools,
     ...careerTools,

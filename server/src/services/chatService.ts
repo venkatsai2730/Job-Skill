@@ -32,7 +32,8 @@ export type AIFeature =
     | "interview_prediction"
     | "fix_bullets"
     | "create_bullets"
-    | "resume_fix";
+    | "resume_fix"
+    | "resume_edit";
 
 const SYSTEM_PROMPTS: Record<string, string> = {
     chat: `You are an expert AI Career Coach inside JobSkill AI named Aria.
@@ -344,7 +345,41 @@ Your task is to analyze a candidate's resume against a specific Job Description 
 1. TRUTHFULNESS: NEVER hallucinate, fabricate, or make up metrics, impact numbers, tools, or experiences that are not explicitly present or highly implied by the source content.
 2. ATS SCORE FOCUSED: Enhance action verbs, employ the STAR method (Situation, Task, Action, Result) where possible, and restructure poorly formatted text based strictly on the provided ATS Penalty Issues.
 3. NO FILLER: Remove vague responsibilities, personal details, or weak phrases ("helped", "assisted", "worked on") and replace them with strong ownership verbs ("Spearheaded", "Engineered", "Orchestrated", "Led").
-4. FORMAT: Return ONLY the rewritten text cleanly. No conversational intro/outro (e.g. "Here is the rewritten section"). Do not use markdown code fences. Structure nicely for readability.`
+4. FORMAT: Return ONLY the rewritten text cleanly. No conversational intro/outro (e.g. "Here is the rewritten section"). Do not use markdown code fences. Structure nicely for readability.`,
+
+    resume_edit: `You are a Resume Patch Generator. You receive the user's current resume data and their edit request.
+Your ONLY job is to return a JSON object that describes the exact changes to make.
+
+CRITICAL: Return ONLY valid JSON. No markdown, no text before/after, no code fences, no explanation outside the JSON.
+
+JSON SCHEMA:
+{
+  "action": "PATCH_RESUME",
+  "patches": [
+    {
+      "section": "summary" | "experience" | "education" | "skills" | "projects",
+      "operation": "update" | "append" | "replace_bullet" | "add_bullet" | "delete_bullet",
+      "target_id": "<uuid of the entry, required for experience/projects/education>",
+      "bullet_index": <number, required for replace_bullet/delete_bullet>,
+      "before": "<original text or array>",
+      "after": "<new text or array>"
+    }
+  ],
+  "explanation": "<1-2 sentence human-readable summary of what changed>"
+}
+
+RULES:
+1. Use the EXACT target_id from the resume state provided in the user message
+2. For "update" on summary: before/after are strings
+3. For "replace_bullet": set bullet_index, before=old bullet, after=new bullet
+4. For "add_bullet": after is new bullet, before is ""
+5. For "delete_bullet": before is bullet being deleted, after is ""
+6. For "update" on skills: before/after are string arrays of the full skills list
+7. For "append" on skills: after is array of NEW skills, before is []
+8. Make bullets QUANTIFIED, use STAR method, include strong action verbs
+9. Keep bullets concise (1 line, under 120 chars)
+10. ALWAYS populate "before" with actual current value
+11. Return ONLY valid JSON, nothing else`
 };
 
 // ── Model Configuration ─────────────────────────────────────
@@ -373,6 +408,7 @@ const FEATURE_MODEL_MAP: Record<AIFeature, { provider: string; model: string }> 
     fix_bullets: { provider: "groq", model: MODELS.maverick },
     create_bullets: { provider: "groq", model: MODELS.maverick },
     resume_fix: { provider: "groq", model: MODELS.maverick },
+    resume_edit: { provider: "groq", model: MODELS.scout },
 };
 
 // ═══════════════════════════════════════════════════════════════

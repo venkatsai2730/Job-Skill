@@ -324,11 +324,7 @@ export function JobCard({ job, userSkills, onSave, onMatch, userDomain, userDoma
 
       {/* Badges row */}
       <div className="flex items-center gap-1.5 flex-wrap mb-3">
-        <DomainPill job={job} userDomain={userDomain} userDomainLabel={userDomainLabel} />
         <SeniorityBadge level={job.seniority_level} />
-        <MatchScoreBadge score={job.match_score} />
-        <ShortlistBadge band={job.shortlisting_band} chance={job.shortlisting_chance} reason={job.shortlisting_reason} />
-        <SelectionChanceBadge chance={job.selection_chance} reason={job.selection_reason} />
         <ActivityBadge postedAt={job.posted_at} />
       </div>
 

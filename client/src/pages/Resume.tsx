@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, FileText, CheckCircle2, ChevronRight, Download, Bot, Sparkles, Code2, AlertTriangle, LayoutTemplate, Briefcase, Minus, Plus, RefreshCw, Loader2, Info, Building2, MapPin, Search, ArrowRight, Eye, Trash2, GraduationCap, FolderOpen, Check, Share2, Pencil, Type, ExternalLink, TrendingUp, BookOpen, ChevronDown, ChevronUp, Target } from "lucide-react";
+import { Upload, FileText, CheckCircle2, ChevronRight, Download, Bot, Sparkles, Code2, AlertTriangle, LayoutTemplate, Briefcase, Minus, Plus, RefreshCw, Loader2, Info, Building2, MapPin, Search, ArrowRight, Eye, Trash2, GraduationCap, FolderOpen, Check, Share2, Pencil, Type, ExternalLink, TrendingUp, BookOpen, ChevronDown, ChevronUp, Target, ToggleLeft, ToggleRight } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
@@ -8,6 +8,10 @@ import { ShareScoreModal } from "@/components/ShareScoreModal";
 import { ScorePanel } from "@/components/ScorePanel";
 import { ResumeChatbot } from "@/components/ResumeChatbot";
 import { ResumePDFViewer } from "@/components/ResumePDFViewer";
+import { ResumePreview } from "@/components/ResumePreview";
+import { useResumeData } from "@/hooks/useResumeData";
+import { denormalizeToSections } from "@/lib/resumeTypes";
+import type { ResumePatch } from "@/lib/resumeTypes";
 
 interface CourseLink { platform: string; title: string; url: string; duration: string; isFree: boolean; }
 interface LearningRec { skill: string; courses: CourseLink[]; salaryImpactINR: string; salaryImpactUSD: string; }
@@ -106,6 +110,13 @@ const Resume = () => {
   const [atsSimJobDesc, setAtsSimJobDesc] = useState("");
   const [atsSimLoading, setAtsSimLoading] = useState(false);
   const [atsSimResult, setAtsSimResult] = useState<{ greenhouse: ATSSimulationResult; lever: ATSSimulationResult } | null>(null);
+
+  // ── Live Edit State (Aria Resume Patching) ──
+  const {
+    resumeData, setResumeData, highlightedSection, isLiveEditMode, setIsLiveEditMode,
+    initFromSections, acceptPatch, undoLastPatch, setPatch,
+  } = useResumeData();
+  const [viewMode, setViewMode] = useState<"pdf" | "live">("pdf");
 
   // ── Analyzing Sequence State ──
   const [showScoringSequence, setShowScoringSequence] = useState(false);
@@ -207,6 +218,15 @@ const Resume = () => {
       .then(data => { if (data.parsed) setParsed(data.parsed); }).catch(() => { }).finally(() => setLoadingParsed(false));
   }, [token, resumeFile, showScoringSequence]);
 
+  // Initialize ResumeData from parsed sections when available
+  useEffect(() => {
+    if (!parsed) {
+      setResumeData(null);
+    } else if (parsed.sections && !resumeData) {
+      initFromSections(parsed.sections);
+    }
+  }, [parsed, initFromSections, resumeData, setResumeData]);
+
   const handleTabClick = (section: string) => {
     setActiveSection(section);
     document.getElementById("pdf-viewer-container")?.scrollTo({ top: 0, behavior: "smooth" });
@@ -216,6 +236,9 @@ const Resume = () => {
     if (!file.type.includes("pdf")) { toast.error("Only PDF files are allowed."); return; }
     if (file.size > 10 * 1024 * 1024) { toast.error("File is too large. Maximum size is 10MB."); return; }
     setUploading(true);
+    // Clear old state before uploading new
+    setResumeData(null);
+    setParsed(null);
     try {
       const fileData: string = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -287,7 +310,10 @@ const Resume = () => {
   const handleDownloadPDF = async () => {
     setDownloading("pdf");
     try {
-      if (resumeFile) {
+      if (viewMode === "live") {
+        window.print();
+        toast.success("Print dialog opened ✦");
+      } else if (resumeFile) {
         // Download original
         await api.downloadBlob("/api/resume/download/pdf", resumeFile.file_name || "resume.pdf");
         toast.success("PDF downloaded ✦");
@@ -304,10 +330,18 @@ const Resume = () => {
   const handleDownloadDOCX = async () => {
     setDownloading("docx");
     try {
+      if (resumeData) {
+        // Trigger immediate save to ensure the database has the latest data before download
+        await api.patch("/api/resume/data", { resume_data: resumeData });
+      }
       const docxName = (resumeFile?.file_name || "resume").replace(/\.pdf$/i, "") + ".docx";
-      await api.downloadBlob("/api/resume/download/docx", docxName); toast.success("DOCX downloaded ✦");
-    } catch (err: any) { toast.error(err.message || "DOCX download failed."); }
-    finally { setDownloading(null); }
+      await api.downloadBlob("/api/resume/download/docx", docxName);
+      toast.success("DOCX downloaded ✦");
+    } catch (err: any) {
+      toast.error(err.message || "DOCX download failed.");
+    } finally {
+      setDownloading(null);
+    }
   };
 
   const sections = parsed?.sections;
@@ -493,11 +527,53 @@ const Resume = () => {
             </div>
           )}
 
-          {/* ── LIVE PDF VIEWER ── */}
-          {hasParsed && pdfUrl && !loadingParsed && (
-            <div className="flex-1 w-full bg-white rounded-xl shadow-xl overflow-hidden border border-border mb-8 min-h-[600px] flex text-foreground">
-              <ResumePDFViewer fileUrl={pdfUrl} zoom={zoom} />
-            </div>
+          {/* ── VIEW MODE TOGGLE + LIVE PDF/PREVIEW ── */}
+          {hasParsed && (pdfUrl || resumeData) && !loadingParsed && (
+            <>
+              {/* View Mode Toggle */}
+              {resumeData && pdfUrl && (
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  <button
+                    onClick={() => setViewMode("pdf")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      viewMode === "pdf"
+                        ? "bg-blue-500 text-white shadow-sm"
+                        : "text-gray-600 hover:bg-gray-100 border border-gray-200"
+                    }`}
+                  >
+                    <Eye className="w-3.5 h-3.5" /> PDF View
+                  </button>
+                  <button
+                    onClick={() => { setViewMode("live"); setIsLiveEditMode(true); }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      viewMode === "live"
+                        ? "bg-emerald-500 text-white shadow-sm"
+                        : "text-gray-600 hover:bg-gray-100 border border-gray-200"
+                    }`}
+                  >
+                    <Pencil className="w-3.5 h-3.5" /> Live Edit
+                  </button>
+                </div>
+              )}
+
+              {/* PDF Viewer (default or when viewMode is 'pdf') */}
+              {viewMode === "pdf" && pdfUrl && (
+                <div className="flex-1 w-full bg-white rounded-xl shadow-xl overflow-hidden border border-border mb-8 min-h-[600px] flex text-foreground">
+                  <ResumePDFViewer fileUrl={pdfUrl} zoom={zoom} />
+                </div>
+              )}
+
+              {/* Live Resume Preview (when viewMode is 'live' or after accepting a patch) */}
+              {viewMode === "live" && resumeData && (
+                <div className="flex-1 w-full overflow-y-auto mb-8 min-h-[600px]">
+                  <ResumePreview
+                    data={resumeData}
+                    highlightedSection={highlightedSection}
+                    zoom={zoom}
+                  />
+                </div>
+              )}
+            </>
           )}
         </motion.div>
       </div>
@@ -983,7 +1059,28 @@ const Resume = () => {
         </div>
       )}
 
-      <ResumeChatbot hasParsedResume={hasParsed} jobDescription={jobDescText} />
+      <ResumeChatbot
+        hasParsedResume={hasParsed}
+        jobDescription={jobDescText}
+        onResumePatch={(patch: ResumePatch) => {
+          setPatch(patch);
+        }}
+        onAcceptPatch={(patch: ResumePatch) => {
+          const newData = acceptPatch(patch);
+          if (newData) {
+            const updatedSections = denormalizeToSections(newData);
+            setParsed(prev => prev ? { ...prev, sections: updatedSections } : null);
+          }
+          setViewMode("live");  // Auto-switch to live view when accepting
+        }}
+        onUndoPatch={() => {
+          const prevData = undoLastPatch();
+          if (prevData) {
+            const updatedSections = denormalizeToSections(prevData);
+            setParsed(prev => prev ? { ...prev, sections: updatedSections } : null);
+          }
+        }}
+      />
     </div>
   );
 };
