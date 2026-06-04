@@ -261,3 +261,70 @@ export function denormalizeToSections(data: ResumeData): LegacyParsedSections {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════
+// AriaEdit — Simple section-rewrite format (auto-applied, no UUID needed)
+// ═══════════════════════════════════════════════════════════════
+
+export interface AriaEditChange {
+  section: "summary" | "skills" | "experience" | "projects";
+  new_summary?: string;
+  new_skills?: string[];
+  entry_name?: string;    // company or project name — matched case-insensitively
+  entry_index?: number;   // fallback when no name match
+  new_bullets?: string[];
+  new_description?: string;
+}
+
+export interface AriaEdit {
+  action: "ARIA_EDIT";
+  changes: AriaEditChange[];
+  description: string;
+}
+
+export function applyAriaEdit(data: ResumeData, edit: AriaEdit): ResumeData {
+  const next: ResumeData = JSON.parse(JSON.stringify(data));
+
+  for (const change of edit.changes) {
+    switch (change.section) {
+      case "summary":
+        if (change.new_summary) next.summary = change.new_summary;
+        break;
+
+      case "skills":
+        if (change.new_skills) next.skills = change.new_skills;
+        break;
+
+      case "experience": {
+        let idx = -1;
+        if (change.entry_name) {
+          idx = next.experience.findIndex(e =>
+            e.company.toLowerCase().includes(change.entry_name!.toLowerCase()) ||
+            e.title.toLowerCase().includes(change.entry_name!.toLowerCase())
+          );
+        }
+        if (idx === -1) idx = change.entry_index ?? 0;
+        if (idx >= 0 && idx < next.experience.length) {
+          if (change.new_bullets) next.experience[idx].bullets = change.new_bullets;
+        }
+        break;
+      }
+
+      case "projects": {
+        let idx = -1;
+        if (change.entry_name) {
+          idx = next.projects.findIndex(p =>
+            p.name.toLowerCase().includes(change.entry_name!.toLowerCase())
+          );
+        }
+        if (idx === -1) idx = change.entry_index ?? 0;
+        if (idx === -1 && next.projects.length > 0) idx = 0;
+        if (idx >= 0 && idx < next.projects.length) {
+          if (change.new_bullets) next.projects[idx].bullets = change.new_bullets;
+          if (change.new_description) next.projects[idx].description = change.new_description;
+        }
+        break;
+      }
+    }
+  }
+  return next;
+}

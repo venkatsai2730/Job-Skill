@@ -15,6 +15,7 @@ import { generateLatex } from "../lib/latex-generator.js";
 import { enrichMissingSkills } from "../lib/learning-resources.js";
 import { inferSemanticSkills, applyResumeFix } from "../services/chatService.js";
 import { logActivity } from "../services/activityService.js";
+import { denormalizeToSections } from "../types/resumePatchTypes.js";
 
 const router = Router();
 router.use(authenticateToken);
@@ -498,6 +499,49 @@ interface ParsedData {
 // ROUTES
 // ═══════════════════════════════════════════════════════════════
 
+// ── PATCH /api/resume/data — persist structured ResumeData (with UUIDs) ──
+router.patch("/data", authenticateToken, async (req: AuthRequest, res: Response) => {
+    try {
+        const userId = req.user!.userId;
+        const { resume_data } = req.body;
+        if (!resume_data || typeof resume_data !== "object") {
+            res.status(400).json({ error: "resume_data is required" });
+            return;
+        }
+
+        // Load current parsed_data so we can merge resume_data into it
+        const { data: row, error: fetchErr } = await supabaseAdmin
+            .from("resumes")
+            .select("id, parsed_data")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+        if (fetchErr || !row) {
+            res.status(404).json({ error: "No resume found. Upload a resume first." });
+            return;
+        }
+
+        const updatedParsedData = {
+            ...(row.parsed_data || {}),
+            resume_data, // embed structured data alongside legacy sections
+        };
+
+        const { error: updateErr } = await supabaseAdmin
+            .from("resumes")
+            .update({ parsed_data: updatedParsedData })
+            .eq("id", row.id);
+
+        if (updateErr) throw updateErr;
+
+        res.json({ success: true });
+    } catch (err: any) {
+        console.error("[Resume] PATCH /data failed:", err.message);
+        res.status(500).json({ error: "Failed to save resume data" });
+    }
+});
+
 // ── GET /api/resume — latest resume metadata ──────────────
 router.get("/", async (req: AuthRequest, res: Response) => {
     try {
@@ -860,6 +904,8 @@ router.get("/download/docx", async (req: AuthRequest, res: Response) => {
         }
 
         const pd: ParsedData = row.parsed_data;
+        // Prefer Aria-patched resume_data when available; fall back to original sections
+        const sections = pd.resume_data ? denormalizeToSections(pd.resume_data) : pd.sections;
         const children: Paragraph[] = [];
 
         // Title
@@ -874,19 +920,19 @@ router.get("/download/docx", async (req: AuthRequest, res: Response) => {
         );
 
         // Summary
-        if (pd.sections.summary) {
+        if (sections.summary) {
             children.push(
                 new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1, spacing: { before: 300, after: 100 } })
             );
-            children.push(new Paragraph({ text: pd.sections.summary, spacing: { after: 200 } }));
+            children.push(new Paragraph({ text: sections.summary, spacing: { after: 200 } }));
         }
 
         // Experience
-        if (pd.sections.experience.length > 0) {
+        if (sections.experience.length > 0) {
             children.push(
                 new Paragraph({ text: "Experience", heading: HeadingLevel.HEADING_1, spacing: { before: 300, after: 100 } })
             );
-            for (const exp of pd.sections.experience) {
+            for (const exp of sections.experience) {
                 children.push(
                     new Paragraph({
                         children: [
@@ -906,11 +952,11 @@ router.get("/download/docx", async (req: AuthRequest, res: Response) => {
         }
 
         // Education
-        if (pd.sections.education.length > 0) {
+        if (sections.education.length > 0) {
             children.push(
                 new Paragraph({ text: "Education", heading: HeadingLevel.HEADING_1, spacing: { before: 300, after: 100 } })
             );
-            for (const edu of pd.sections.education) {
+            for (const edu of sections.education) {
                 children.push(
                     new Paragraph({
                         children: [
@@ -926,11 +972,11 @@ router.get("/download/docx", async (req: AuthRequest, res: Response) => {
         }
 
         // Skills
-        if (pd.sections.skills.length > 0) {
+        if (sections.skills.length > 0) {
             children.push(
                 new Paragraph({ text: "Skills", heading: HeadingLevel.HEADING_1, spacing: { before: 300, after: 100 } })
             );
-            for (const group of pd.sections.skills) {
+            for (const group of sections.skills) {
                 children.push(
                     new Paragraph({
                         children: [
@@ -944,11 +990,11 @@ router.get("/download/docx", async (req: AuthRequest, res: Response) => {
         }
 
         // Projects
-        if (pd.sections.projects.length > 0) {
+        if (sections.projects.length > 0) {
             children.push(
                 new Paragraph({ text: "Projects", heading: HeadingLevel.HEADING_1, spacing: { before: 300, after: 100 } })
             );
-            for (const proj of pd.sections.projects) {
+            for (const proj of sections.projects) {
                 children.push(
                     new Paragraph({
                         children: [new TextRun({ text: proj.name, bold: true })],

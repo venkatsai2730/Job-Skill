@@ -389,6 +389,16 @@ async function storeJobs(jobs: RawJob[]): Promise<number> {
     resetAICallCounter(); // Reset AI call budget for this cycle
     let stored = 0;
 
+    // Pre-fetch existing posted_at in one query so re-scrapes don't overwrite original dates
+    const allUrls = jobs.map(j => j.job_url).filter(Boolean);
+    const { data: existingRecords } = await supabaseAdmin
+        .from("job_listings")
+        .select("job_url, posted_at")
+        .in("job_url", allUrls);
+    const existingPostedAt = new Map(
+        (existingRecords || []).map((r: any) => [r.job_url, r.posted_at])
+    );
+
     for (const job of jobs) {
         if (!job.title || !job.company || !job.job_url) continue;
 
@@ -436,7 +446,7 @@ async function storeJobs(jobs: RawJob[]): Promise<number> {
                 job_url: job.job_url,
                 source: job.source,
                 description: job.description || "",
-                posted_at: job.posted_at || new Date().toISOString(),
+                posted_at: existingPostedAt.get(job.job_url) || job.posted_at || new Date().toISOString(),
             };
 
             // Only add new columns if migration has been applied
@@ -479,7 +489,7 @@ async function storeJobs(jobs: RawJob[]): Promise<number> {
                             job_url: job.job_url,
                             source: job.source,
                             description: job.description || "",
-                            posted_at: job.posted_at || new Date().toISOString(),
+                            posted_at: existingPostedAt.get(job.job_url) || job.posted_at || new Date().toISOString(),
                         }, { onConflict: "job_url" });
                     if (!retryError) stored++;
                 }

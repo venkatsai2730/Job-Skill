@@ -40,6 +40,22 @@ export interface ScrapedJob {
     category?: string;
 }
 
+// ── Helper: parse relative date strings ("3 days ago", "1 month ago") ───────
+function parseRelativeDate(text: string): string | null {
+    const t = (text || "").toLowerCase().replace(/posted\s*/i, "").trim();
+    const now = Date.now();
+    if (t === "today" || t === "just posted" || t === "new" || t === "1 day ago") return new Date().toISOString();
+    const hours = t.match(/(\d+)\s*hour/);
+    if (hours) return new Date(now - parseInt(hours[1]) * 3_600_000).toISOString();
+    const days = t.match(/(\d+)\+?\s*day/);
+    if (days) return new Date(now - parseInt(days[1]) * 86_400_000).toISOString();
+    const weeks = t.match(/(\d+)\s*week/);
+    if (weeks) return new Date(now - parseInt(weeks[1]) * 7 * 86_400_000).toISOString();
+    const months = t.match(/(\d+)\s*month/);
+    if (months) return new Date(now - parseInt(months[1]) * 30 * 86_400_000).toISOString();
+    return null;
+}
+
 // ── Helper: safe fetch with timeout ─────────────────────────
 async function safeFetch(url: string, opts?: RequestInit): Promise<Response | null> {
     try {
@@ -265,13 +281,19 @@ async function scrapeLinkedIn(query: string, location: string, limit: number): P
             const link = $(el).find("a.base-card__full-link, a[href*='/jobs/view/']").first().attr("href");
 
             if (title && company && link) {
+                // LinkedIn embeds actual post date in <time datetime="YYYY-MM-DD">
+                const dateAttr = $(el).find("time[datetime]").first().attr("datetime");
+                const dateText = $(el).find("time[datetime]").first().text().trim();
+                const posted_at = dateAttr
+                    ? new Date(dateAttr).toISOString()
+                    : parseRelativeDate(dateText) || new Date().toISOString();
                 jobs.push({
                     title, company, location: locText || location,
                     description: `${title} at ${company}`,
                     job_url: link.split("?")[0],
                     source: "linkedin",
                     salary_min: null, salary_max: null,
-                    posted_at: new Date().toISOString(),
+                    posted_at,
                 });
             }
         });
@@ -314,13 +336,16 @@ async function scrapeIndeed(query: string, location: string, limit: number): Pro
                     : "";
 
             if (title && title.length > 3 && jobUrl) {
+                // Indeed date text: "3 days ago", "30+ days ago", "Today", "Just posted"
+                const dateText = $(el).find(".date, [class*='date'], [data-testid*='date']").first().text().trim();
+                const posted_at = parseRelativeDate(dateText) || new Date().toISOString();
                 jobs.push({
                     title, company: company || "Various Companies",
                     location: locText || location,
                     description: `${title} at ${company || "Various Companies"} — Indeed`,
                     job_url: jobUrl, source: "indeed",
                     salary_min: null, salary_max: null,
-                    posted_at: new Date().toISOString(),
+                    posted_at,
                 });
             }
         });

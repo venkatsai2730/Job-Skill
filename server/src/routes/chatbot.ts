@@ -108,7 +108,7 @@ const HELP_TEXT = `# 🤖 Aria — Your AI Career Co-Pilot
 // ── POST /api/chatbot/resume-chatbot ────────────────────────
 router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: Response) => {
     try {
-        const { message, command: explicitCommand, payload = {}, useAgent = true } = req.body;
+        const { message, command: explicitCommand, payload = {}, useAgent = true, currentResumeData } = req.body;
         const userId = req.user!.userId;
 
         // ═══════════════════════════════════════════════════════
@@ -124,7 +124,13 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                     getUserMemories(userId).catch(() => []),
                 ]);
 
-                const resumeData = resumeCtx?.parsedData || null;
+                // If the frontend sent its current resumeData (with UUIDs), embed it so
+                // the edit_resume tool can generate patches that use the correct IDs.
+                const parsedData = resumeCtx?.parsedData || null;
+                const resumeData = currentResumeData
+                    ? { ...(parsedData || {}), resume_data: currentResumeData }
+                    : parsedData;
+
                 const userSkills: string[] = (() => {
                     if (resumeData?.sections?.skills) {
                         return (resumeData.sections.skills as any[]).flatMap((g: any) => g.items || []);
@@ -179,6 +185,7 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                         content: response.message,
                         intent: response.intent,
                         toolsUsed: response.toolsUsed,
+                        aria_edit: response.aria_edit || null,
                         resume_patch: response.resume_patch || null,
                     })}\n\n`);
 
@@ -194,6 +201,7 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                     type: "success",
                     command: response.intent,
                     message: response.message,
+                    aria_edit: response.aria_edit || null,
                     resume_patch: response.resume_patch || null,
                     data: {
                         reply: response.message,
@@ -203,6 +211,7 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                             thought: s.thought,
                         })),
                         intent: response.intent,
+                        aria_edit: response.aria_edit || null,
                         resume_patch: response.resume_patch || null,
                     },
                 });
