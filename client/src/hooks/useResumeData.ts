@@ -13,8 +13,9 @@ import type {
     ResumeEducation,
     ResumeProject,
     ResumePatch,
+    AriaEdit,
 } from "@/lib/resumeTypes";
-import { applyResumePatch } from "@/lib/resumeTypes";
+import { applyResumePatch, applyAriaEdit } from "@/lib/resumeTypes";
 
 // ── Legacy ParsedSections shape (matches Resume.tsx interfaces) ──
 interface LegacyExperience { title: string; company: string; dates: string; bullets: string[]; }
@@ -93,24 +94,18 @@ export function useResumeData() {
     const [isLiveEditMode, setIsLiveEditMode] = useState(false);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // ── Initialize from parsed sections ───────────────────────
-    const initFromSections = useCallback((sections: LegacyParsedSections) => {
-        const data = initFromParsedSections(sections);
-        setResumeData(data);
-        setResumeHistory([]);
-    }, []);
-
     // ── Debounced save to server ──────────────────────────────
-    const saveToServer = useCallback((data: ResumeData, immediate = false) => {
+    // silent=true suppresses the toast (used for background UUID persistence)
+    const saveToServer = useCallback((data: ResumeData, immediate = false, silent = false) => {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        
+
         const saveFn = async () => {
             try {
                 await api.patch("/api/resume/data", { resume_data: data });
-                toast.success("Resume saved", { duration: 2000 });
+                if (!silent) toast.success("Resume saved", { duration: 2000 });
             } catch (err: any) {
                 console.error("[useResumeData] Save failed:", err);
-                toast.error("Failed to save resume changes");
+                if (!silent) toast.error("Failed to save resume changes");
             }
         };
 
@@ -120,6 +115,15 @@ export function useResumeData() {
             saveTimerRef.current = setTimeout(saveFn, 2000);
         }
     }, []);
+
+    // ── Initialize from parsed sections ───────────────────────
+    const initFromSections = useCallback((sections: LegacyParsedSections) => {
+        const data = initFromParsedSections(sections);
+        setResumeData(data);
+        setResumeHistory([]);
+        // Silently persist UUIDs so the backend edit tool uses matching IDs
+        saveToServer(data, true, true);
+    }, [saveToServer]);
 
     // ── Accept a pending patch (user clicked "Accept") ────────
     const acceptPatch = useCallback((patch?: ResumePatch) => {
@@ -168,6 +172,31 @@ export function useResumeData() {
         return previousState;
     }, [resumeHistory, resumeData, saveToServer]);
 
+    // ── Apply AriaEdit immediately (no Accept click needed) ──────
+    const applyAriaEditImmediate = useCallback((edit: AriaEdit) => {
+        if (!resumeData) return null;
+
+        // Push to history for undo
+        setResumeHistory(prev => {
+            const next = [...prev, resumeData];
+            if (next.length > MAX_HISTORY) next.shift();
+            return next;
+        });
+
+        const newData = applyAriaEdit(resumeData, edit);
+        setResumeData(newData);
+        setIsLiveEditMode(true);
+
+        // Highlight all changed sections
+        if (edit.changes.length > 0) {
+            setHighlightedSection(edit.changes[0].section);
+            setTimeout(() => setHighlightedSection(null), 2500);
+        }
+
+        saveToServer(newData, false, true);
+        return newData;
+    }, [resumeData, saveToServer]);
+
     // ── Set a pending patch (don't apply yet — show diff) ─────
     const setPatch = useCallback((patch: ResumePatch) => {
         setPendingPatch(patch);
@@ -188,6 +217,7 @@ export function useResumeData() {
         setIsLiveEditMode,
         initFromSections,
         acceptPatch,
+        applyAriaEditImmediate,
         undoLastPatch,
         setPatch,
         rejectPatch,

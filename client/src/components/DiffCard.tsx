@@ -25,12 +25,20 @@ const OPERATION_LABELS: Record<string, string> = {
     delete_bullet: "Removed bullet",
 };
 
+// ── Safe value → display string (guards against LLM returning objects) ───────
+function toDisplayText(val: any): string {
+    if (typeof val === "string") return val;
+    if (Array.isArray(val)) return val.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join("\n");
+    if (val == null) return "";
+    return JSON.stringify(val, null, 2);
+}
+
 // ── Single Diff Item ──────────────────────────────────────────
 function DiffItem({ patch }: { patch: ResumePatchItem }) {
     const [expanded, setExpanded] = useState(true);
 
-    const beforeText = Array.isArray(patch.before) ? patch.before.join("\n") : patch.before;
-    const afterText = Array.isArray(patch.after) ? patch.after.join("\n") : patch.after;
+    const beforeText = toDisplayText(patch.before);
+    const afterText = toDisplayText(patch.after);
     const sectionLabel = SECTION_LABELS[patch.section] || patch.section;
     const opLabel = OPERATION_LABELS[patch.operation] || patch.operation;
 

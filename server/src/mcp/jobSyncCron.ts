@@ -156,6 +156,16 @@ export async function syncJobsViaMCP(): Promise<{ total: number; errors: number 
 
                     if (!Array.isArray(jobs) || jobs.length === 0) return { fetched: 0, stored: 0, errors: 0 };
 
+                    // Pre-fetch existing posted_at in one query so re-scrapes don't reset the date
+                    const jobUrls = jobs.map((j: any) => j.job_url).filter(Boolean);
+                    const { data: existingRecords } = await supabaseAdmin
+                        .from("job_listings")
+                        .select("job_url, posted_at")
+                        .in("job_url", jobUrls);
+                    const existingPostedAt = new Map(
+                        (existingRecords || []).map((r: any) => [r.job_url, r.posted_at])
+                    );
+
                     let stored = 0;
                     let errors = 0;
 
@@ -179,7 +189,7 @@ export async function syncJobsViaMCP(): Promise<{ total: number; errors: number 
                             source: rawJob.source || "mcp",
                             salary_min: rawJob.salary_min || null,
                             salary_max: rawJob.salary_max || null,
-                            posted_at: rawJob.posted_at || new Date().toISOString(),
+                            posted_at: existingPostedAt.get(jobUrl) || rawJob.posted_at || new Date().toISOString(),
                             skills,
                             experience_min: experience.min ?? classification.experience_min,
                             experience_max: experience.max ?? classification.experience_max,
@@ -211,7 +221,7 @@ export async function syncJobsViaMCP(): Promise<{ total: number; errors: number 
                                         source: rawJob.source || "mcp",
                                         salary_min: rawJob.salary_min || null,
                                         salary_max: rawJob.salary_max || null,
-                                        posted_at: rawJob.posted_at || new Date().toISOString(),
+                                        posted_at: existingPostedAt.get(jobUrl) || rawJob.posted_at || new Date().toISOString(),
                                         skills,
                                     }, { onConflict: "job_url" });
                                 if (!retryErr) stored++;

@@ -11,7 +11,7 @@ import { ResumePDFViewer } from "@/components/ResumePDFViewer";
 import { ResumePreview } from "@/components/ResumePreview";
 import { useResumeData } from "@/hooks/useResumeData";
 import { denormalizeToSections } from "@/lib/resumeTypes";
-import type { ResumePatch } from "@/lib/resumeTypes";
+import type { ResumePatch, AriaEdit } from "@/lib/resumeTypes";
 
 interface CourseLink { platform: string; title: string; url: string; duration: string; isFree: boolean; }
 interface LearningRec { skill: string; courses: CourseLink[]; salaryImpactINR: string; salaryImpactUSD: string; }
@@ -114,7 +114,7 @@ const Resume = () => {
   // ── Live Edit State (Aria Resume Patching) ──
   const {
     resumeData, setResumeData, highlightedSection, isLiveEditMode, setIsLiveEditMode,
-    initFromSections, acceptPatch, undoLastPatch, setPatch,
+    initFromSections, acceptPatch, applyAriaEditImmediate, undoLastPatch, setPatch,
   } = useResumeData();
   const [viewMode, setViewMode] = useState<"pdf" | "live">("pdf");
 
@@ -310,11 +310,19 @@ const Resume = () => {
   const handleDownloadPDF = async () => {
     setDownloading("pdf");
     try {
-      if (viewMode === "live") {
-        window.print();
-        toast.success("Print dialog opened ✦");
-      } else if (resumeFile) {
-        // Download original
+      if (resumeData) {
+        // Patches have been applied — print the live HTML preview as PDF.
+        // Switch to live view first so the updated content is visible.
+        setViewMode("live");
+        // Small delay to let the view switch render before print dialog opens.
+        setTimeout(() => {
+          window.print();
+          toast.success("Select 'Save as PDF' in the print dialog to download ✦", { duration: 5000 });
+          setDownloading(null);
+        }, 250);
+        return;
+      }
+      if (resumeFile) {
         await api.downloadBlob("/api/resume/download/pdf", resumeFile.file_name || "resume.pdf");
         toast.success("PDF downloaded ✦");
       } else {
@@ -465,7 +473,7 @@ const Resume = () => {
       </div>
 
       {/* Center - editor */}
-      <div className="flex-1 p-6 lg:p-8 overflow-y-auto bg-gray-50">
+      <div id="resume-editor-area" className="flex-1 p-6 lg:p-8 overflow-y-auto bg-gray-50">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-3xl mx-auto space-y-8">
           <div className="flex items-center justify-between shrink-0 mb-6">
             <h2 className="font-display font-bold text-2xl text-foreground">Resume Editor</h2>
@@ -1062,6 +1070,19 @@ const Resume = () => {
       <ResumeChatbot
         hasParsedResume={hasParsed}
         jobDescription={jobDescText}
+        resumeData={resumeData}
+        onAriaEdit={(edit: AriaEdit) => {
+          const newData = applyAriaEditImmediate(edit);
+          if (newData) {
+            const updatedSections = denormalizeToSections(newData);
+            setParsed(prev => prev ? { ...prev, sections: updatedSections } : null);
+          }
+          setViewMode("live");
+          toast.success(`✅ Resume updated! ${edit.description}`, { duration: 4000 });
+          setTimeout(() => {
+            document.getElementById("resume-editor-area")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 150);
+        }}
         onResumePatch={(patch: ResumePatch) => {
           setPatch(patch);
         }}
@@ -1071,7 +1092,12 @@ const Resume = () => {
             const updatedSections = denormalizeToSections(newData);
             setParsed(prev => prev ? { ...prev, sections: updatedSections } : null);
           }
-          setViewMode("live");  // Auto-switch to live view when accepting
+          setViewMode("live");
+          toast.success("Resume updated! Switched to Live Edit view.", { duration: 3000 });
+          // Scroll the main editor area into view
+          setTimeout(() => {
+            document.getElementById("resume-editor-area")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 100);
         }}
         onUndoPatch={() => {
           const prevData = undoLastPatch();

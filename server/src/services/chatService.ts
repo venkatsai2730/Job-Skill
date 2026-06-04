@@ -347,39 +347,49 @@ Your task is to analyze a candidate's resume against a specific Job Description 
 3. NO FILLER: Remove vague responsibilities, personal details, or weak phrases ("helped", "assisted", "worked on") and replace them with strong ownership verbs ("Spearheaded", "Engineered", "Orchestrated", "Led").
 4. FORMAT: Return ONLY the rewritten text cleanly. No conversational intro/outro (e.g. "Here is the rewritten section"). Do not use markdown code fences. Structure nicely for readability.`,
 
-    resume_edit: `You are a Resume Patch Generator. You receive the user's current resume data and their edit request.
-Your ONLY job is to return a JSON object that describes the exact changes to make.
+    resume_edit: `You are a Resume Editor. Return ONLY a JSON object — no text before or after, no markdown fences.
 
-CRITICAL: Return ONLY valid JSON. No markdown, no text before/after, no code fences, no explanation outside the JSON.
-
-JSON SCHEMA:
+JSON FORMAT (copy this structure exactly):
 {
-  "action": "PATCH_RESUME",
-  "patches": [
+  "action": "ARIA_EDIT",
+  "changes": [
     {
-      "section": "summary" | "experience" | "education" | "skills" | "projects",
-      "operation": "update" | "append" | "replace_bullet" | "add_bullet" | "delete_bullet",
-      "target_id": "<uuid of the entry, required for experience/projects/education>",
-      "bullet_index": <number, required for replace_bullet/delete_bullet>,
-      "before": "<original text or array>",
-      "after": "<new text or array>"
+      "section": "summary",
+      "new_summary": "Results-driven software engineer with 2+ years building Python/Flask web apps. Strong in SQL, REST APIs, and Agile delivery."
+    },
+    {
+      "section": "experience",
+      "entry_name": "CompanyName",
+      "new_bullets": [
+        "Developed REST APIs using Python and Flask, reducing response latency by 35%",
+        "Implemented SQL optimizations cutting report generation time by 40%"
+      ]
+    },
+    {
+      "section": "projects",
+      "entry_name": "ProjectName",
+      "new_bullets": [
+        "Built task management app with Python Flask serving 200+ daily users",
+        "Integrated WebSocket notifications reducing missed updates by 60%"
+      ]
+    },
+    {
+      "section": "skills",
+      "new_skills": ["Python", "Flask", "JavaScript", "SQL", "HTML", "CSS", "Git"]
     }
   ],
-  "explanation": "<1-2 sentence human-readable summary of what changed>"
+  "description": "Improved summary, quantified experience bullets, added project impact metrics."
 }
 
-RULES:
-1. Use the EXACT target_id from the resume state provided in the user message
-2. For "update" on summary: before/after are strings
-3. For "replace_bullet": set bullet_index, before=old bullet, after=new bullet
-4. For "add_bullet": after is new bullet, before is ""
-5. For "delete_bullet": before is bullet being deleted, after is ""
-6. For "update" on skills: before/after are string arrays of the full skills list
-7. For "append" on skills: after is array of NEW skills, before is []
-8. Make bullets QUANTIFIED, use STAR method, include strong action verbs
-9. Keep bullets concise (1 line, under 120 chars)
-10. ALWAYS populate "before" with actual current value
-11. Return ONLY valid JSON, nothing else`
+FIELD RULES:
+- "section": exactly one of: summary, experience, skills, projects
+- "entry_name": the company name (experience) or project name (projects) — copy EXACTLY from the resume
+- "new_summary": complete rewritten summary string
+- "new_bullets": array of strings, each under 120 chars, starts with action verb, includes numbers/metrics
+- "new_skills": full skills list as array of strings
+- Only include sections you are actually changing
+- Strong verbs: Developed, Implemented, Engineered, Built, Optimized, Delivered, Led, Reduced, Improved
+- Start response with { and end with }. Nothing else.`
 };
 
 // ── Model Configuration ─────────────────────────────────────
@@ -408,14 +418,14 @@ const FEATURE_MODEL_MAP: Record<AIFeature, { provider: string; model: string }> 
     fix_bullets: { provider: "groq", model: MODELS.maverick },
     create_bullets: { provider: "groq", model: MODELS.maverick },
     resume_fix: { provider: "groq", model: MODELS.maverick },
-    resume_edit: { provider: "groq", model: MODELS.scout },
+    resume_edit: { provider: "google", model: MODELS.gemini },  // Gemini follows JSON schema reliably
 };
 
 // ═══════════════════════════════════════════════════════════════
 // Provider Implementations
 // ═══════════════════════════════════════════════════════════════
 
-async function callGroq(messages: any[], model: string, systemPrompt: string, maxTokens = 4000) {
+async function callGroq(messages: any[], model: string, systemPrompt: string, maxTokens = 4000, jsonMode = false) {
     // Llama 4 Scout supports vision natively — pass image_url parts through
     const cleanMessages = messages.map(m => {
         if (typeof m.content === "string") return { role: m.role, content: m.content };
@@ -425,7 +435,6 @@ async function callGroq(messages: any[], model: string, systemPrompt: string, ma
             for (const p of m.content) {
                 if (p.type === "text") parts.push({ type: "text", text: p.text });
                 if (p.type === "image") {
-                    // Llama 4 Scout vision via Groq uses image_url format
                     parts.push({
                         type: "image_url",
                         image_url: { url: `data:${p.mimeType};base64,${p.base64}` },
@@ -452,8 +461,10 @@ async function callGroq(messages: any[], model: string, systemPrompt: string, ma
                 model,
                 messages: [{ role: "system", content: systemPrompt }, ...cleanMessages],
                 max_tokens: maxTokens,
-                temperature: 0.4,
+                temperature: jsonMode ? 0.1 : 0.4,
                 stream: false,
+                // Force JSON output for structured responses to prevent plain-text replies
+                ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
             }),
         });
 
@@ -498,7 +509,7 @@ async function callGroq(messages: any[], model: string, systemPrompt: string, ma
 // ── Gemini Cooldown (skip for 1 hour if quota exhausted) ──
 let geminiCooldownUntil = 0;
 
-async function callGemini(messages: any[], model: string, systemPrompt: string, maxTokens = 4000) {
+async function callGemini(messages: any[], model: string, systemPrompt: string, maxTokens = 4000, jsonMode = false) {
     // If Gemini is in cooldown, throw immediately so fallback kicks in
     if (Date.now() < geminiCooldownUntil) {
         throw new Error(`Gemini quota cooldown active (resets at ${new Date(geminiCooldownUntil).toLocaleTimeString()})`);
@@ -537,7 +548,13 @@ async function callGemini(messages: any[], model: string, systemPrompt: string, 
             body: JSON.stringify({
                 system_instruction: { parts: [{ text: systemPrompt }] },
                 contents: geminiMessages,
-                generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4, topP: 0.9 },
+                generationConfig: {
+                    maxOutputTokens: maxTokens,
+                    temperature: jsonMode ? 0.1 : 0.4,
+                    topP: 0.9,
+                    // Force JSON MIME type so Gemini never returns plain text for structured features
+                    ...(jsonMode ? { responseMimeType: "application/json" } : {}),
+                },
                 safetySettings: [
                     { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
                     { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
@@ -606,17 +623,20 @@ async function callMistral(messages: any[], model: string, systemPrompt: string,
 // Smart Router — Routes features to correct model with fallback
 // ═══════════════════════════════════════════════════════════════
 
+// Features that must return JSON — these get JSON mode enforced on all providers
+const JSON_FEATURES = new Set<AIFeature>(["resume_edit", "cover_letter", "interview_prediction"]);
+
 export async function getAIReply(messages: any[], feature: AIFeature = "chat") {
     const startTime = Date.now();
     const config = FEATURE_MODEL_MAP[feature];
     const systemPrompt = SYSTEM_PROMPTS[feature] || SYSTEM_PROMPTS.chat;
+    const jsonMode = JSON_FEATURES.has(feature);
 
     // Auto-detect images → use Scout vision if feature is chat
     const hasImages = messages.some(m =>
         Array.isArray(m.content) && m.content.some((p: any) => p.type === "image")
     );
     if (hasImages && feature === "chat") {
-        // Route to Scout vision
         return callGroq(messages, MODELS.scout, systemPrompt, 4000);
     }
 
@@ -626,7 +646,7 @@ export async function getAIReply(messages: any[], feature: AIFeature = "chat") {
 
     // Primary attempt
     try {
-        const result = await providerFn(messages, config.model, systemPrompt);
+        const result = await providerFn(messages, config.model, systemPrompt, 4000, jsonMode);
         // Trace successful LLM call
         traceStandalone({
             name: `llm:${feature}`,
@@ -653,7 +673,7 @@ export async function getAIReply(messages: any[], feature: AIFeature = "chat") {
     for (const fb of fallbacks) {
         try {
             console.log(`[AI] Falling back to ${fb.name} for ${feature}`);
-            return await fb.fn(messages, fb.model, systemPrompt);
+            return await fb.fn(messages, fb.model, systemPrompt, 4000, jsonMode);
         } catch (err: any) {
             console.warn(`[AI] Fallback ${fb.name} also failed: ${err.message}`);
         }

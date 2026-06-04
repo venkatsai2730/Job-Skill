@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, Component } from "react";
+import type { ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Bot, X, Send, Loader2, Target, CheckCircle2,
@@ -12,7 +13,27 @@ import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
 import { toast } from "sonner";
 import { DiffCard } from "./DiffCard";
-import type { ResumePatch } from "@/lib/resumeTypes";
+import type { ResumePatch, AriaEdit } from "@/lib/resumeTypes";
+
+// ── ErrorBoundary: prevents a single bad DiffCard from crashing the page ─────
+class DiffCardErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+    constructor(props: { children: ReactNode }) {
+        super(props);
+        this.state = { hasError: false };
+    }
+    static getDerivedStateFromError() { return { hasError: true }; }
+    componentDidCatch(err: Error) { console.warn("[DiffCard] Render error caught:", err.message); }
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="mt-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-700">
+                    ⚠️ Could not render the diff preview. The changes are still available — click Accept or Undo to proceed.
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 // ── Types ──────────────────────────────────────────────
 interface AgentStepUI {
@@ -32,6 +53,7 @@ interface ChatMessage {
     toolsUsed?: string[];
     steps?: AgentStepUI[];
     intent?: string;
+    aria_edit?: AriaEdit | null;
     resume_patch?: ResumePatch | null;
     patchAccepted?: boolean;
 }
@@ -46,6 +68,8 @@ interface ChatbotResponse {
 interface ResumeChatbotProps {
     hasParsedResume: boolean;
     jobDescription: string;
+    resumeData?: any | null;
+    onAriaEdit?: (edit: AriaEdit) => void;   // auto-applied immediately
     onResumePatch?: (patch: ResumePatch) => void;
     onAcceptPatch?: (patch: ResumePatch) => void;
     onUndoPatch?: () => void;
@@ -280,7 +304,7 @@ function MarkdownContent({ content }: { content: string }) {
 // ════════════════════════════════════════════════════════════
 // ██ MAIN COMPONENT
 // ════════════════════════════════════════════════════════════
-export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, onAcceptPatch, onUndoPatch }: ResumeChatbotProps) {
+export function ResumeChatbot({ hasParsedResume, jobDescription, resumeData, onAriaEdit, onResumePatch, onAcceptPatch, onUndoPatch }: ResumeChatbotProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([{
         id: "welcome",
@@ -364,6 +388,8 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, 
                     command: explicitCommand,
                     useAgent: true,
                     payload: { jobDescription: jobDescription || undefined },
+                    // Send current resume data so the backend uses the correct UUIDs for patches
+                    currentResumeData: resumeData || undefined,
                 }),
             });
 
@@ -378,6 +404,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, 
                 let toolsUsed: string[] = [];
                 let steps: AgentStepUI[] = [];
                 let intent = "";
+                let sseAriaEdit: AriaEdit | null = null;
                 let sseResumePatch: ResumePatch | null = null;
 
                 while (true) {
@@ -404,8 +431,10 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, 
                                 finalMessage = event.content || "";
                                 toolsUsed = event.toolsUsed || [];
                                 intent = event.intent || "";
-                                // Extract resume_patch from SSE message event
-                                if (event.resume_patch && event.resume_patch.action === "PATCH_RESUME") {
+                                // Prefer AriaEdit (simple, auto-applied) over legacy ResumePatch
+                                if (event.aria_edit?.action === "ARIA_EDIT") {
+                                    sseAriaEdit = event.aria_edit;
+                                } else if (event.resume_patch?.action === "PATCH_RESUME") {
                                     sseResumePatch = event.resume_patch;
                                 }
                             } else if (event.type === "done") {
@@ -415,8 +444,10 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, 
                     }
                 }
 
-                // Notify parent of resume patch if present
-                if (sseResumePatch && onResumePatch) {
+                // Auto-apply AriaEdit (new, simple), or notify parent of legacy patch
+                if (sseAriaEdit && onAriaEdit) {
+                    onAriaEdit(sseAriaEdit);
+                } else if (sseResumePatch && onResumePatch) {
                     onResumePatch(sseResumePatch);
                 }
 
@@ -430,6 +461,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, 
                     intent,
                     data: { reply: finalMessage, toolsUsed, intent },
                     timestamp: Date.now(),
+                    aria_edit: sseAriaEdit,
                     resume_patch: sseResumePatch,
                 }]);
             } else {
@@ -438,12 +470,16 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, 
                 const botMessage = res.message || res.data?.message || "Here is what I found:";
                 const botCommand = res.command || res.data?.command;
                 const botData = res.data;
-                const jsonResumePatch: ResumePatch | null = 
-                    (res.resume_patch?.action === "PATCH_RESUME" ? res.resume_patch : null) ||
-                    (botData?.resume_patch?.action === "PATCH_RESUME" ? botData.resume_patch : null);
+                const jsonAriaEdit: AriaEdit | null =
+                    (res.aria_edit?.action === "ARIA_EDIT" ? res.aria_edit : null) ||
+                    (botData?.aria_edit?.action === "ARIA_EDIT" ? botData.aria_edit : null);
+                const jsonResumePatch: ResumePatch | null =
+                    !jsonAriaEdit && (res.resume_patch?.action === "PATCH_RESUME" ? res.resume_patch : null) ||
+                    !jsonAriaEdit && (botData?.resume_patch?.action === "PATCH_RESUME" ? botData.resume_patch : null) || null;
 
-                // Notify parent of resume patch if present
-                if (jsonResumePatch && onResumePatch) {
+                if (jsonAriaEdit && onAriaEdit) {
+                    onAriaEdit(jsonAriaEdit);
+                } else if (jsonResumePatch && onResumePatch) {
                     onResumePatch(jsonResumePatch);
                 }
 
@@ -457,6 +493,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, 
                     steps: botData?.steps || [],
                     intent: botData?.intent || botCommand,
                     timestamp: Date.now(),
+                    aria_edit: jsonAriaEdit,
                     resume_patch: jsonResumePatch,
                 }]);
             }
@@ -829,14 +866,22 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, 
                                             ) : (
                                                 <>
                                                     <MarkdownContent content={msg.content} />
-                                                    {/* Resume Patch DiffCard */}
+                                                    {/* AriaEdit — auto-applied indicator */}
+                                                    {msg.aria_edit && (
+                                                        <div className="mt-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-700 font-medium">
+                                                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                                            <span>Changes applied to your resume — switch to <strong>Live Edit</strong> tab to see them</span>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Resume Patch DiffCard (legacy) */}
                                                     {msg.resume_patch && (
+                                                        <DiffCardErrorBoundary>
                                                         <DiffCard
                                                             patch={msg.resume_patch}
                                                             isAccepted={!!msg.patchAccepted}
                                                             onAccept={(patch) => {
-                                                                // Mark this message's patch as accepted
-                                                                setMessages(prev => prev.map(m => 
+                                                                setMessages(prev => prev.map(m =>
                                                                     m.id === msg.id ? { ...m, patchAccepted: true } : m
                                                                 ));
                                                                 onAcceptPatch?.(patch);
@@ -848,6 +893,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, onResumePatch, 
                                                                 onUndoPatch?.();
                                                             }}
                                                         />
+                                                        </DiffCardErrorBoundary>
                                                     )}
                                                     {renderComplexData(msg)}
                                                     {msg.toolsUsed && msg.toolsUsed.length > 0 && (
