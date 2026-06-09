@@ -16,6 +16,7 @@ import Jobs from "./pages/Jobs";
 import Resume from "./pages/Resume";
 import LinkedInOptimizer from "./pages/LinkedInOptimizer";
 import SettingsPage from "./pages/Settings";
+import CoverLetter from "./pages/CoverLetter";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -38,6 +39,7 @@ const App = () => (
               <Route path="jobs" element={<Jobs />} />
               <Route path="resume" element={<Resume />} />
               <Route path="linkedin" element={<LinkedInOptimizer />} />
+              <Route path="cover-letter" element={<CoverLetter />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />

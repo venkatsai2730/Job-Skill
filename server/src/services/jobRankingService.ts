@@ -1,0 +1,705 @@
+// ═══════════════════════════════════════════════════════════════
+// Smart Job Ranking Service — Resume-matched job scoring
+// Ranks jobs by 5 weighted signals instead of chronological order.
+// ═══════════════════════════════════════════════════════════════
+
+import { supabaseAdmin } from "../config/supabase.js";
+import { USE_HYBRID_JOB_RANKING } from "../config/featureFlags.js";
+import { retrieveSimilarJobs } from "../rag/retrieve.js";
+import { scoreTrackAlignment } from "./recommendationEngine.js";
+
+// ── Types ─────────────────────────────────────────────────────
+export interface JobListing {
+    id: string;
+    title: string;
+    company: string;
+    location: string;
+    description: string;
+    job_url: string;
+    source: string;
+    salary_min: number | null;
+    salary_max: number | null;
+    experience_min: number | null;
+    experience_max: number | null;
+    skills: string[];
+    required_skills?: string[];
+    posted_at: string;
+    fetched_at?: string;
+    seniority_level?: string;
+    seniority?: string;
+    is_active?: boolean;
+    match_score?: number;
+    confidence_score?: number;
+    category?: string;
+    search_term?: string;
+}
+
+export interface RankedJob extends JobListing {
+    match_score: number;
+    matched_skills: string[];
+    skill_gap: string[];
+    selection_chance: number; // 1-99% estimated selection probability
+    selection_reason: string; // human-readable explanation
+}
+
+// ── Tech terms dictionary for project relevance ───────────────
+const TECH_TERMS = new Set([
+    "react", "angular", "vue", "next", "nuxt", "svelte", "node", "express", "django",
+    "flask", "spring", "rails", "laravel", "fastapi", "graphql", "rest", "grpc",
+    "postgresql", "mysql", "mongodb", "redis", "elasticsearch", "kafka", "rabbitmq",
+    "docker", "kubernetes", "terraform", "aws", "azure", "gcp", "jenkins", "cicd",
+    "python", "javascript", "typescript", "java", "golang", "rust", "cpp", "csharp",
+    "kotlin", "swift", "flutter", "reactnative", "tensorflow", "pytorch", "pandas",
+    "numpy", "scikit", "opencv", "nlp", "transformer", "bert", "gpt", "llm",
+    "microservices", "serverless", "lambda", "s3", "ec2", "dynamodb", "firebase",
+    "supabase", "prisma", "sequelize", "typeorm", "mongoose", "socketio", "websocket",
+    "html", "css", "tailwind", "sass", "webpack", "vite", "rollup", "babel",
+    "git", "linux", "nginx", "apache", "blockchain", "solidity", "web3",
+    "figma", "sketch", "xd", "photoshop", "illustrator", "canva",
+    "agile", "scrum", "jira", "confluence", "notion",
+    "selenium", "cypress", "jest", "mocha", "playwright", "testing",
+    "ml", "ai", "deeplearning", "datascience", "analytics", "tableau", "powerbi",
+]);
+
+// ── Extract tech terms from text ──────────────────────────────
+function extractTechTerms(text: string): string[] {
+    const words = text.toLowerCase().replace(/[^a-z0-9\s.#+]/g, " ").split(/\s+/);
+    const found = new Set<string>();
+    for (const word of words) {
+        const normalized = word.replace(/[.#+]/g, "").trim();
+        if (normalized.length > 1 && TECH_TERMS.has(normalized)) {
+            found.add(normalized);
+        }
+    }
+    return Array.from(found);
+}
+
+function detectUserDegreeFromData(sections: any, rawText: string): "phd" | "masters" | "bachelors" | "none" {
+    const text = (((sections?.education || []).map((e: any) => (e.degree || "") + " " + (e.school || "")).join(" ") + " " + (rawText || ""))).toLowerCase();
+    if (/\b(ph\.?d\.?|doctor\s+of\s+philosophy|doctorate)\b/i.test(text)) return "phd";
+    if (/\b(m\.?s\.?|m\.?a\.?|m\.?b\.?a\.?|m\.?tech|m\.?e\.?|master|masters)\b/i.test(text)) return "masters";
+    if (/\b(b\.?s\.?|b\.?a\.?|b\.?tech|b\.?e\.?|bachelor|bachelors)\b/i.test(text)) return "bachelors";
+    return "none";
+}
+
+// ── Compute Selection Chance (1-99%) ──────────────────────────
+// Estimates realistic probability of getting selected based on
+// match quality, competition level, seniority fit, and recency.
+const BIG_COMPANIES = new Set([
+    "google", "microsoft", "amazon", "meta", "apple", "netflix", "uber",
+    "flipkart", "swiggy", "zomato", "paytm", "phonepe", "razorpay",
+    "infosys", "tcs", "wipro", "hcl", "cognizant", "accenture", "deloitte",
+    "jpmorgan", "goldman sachs", "morgan stanley", "barclays",
+    "samsung", "oracle", "ibm", "intel", "nvidia", "salesforce", "adobe",
+    "walmart", "target", "spotify", "stripe", "airbnb", "twitter", "snap",
+]);
+
+function computeSelectionChance(
+    matchScore: number,
+    seniorityFit: number,
+    company: string,
+    hoursOld: number,
+    skillOverlapPct: number,
+    jobSeniority: string,
+): { chance: number; reason: string } {
+    // 1. Base chance from match score (40% weight)
+    // matchScore 0-100 → base 1-50
+    const matchBase = Math.max(1, Math.min(50, matchScore * 0.5));
+
+    // 2. Seniority fit bonus (25% weight)
+    // seniorityFit is 100/60/20 → bonus 0-25
+    const seniorityBonus = (seniorityFit / 100) * 25;
+
+    // 3. Competition penalty (20% weight)
+    // Big companies: high competition → penalty
+    const companyLower = (company || "").toLowerCase();
+    const isBigCompany = BIG_COMPANIES.has(companyLower) ||
+        [...BIG_COMPANIES].some(bc => companyLower.includes(bc));
+    const competitionPenalty = isBigCompany ? -15 : 0; // MNCs are harder
+    const smallCompanyBonus = !isBigCompany ? 10 : 0; // Startups are easier
+
+    // 4. Recency bonus (15% weight)
+    // Jobs posted < 24h ago → full bonus; > 7 days → no bonus
+    const recencyBonus = hoursOld < 24 ? 15 : hoursOld < 72 ? 10 : hoursOld < 168 ? 5 : 0;
+
+    // 5. Skill overlap multiplier
+    // If > 70% skills match, boost; if < 30%, penalize
+    const skillMultiplier = skillOverlapPct > 70 ? 1.2 : skillOverlapPct > 40 ? 1.0 : 0.7;
+
+    // 6. Seniority level penalty for very senior roles
+    const seniorPenalty = ["senior", "lead", "staff", "principal"].includes(jobSeniority.toLowerCase()) ? -10 : 0;
+    const internBonus = ["intern", "entry"].includes(jobSeniority.toLowerCase()) ? 8 : 0;
+
+    let rawChance = (matchBase + seniorityBonus + competitionPenalty + smallCompanyBonus + recencyBonus + seniorPenalty + internBonus) * skillMultiplier;
+
+    // Clamp to 1-99
+    const chance = Math.max(1, Math.min(99, Math.round(rawChance)));
+
+    // Generate human-readable reason
+    const reasons: string[] = [];
+    if (matchScore >= 70) reasons.push("Strong skill match");
+    else if (matchScore >= 40) reasons.push("Moderate skill match");
+    else reasons.push("Limited skill overlap");
+
+    if (seniorityFit >= 80) reasons.push("great seniority fit");
+    else if (seniorityFit >= 50) reasons.push("acceptable seniority level");
+    else reasons.push("seniority mismatch");
+
+    if (isBigCompany) reasons.push("high competition (large company)");
+    else reasons.push("lower competition (smaller company)");
+
+    if (hoursOld < 48) reasons.push("recently posted");
+    else if (hoursOld > 168) reasons.push("posted over a week ago");
+
+    return { chance, reason: reasons.join(", ") };
+}
+
+// ── Compute title similarity (tokenized Jaccard) ──────────────
+function computeTitleSimilarity(userTitle: string, jobTitle: string): number {
+    if (!userTitle || !jobTitle) return 50; // neutral if unknown
+
+    const tokenize = (s: string) =>
+        new Set(s.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 1));
+
+    const userTokens = tokenize(userTitle);
+    const jobTokens = tokenize(jobTitle);
+
+    if (userTokens.size === 0 || jobTokens.size === 0) return 50;
+
+    let intersection = 0;
+    for (const token of userTokens) {
+        if (jobTokens.has(token)) intersection++;
+    }
+
+    const union = new Set([...userTokens, ...jobTokens]).size;
+    return Math.round((intersection / union) * 100);
+}
+
+// ── Seniority level order ─────────────────────────────────────
+const SENIORITY_ORDER = ["intern", "entry", "mid", "senior", "lead"];
+
+function seniorityIndex(level: string): number {
+    const idx = SENIORITY_ORDER.indexOf(level.toLowerCase());
+    return idx >= 0 ? idx : 1; // default to entry
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MAIN RANKING FUNCTION
+// ═══════════════════════════════════════════════════════════════
+export async function rankJobsForUser(
+    userId: string,
+    jobs: JobListing[],
+    limit: number = 20
+): Promise<RankedJob[]> {
+    if (!jobs || jobs.length === 0) return [];
+
+    // 1. Load user's latest resume from Supabase
+    let userSkills: string[] = [];
+    let userProjects: string[] = [];
+    let userATSScore: number = 50;
+    let userTitle: string = "";
+    let userDegree: "phd" | "masters" | "bachelors" | "none" = "none";
+    let userExpYears: number = 0;
+
+    try {
+        const { data: resume } = await supabaseAdmin
+            .from("resumes")
+            .select("parsed_data")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+        if (resume?.parsed_data) {
+            const pd = resume.parsed_data as any;
+
+            // Extract skills from parsed sections — split parenthetical groups into individual skills
+            const skillGroups = pd?.sections?.skills || [];
+            const rawSkills = skillGroups.flatMap((g: any) => g.items || []);
+            // "Python (pandas, NumPy, scikit-learn)" → ["Python", "pandas", "NumPy", "scikit-learn"]
+            userSkills = rawSkills.flatMap((s: string) => {
+                const base = s.replace(/\s*\([^)]*\)/g, '').trim();
+                const parenMatch = s.match(/\(([^)]+)\)/);
+                const parenItems = parenMatch ? parenMatch[1].split(/[,;]/).map(i => i.trim()).filter(Boolean) : [];
+                return [base, ...parenItems].filter(i => i.length > 0);
+            });
+
+            // ── Also include LLM-inferred skills from projects/experience ──
+            const inferredSkills: string[] = pd?.ats?.inferredSkills || [];
+            if (inferredSkills.length > 0) {
+                userSkills = Array.from(new Set([...userSkills, ...inferredSkills]));
+            }
+
+            // ── Extract skills directly from project tech stacks ──
+            const projects = pd?.sections?.projects || [];
+            const projectTechSkills = projects.flatMap((p: any) => (p.tech || []).map((t: string) => t.trim())).filter(Boolean);
+            if (projectTechSkills.length > 0) {
+                userSkills = Array.from(new Set([...userSkills, ...projectTechSkills]));
+            }
+
+            // Extract project text
+            userProjects = projects.map((p: any) =>
+                `${p.name || ""} ${p.description || ""} ${(p.tech || []).join(" ")}`
+            );
+
+            // Get ATS score
+            userATSScore = pd?.ats?.score ?? pd?.ats?.overall_score ?? 50;
+
+            // Get most recent title
+            const expEntries = pd?.sections?.experience || [];
+            if (expEntries.length > 0) {
+                userTitle = expEntries[0]?.title || "";
+            }
+
+            // Extract user degree from resume sections
+            userDegree = detectUserDegreeFromData(pd.sections, pd.rawText || "");
+        }
+    } catch {
+        // No resume — return jobs with neutral score
+        return jobs.slice(0, limit).map(j => ({
+            ...j,
+            match_score: 50,
+            matched_skills: [],
+            skill_gap: [],
+            selection_chance: 0,
+            selection_reason: "",
+        }));
+    }
+
+    // Also try user profile for additional skills and experience years
+    try {
+        const { data: profile } = await supabaseAdmin
+            .from("user_profiles")
+            .select("skills, experience_years, seniority_level")
+            .eq("user_id", userId)
+            .single();
+
+        if (profile) {
+            if (profile.skills && Array.isArray(profile.skills)) {
+                const profileSkills = profile.skills.filter((s: any) => typeof s === "string");
+                userSkills = Array.from(new Set([...userSkills, ...profileSkills]));
+            }
+            userExpYears = Number(profile.experience_years) || 0;
+        }
+    } catch { /* no profile */ }
+
+    if (userSkills.length === 0) {
+        return jobs.slice(0, limit).map(j => ({
+            ...j,
+            match_score: 50,
+            matched_skills: [],
+            skill_gap: [],
+            selection_chance: 0,
+            selection_reason: "",
+        }));
+    }
+
+    // 2. Score each job
+    const ranked: RankedJob[] = jobs.map(job => {
+        const jobSkills = job.required_skills || job.skills || [];
+
+        // ── Signal 1: Skill Overlap ────────────────────────────
+        const matchedSkills = userSkills.filter(s =>
+            jobSkills.some(js => js.toLowerCase().includes(s.toLowerCase()) || s.toLowerCase().includes(js.toLowerCase()))
+        );
+        // Also check description for skill mentions (many jobs have sparse skills[] arrays)
+        const descLower = (job.description || "").toLowerCase();
+        const titleLower = (job.title || "").toLowerCase();
+        const descMatchedSkills = userSkills.filter(s => {
+            if (s.length < 3) return false;
+            return !matchedSkills.includes(s) && (descLower.includes(s.toLowerCase()) || titleLower.includes(s.toLowerCase()));
+        });
+        const totalMatchedCount = matchedSkills.length + Math.floor(descMatchedSkills.length * 0.5);
+        
+        const skillOverlap = jobSkills.length > 0
+            ? Math.min(100, (totalMatchedCount / Math.max(jobSkills.length, 1)) * 100)
+            : (totalMatchedCount > 0 ? Math.min(100, totalMatchedCount * 12) : 5); // If no job skills listed, use desc matches; if nothing matches, score very low (5 not 50)
+
+        // ── Signal 2: Title Match ──────────────────────────────
+        const titleMatch = computeTitleSimilarity(userTitle, job.title);
+
+        // ── Signal 3: Seniority Fit ────────────────────────────
+        const userLevel = userATSScore < 40 ? "intern"
+            : userATSScore < 65 ? "entry"
+                : userATSScore < 80 ? "mid"
+                    : "senior";
+        const jobSeniority = job.seniority_level || job.seniority || "entry";
+        const levelDiff = Math.abs(seniorityIndex(jobSeniority) - seniorityIndex(userLevel));
+        const seniorityFit = levelDiff === 0 ? 100 : levelDiff === 1 ? 60 : 20;
+
+        // ── Signal 4: Project Relevance ────────────────────────
+        const projectText = userProjects.join(" ").toLowerCase();
+        const jobText = `${job.title} ${job.description || ""}`.toLowerCase();
+        const techOverlap = extractTechTerms(projectText).filter(t => jobText.includes(t));
+        const projectRelevance = Math.min(100, techOverlap.length * 15);
+
+        // ── Signal 5: Recency ──────────────────────────────────
+        const hoursOld = (Date.now() - new Date(job.posted_at).getTime()) / 3600000;
+        const recencyBonus = Math.max(0, 100 - hoursOld * 2);
+
+        // ── Signals 6-8: Hybrid mode (Qdrant-enhanced) ─────────
+        let semanticSimilarity = 50; // Neutral default
+        let locationFit = 50;        // Neutral default
+        let compensationFit = 50;    // Neutral default
+
+        if (USE_HYBRID_JOB_RANKING) {
+            // Signal 6: Location preference fit
+            const jobLoc = (job.location || "").toLowerCase();
+            if (jobLoc.includes("remote") || jobLoc.includes("wfh") || jobLoc.includes("anywhere")) {
+                locationFit = 90; // Remote is generally high fit
+            }
+            // Could enhance with user's preferred_location from memory
+
+            // Signal 7: Compensation fit (if salary data available)
+            if (job.salary_min && job.salary_max) {
+                compensationFit = 80; // Having salary info = transparency bonus
+            }
+        }
+
+        // ── Weighted final score ────────────────────────────────
+        let matchScore: number;
+        if (USE_HYBRID_JOB_RANKING) {
+            // 8-signal hybrid scoring
+            matchScore = Math.round(
+                Math.min(100, skillOverlap) * 0.35 +
+                Math.min(100, titleMatch) * 0.15 +
+                seniorityFit * 0.15 +
+                Math.min(100, projectRelevance) * 0.10 +
+                semanticSimilarity * 0.10 +
+                Math.min(100, recencyBonus) * 0.05 +
+                locationFit * 0.05 +
+                compensationFit * 0.05
+            );
+        } else {
+            // Original 5-signal scoring
+            matchScore = Math.round(
+                Math.min(100, skillOverlap) * 0.40 +
+                Math.min(100, titleMatch) * 0.20 +
+                seniorityFit * 0.20 +
+                Math.min(100, projectRelevance) * 0.15 +
+                Math.min(100, recencyBonus) * 0.05
+            );
+        }
+
+        // Skills the user is missing for this job
+        const skillGap = jobSkills.filter(js =>
+            !userSkills.some(us => us.toLowerCase().includes(js.toLowerCase()) || js.toLowerCase().includes(us.toLowerCase()))
+        );
+
+        let forcedSelectionChance: number | null = null;
+        let forcedSelectionReason: string | null = null;
+        let finalMatchScore = Math.max(5, Math.min(100, matchScore));
+
+        const jobTitleLower = (job.title || "").toLowerCase();
+        const companyLower = (job.company || "").toLowerCase();
+
+        // 1. Strict PhD check
+        const isPhdJob = /\b(phd|ph\.d|doctorate)\b/i.test(jobTitleLower);
+        if (isPhdJob && userDegree !== "phd") {
+            finalMatchScore = Math.max(5, finalMatchScore - 75);
+            forcedSelectionChance = 1;
+            forcedSelectionReason = "Requires PhD degree, which does not match your academic profile.";
+        }
+
+        // 2. Master's requirement check
+        const isMastersJob = /\b(ms|m\.s|masters)\b/i.test(jobTitleLower);
+        if (!isPhdJob && isMastersJob && userDegree === "bachelors" && !jobTitleLower.includes("bs")) {
+            finalMatchScore = Math.max(5, finalMatchScore - 40);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 10);
+            forcedSelectionReason = forcedSelectionReason || "Requires Master's degree (academic mismatch)";
+        }
+
+        // 3. Seniority level check for junior candidates
+        const isSeniorRole = /\b(senior|sr\.?|lead|staff|principal|manager|director|vp|architect|head)\b/i.test(jobTitleLower);
+        const isStaffRole = /\b(staff|principal|director|vp|head)\b/i.test(jobTitleLower);
+
+        if (isSeniorRole && userExpYears < 2) {
+            finalMatchScore = Math.max(5, finalMatchScore - 45);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 2);
+            forcedSelectionReason = forcedSelectionReason || "Requires senior-level experience";
+        } else if (isStaffRole && userExpYears < 4) {
+            finalMatchScore = Math.max(5, finalMatchScore - 65);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 1);
+            forcedSelectionReason = forcedSelectionReason || "Requires advanced staff-level leadership experience";
+        }
+
+        // 4. Tier-1 Hyper-competitive bar check
+        const isTier1Company = ["openai", "anthropic", "stripe", "figma", "netflix", "apple", "google", "meta", "microsoft", "amazon", "uber"].some(
+            t1 => companyLower.includes(t1)
+        );
+        if (isTier1Company && userExpYears < 2) {
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 15);
+            forcedSelectionReason = forcedSelectionReason || "Hyper-competitive tier-1 hiring bar for junior candidates.";
+        }
+
+        // 5. Career Track Alignment Check (AI-powered Recommendation Engine)
+        const alignmentResult = scoreTrackAlignment(userSkills, userTitle, {
+            title: job.title,
+            description: job.description || "",
+            skills: jobSkills,
+            company: job.company
+        });
+        
+        finalMatchScore = Math.max(5, Math.min(100, finalMatchScore + alignmentResult.scoreModifier));
+
+        // Compute selection chance
+        const { chance, reason } = computeSelectionChance(
+            finalMatchScore, seniorityFit, job.company, hoursOld,
+            skillOverlap, jobSeniority,
+        );
+
+        const selectionChance = forcedSelectionChance !== null ? forcedSelectionChance : chance;
+        const selectionReason = forcedSelectionReason !== null 
+            ? forcedSelectionReason 
+            : `${alignmentResult.trackReason}, ${reason}`;
+
+        return {
+            ...job,
+            match_score: finalMatchScore,
+            matched_skills: matchedSkills.slice(0, 10),
+            skill_gap: skillGap.slice(0, 10),
+            selection_chance: selectionChance,
+            selection_reason: selectionReason,
+        };
+    });
+
+    // 3. Sort by match score descending
+    return ranked
+        .sort((a, b) => b.match_score - a.match_score)
+        .slice(0, limit);
+}
+
+// ── Export user skills for frontend highlighting ───────────────
+export async function getUserSkillsForMatching(userId: string): Promise<string[]> {
+    try {
+        const { data: resume } = await supabaseAdmin
+            .from("resumes")
+            .select("parsed_data")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+        if (resume?.parsed_data) {
+            const pd = resume.parsed_data as any;
+            const skillGroups = pd?.sections?.skills || [];
+            const rawSkills = skillGroups.flatMap((g: any) => g.items || []);
+            // Split "Python (pandas, NumPy)" → ["Python", "pandas", "NumPy"]
+            const explicitSkills = rawSkills.flatMap((s: string) => {
+                const base = s.replace(/\s*\([^)]*\)/g, '').trim();
+                const parenMatch = s.match(/\(([^)]+)\)/);
+                const parenItems = parenMatch ? parenMatch[1].split(/[,;]/).map((i: string) => i.trim()).filter(Boolean) : [];
+                return [base, ...parenItems].filter((i: string) => i.length > 0);
+            });
+
+            // Include LLM-inferred skills from projects/experience
+            const inferredSkills: string[] = pd?.ats?.inferredSkills || [];
+
+            // Include skills from project tech stacks
+            const projects = pd?.sections?.projects || [];
+            const projectTechSkills = projects.flatMap((p: any) => (p.tech || []).map((t: string) => t.trim())).filter(Boolean);
+
+            return Array.from(new Set([...explicitSkills, ...inferredSkills, ...projectTechSkills]));
+        }
+    } catch { /* ignore */ }
+    return [];
+}
+
+// ── rankJobsForUserWithSkills ──────────────────────────────────
+// Like rankJobsForUser but accepts pre-loaded user data to avoid double DB fetch.
+// This is the preferred function to call from chat.ts /jobs handler.
+export async function rankJobsForUserWithSkills(
+    userId: string,
+    jobs: JobListing[],
+    preloadedSkills: string[],   // already normalized (lowercase, no spaces)
+    preloadedExpYears: number,
+    limit: number = 20
+): Promise<RankedJob[]> {
+    if (!jobs || jobs.length === 0) return [];
+
+    // Normalize the pre-loaded skills consistently
+    const userSkills = preloadedSkills.map(s => s.toLowerCase().replace(/[\s.]+/g, ''));
+
+    // Get ATS score and title from resume (still need one quick fetch for these)
+    let userATSScore: number = 50;
+    let userTitle: string = "";
+    let userProjects: string[] = [];
+    let userDegree: "phd" | "masters" | "bachelors" | "none" = "none";
+
+    try {
+        const { data: resume } = await supabaseAdmin
+            .from("resumes")
+            .select("parsed_data")
+            .eq("user_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+        if (resume?.parsed_data) {
+            const pd = resume.parsed_data as any;
+            userATSScore = pd?.ats?.score ?? pd?.ats?.overall_score ?? 50;
+            const expEntries = pd?.sections?.experience || [];
+            if (expEntries.length > 0) userTitle = expEntries[0]?.title || "";
+            const projects = pd?.sections?.projects || [];
+            userProjects = projects.map((p: any) =>
+                `${p.name || ""} ${p.description || ""} ${(p.tech || []).join(" ")}`
+            );
+            userDegree = detectUserDegreeFromData(pd.sections, pd.rawText || "");
+        }
+    } catch { /* use defaults */ }
+
+    if (userSkills.length === 0) {
+        return jobs.slice(0, limit).map(j => ({
+            ...j,
+            match_score: 50,
+            matched_skills: [],
+            skill_gap: [],
+            selection_chance: 0,
+            selection_reason: "",
+        }));
+    }
+
+    const ranked: RankedJob[] = jobs.map(job => {
+        // Normalize job skills the same way
+        const jobSkillsRaw = job.required_skills || job.skills || [];
+        const jobSkills = jobSkillsRaw.map((s: string) => s.toLowerCase().replace(/[\s.]+/g, ''));
+
+        // ── Signal 1: Skill Overlap ────────────────────────────
+        // Also scan description for skill mentions (DB skills[] is often sparse)
+        const descNorm = (job.description || "").toLowerCase().replace(/[\s.]+/g, '');
+        const titleNorm = (job.title || "").toLowerCase().replace(/[\s.]+/g, '');
+
+        const matchedFromArray = userSkills.filter(s =>
+            jobSkills.some(js => js.includes(s) || s.includes(js))
+        );
+        const matchedFromDesc = userSkills.filter(s =>
+            !matchedFromArray.includes(s) && (descNorm.includes(s) || titleNorm.includes(s))
+        );
+
+        // Weight array match higher than description mention
+        const totalMatched = matchedFromArray.length + Math.floor(matchedFromDesc.length * 0.5);
+        const skillOverlap = userSkills.length > 0
+            ? Math.min(100, (totalMatched / userSkills.length) * 100)
+            : 50;
+
+        // ── Signal 2: Title Match ──────────────────────────────
+        const titleMatch = computeTitleSimilarity(userTitle, job.title);
+
+        // ── Signal 3: Seniority Fit ────────────────────────────
+        const userLevel = preloadedExpYears <= 1 ? "intern"
+            : preloadedExpYears <= 3 ? "entry"
+            : preloadedExpYears <= 6 ? "mid"
+            : "senior";
+        const jobSeniority = job.seniority_level || job.seniority || "entry";
+        const levelDiff = Math.abs(seniorityIndex(jobSeniority) - seniorityIndex(userLevel));
+        const seniorityFit = levelDiff === 0 ? 100 : levelDiff === 1 ? 60 : 20;
+
+        // ── Signal 4: Project Relevance ────────────────────────
+        const projectText = userProjects.join(" ").toLowerCase();
+        const jobText = `${job.title} ${job.description || ""}`.toLowerCase();
+        const techOverlap = extractTechTerms(projectText).filter(t => jobText.includes(t));
+        const projectRelevance = Math.min(100, techOverlap.length * 15);
+
+        // ── Signal 5: Recency ──────────────────────────────────
+        const hoursOld = (Date.now() - new Date(job.posted_at).getTime()) / 3600000;
+        const recencyBonus = Math.max(0, 100 - hoursOld * 2);
+
+        const matchScore = Math.round(
+            Math.min(100, skillOverlap) * 0.40 +
+            Math.min(100, titleMatch) * 0.20 +
+            seniorityFit * 0.20 +
+            Math.min(100, projectRelevance) * 0.15 +
+            Math.min(100, recencyBonus) * 0.05
+        );
+
+        // Human-readable matched skills (original form)
+        const matchedSkillsDisplay = (job.required_skills || job.skills || [])
+            .filter((js: string) => userSkills.some(us => js.toLowerCase().replace(/[\s.]+/g, '').includes(us) || us.includes(js.toLowerCase().replace(/[\s.]+/g, ''))))
+            .slice(0, 10);
+
+        const skillGap = (job.required_skills || job.skills || [])
+            .filter((js: string) => !userSkills.some(us => js.toLowerCase().replace(/[\s.]+/g, '').includes(us) || us.includes(js.toLowerCase().replace(/[\s.]+/g, ''))))
+            .slice(0, 10);
+
+        let forcedSelectionChance: number | null = null;
+        let forcedSelectionReason: string | null = null;
+        let finalMatchScore = Math.max(5, Math.min(100, matchScore));
+
+        const jobTitleLower = (job.title || "").toLowerCase();
+        const companyLower = (job.company || "").toLowerCase();
+
+        // 1. Strict PhD check
+        const isPhdJob = /\b(phd|ph\.d|doctorate)\b/i.test(jobTitleLower);
+        if (isPhdJob && userDegree !== "phd") {
+            finalMatchScore = Math.max(5, finalMatchScore - 75);
+            forcedSelectionChance = 1;
+            forcedSelectionReason = "Requires PhD degree, which does not match your academic profile.";
+        }
+
+        // 2. Master's requirement check
+        const isMastersJob = /\b(ms|m\.s|masters)\b/i.test(jobTitleLower);
+        if (!isPhdJob && isMastersJob && userDegree === "bachelors" && !jobTitleLower.includes("bs")) {
+            finalMatchScore = Math.max(5, finalMatchScore - 40);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 10);
+            forcedSelectionReason = forcedSelectionReason || "Requires Master's degree (academic mismatch)";
+        }
+
+        // 3. Seniority level check for junior candidates
+        const isSeniorRole = /\b(senior|sr\.?|lead|staff|principal|manager|director|vp|architect|head)\b/i.test(jobTitleLower);
+        const isStaffRole = /\b(staff|principal|director|vp|head)\b/i.test(jobTitleLower);
+
+        if (isSeniorRole && preloadedExpYears < 2) {
+            finalMatchScore = Math.max(5, finalMatchScore - 45);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 2);
+            forcedSelectionReason = forcedSelectionReason || "Requires senior-level experience";
+        } else if (isStaffRole && preloadedExpYears < 4) {
+            finalMatchScore = Math.max(5, finalMatchScore - 65);
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 1);
+            forcedSelectionReason = forcedSelectionReason || "Requires advanced staff-level leadership experience";
+        }
+
+        // 4. Tier-1 Hyper-competitive bar check
+        const isTier1Company = ["openai", "anthropic", "stripe", "figma", "netflix", "apple", "google", "meta", "microsoft", "amazon", "uber"].some(
+            t1 => companyLower.includes(t1)
+        );
+        if (isTier1Company && preloadedExpYears < 2) {
+            forcedSelectionChance = Math.min(forcedSelectionChance || 100, 15);
+            forcedSelectionReason = forcedSelectionReason || "Hyper-competitive tier-1 hiring bar for junior candidates.";
+        }
+
+        // 5. Career Track Alignment Check (AI-powered Recommendation Engine)
+        const alignmentResult = scoreTrackAlignment(userSkills, userTitle, {
+            title: job.title,
+            description: job.description || "",
+            skills: job.skills || [],
+            company: job.company
+        });
+        
+        finalMatchScore = Math.max(5, Math.min(100, finalMatchScore + alignmentResult.scoreModifier));
+
+        // Compute selection chance
+        const { chance, reason } = computeSelectionChance(
+            finalMatchScore, seniorityFit, job.company, hoursOld,
+            skillOverlap, jobSeniority,
+        );
+
+        const selectionChance = forcedSelectionChance !== null ? forcedSelectionChance : chance;
+        const selectionReason = forcedSelectionReason !== null 
+            ? forcedSelectionReason 
+            : `${alignmentResult.trackReason}, ${reason}`;
+
+        return {
+            ...job,
+            match_score: finalMatchScore,
+            matched_skills: matchedSkillsDisplay,
+            skill_gap: skillGap,
+            selection_chance: selectionChance,
+            selection_reason: selectionReason,
+        };
+    });
+
+    return ranked
+        .sort((a, b) => b.match_score - a.match_score)
+        .slice(0, limit);
+}
+
