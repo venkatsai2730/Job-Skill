@@ -2,6 +2,7 @@ import { Router, Response } from "express";
 import { supabaseAdmin } from "../config/supabase.js";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
 import { PDFParse } from "pdf-parse";
+import Groq from "groq-sdk";
 import {
     Document,
     Packer,
@@ -41,6 +42,10 @@ interface ProjectEntry {
     tech: string[];
 }
 interface ParsedSections {
+    name: string;
+    email: string;
+    phone: string;
+    location: string;
     summary: string;
     experience: ExperienceEntry[];
     education: EducationEntry[];
@@ -57,6 +62,28 @@ interface ParsedData {
     sections: ParsedSections;
     ats: ATSResult;
     rawText: string;
+}
+
+// ── Extract contact info from header lines (before first section) ─
+function extractContactInfo(headerLines: string[]): {
+    name: string; email: string; phone: string; location: string;
+} {
+    const fullText = headerLines.join(" ");
+
+    const emailMatch = /[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}/.exec(fullText);
+    const email = emailMatch ? emailMatch[0].trim() : "";
+
+    const phoneMatch = /(\+?[\d][\d\s\-.()/]{7,}\d)/.exec(fullText);
+    const phone = phoneMatch ? phoneMatch[0].trim() : "";
+
+    const name = headerLines.find(
+        (l) => l.length > 1 && l.length < 60 && !/@/.test(l) && !/^\+?[\d\s\-.()/]{7,}$/.test(l)
+    ) ?? "";
+
+    const locMatch = /\b([A-Z][a-z][\w ]*,\s*(?:[A-Z]{2}|[A-Z][a-z]+(?:\s[A-Z][a-z]+)*))\b/.exec(fullText);
+    const location = locMatch ? locMatch[0].trim() : "";
+
+    return { name, email, phone, location };
 }
 
 // ── Section heading patterns ────────────────────────────────────
@@ -260,12 +287,26 @@ function parseSections(rawText: string): ParsedSections {
     const boundaries = detectSectionBoundaries(lines);
 
     const result: ParsedSections = {
+        name: "",
+        email: "",
+        phone: "",
+        location: "",
         summary: "",
         experience: [],
         education: [],
         skills: [],
         projects: [],
     };
+
+    // Extract name/email/phone/location from text before the first section heading
+    if (boundaries.length > 0) {
+        const headerLines = lines.slice(0, boundaries[0].startIdx).filter(Boolean);
+        const contact = extractContactInfo(headerLines);
+        result.name = contact.name;
+        result.email = contact.email;
+        result.phone = contact.phone;
+        result.location = contact.location;
+    }
 
     for (let i = 0; i < boundaries.length; i++) {
         const b = boundaries[i];
@@ -600,16 +641,32 @@ router.get("/download/docx", async (req: AuthRequest, res: Response) => {
         const pd: ParsedData = row.parsed_data;
         const children: Paragraph[] = [];
 
-        // Title
+        // Title — prefer the extracted name, fall back to file name
         const baseName = row.file_name.replace(/\.pdf$/i, "");
+        const displayName = pd.sections.name || baseName;
         children.push(
             new Paragraph({
-                text: baseName,
+                text: displayName,
                 heading: HeadingLevel.TITLE,
                 alignment: AlignmentType.CENTER,
-                spacing: { after: 200 },
+                spacing: { after: 60 },
             })
         );
+
+        // Contact line (email · phone · location)
+        const contactParts = [pd.sections.email, pd.sections.phone, pd.sections.location].filter(Boolean);
+        if (contactParts.length > 0) {
+            children.push(
+                new Paragraph({
+                    children: contactParts.map((part, i) => [
+                        new TextRun({ text: part }),
+                        ...(i < contactParts.length - 1 ? [new TextRun({ text: "  ·  " })] : []),
+                    ]).flat(),
+                    alignment: AlignmentType.CENTER,
+                    spacing: { after: 200 },
+                })
+            );
+        }
 
         // Summary
         if (pd.sections.summary) {
@@ -722,6 +779,215 @@ router.get("/download/docx", async (req: AuthRequest, res: Response) => {
         res.send(Buffer.from(docxBuffer));
     } catch (err: any) {
         console.error("Download DOCX error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// ── POST /api/resume/ai-edit — streaming SSE ──────────────
+router.post("/ai-edit", async (req: AuthRequest, res: Response) => {
+    const { prompt, sections } = req.body;
+
+    if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
+        res.status(400).json({ error: "prompt is required" });
+        return;
+    }
+    if (!sections || typeof sections !== "object") {
+        res.status(400).json({ error: "sections is required" });
+        return;
+    }
+
+    // Sanitise: strip control chars, cap length
+    const safePrompt = prompt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim().slice(0, 500);
+
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey || apiKey === "your_groq_api_key_here") {
+        res.status(500).json({ error: "AI service not configured. Add GROQ_API_KEY to server .env" });
+        return;
+    }
+
+    // SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    try {
+        const groq = new Groq({ apiKey });
+
+        const systemPrompt = `You are an expert resume writer and career coach. The user will give you their current resume sections as JSON and an instruction. Apply ONLY the requested change. Return ONLY the updated sections JSON — same structure as input, no markdown fences, no explanation. Preserve all IDs exactly as-is.`;
+
+        const userPrompt = `Current resume sections:
+${JSON.stringify(sections, null, 2)}
+
+Instruction: "${safePrompt}"
+
+Apply this instruction and return the complete updated sections JSON. Preserve all section structure, IDs, and fields that were not asked to change.`;
+
+        const stream = await groq.chat.completions.create({
+            model: "llama-3.3-70b-versatile",
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt },
+            ],
+            max_tokens: 3000,
+            temperature: 0.25,
+            stream: true,
+        });
+
+        let fullText = "";
+        for await (const chunk of stream) {
+            const token = chunk.choices[0]?.delta?.content ?? "";
+            if (token) {
+                fullText += token;
+                send({ type: "token", text: token });
+            }
+        }
+
+        // Parse the streamed JSON
+        let updatedSections: ParsedSections;
+        try {
+            updatedSections = JSON.parse(fullText);
+        } catch {
+            const match = fullText.match(/\{[\s\S]*\}/);
+            if (!match) throw new Error("AI returned malformed JSON");
+            updatedSections = JSON.parse(match[0]);
+        }
+
+        // Recompute ATS and persist updated sections to DB
+        const { data: row } = await supabaseAdmin
+            .from("resumes")
+            .select("parsed_data")
+            .eq("user_id", req.user!.userId)
+            .limit(1)
+            .single();
+
+        let newAts: ATSResult | undefined;
+        if (row?.parsed_data) {
+            const existing = row.parsed_data as ParsedData;
+            newAts = computeATS(updatedSections, existing.rawText ?? "");
+            const newParsedData = { ...existing, sections: updatedSections, ats: newAts };
+            await supabaseAdmin
+                .from("resumes")
+                .update({ parsed_data: newParsedData })
+                .eq("user_id", req.user!.userId);
+        }
+
+        send({ type: "result", sections: updatedSections, ats: newAts, summary: `Applied: "${safePrompt}"` });
+        res.write("data: [DONE]\n\n");
+        res.end();
+    } catch (err: any) {
+        console.error("AI edit stream error:", err?.message ?? err);
+        send({ type: "error", message: err?.message ?? "AI edit failed" });
+        res.write("data: [DONE]\n\n");
+        res.end();
+    }
+});
+
+// ── PUT /api/resume/sections — save manually edited sections ──
+router.put("/sections", async (req: AuthRequest, res: Response) => {
+    try {
+        const { sections } = req.body;
+        if (!sections) { res.status(400).json({ error: "sections required" }); return; }
+
+        const { data: row } = await supabaseAdmin
+            .from("resumes")
+            .select("parsed_data")
+            .eq("user_id", req.user!.userId)
+            .limit(1)
+            .single();
+
+        if (!row) { res.status(404).json({ error: "No resume found" }); return; }
+
+        const existing = row.parsed_data ?? {};
+        const updatedAts = computeATS(sections as ParsedSections, existing.rawText ?? "");
+        const newParsedData = { ...existing, sections, ats: updatedAts };
+
+        await supabaseAdmin
+            .from("resumes")
+            .update({ parsed_data: newParsedData })
+            .eq("user_id", req.user!.userId);
+
+        res.json({ sections, ats: updatedAts });
+    } catch (err: any) {
+        console.error("Save sections error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// ── GET /api/resume/versions ───────────────────────────────
+router.get("/versions", async (req: AuthRequest, res: Response) => {
+    try {
+        const { data } = await supabaseAdmin
+            .from("resumes")
+            .select("parsed_data")
+            .eq("user_id", req.user!.userId)
+            .limit(1)
+            .single();
+
+        res.json({ versions: (data?.parsed_data as any)?.versions ?? [] });
+    } catch (err: any) {
+        console.error("Get versions error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// ── POST /api/resume/versions — save a named version ──────
+router.post("/versions", async (req: AuthRequest, res: Response) => {
+    try {
+        const { label, sections } = req.body;
+        if (!sections) { res.status(400).json({ error: "sections required" }); return; }
+
+        const version = {
+            id: crypto.randomUUID(),
+            label: (label || new Date().toLocaleString()).slice(0, 100),
+            sections,
+            createdAt: new Date().toISOString(),
+        };
+
+        const { data: row } = await supabaseAdmin
+            .from("resumes")
+            .select("parsed_data")
+            .eq("user_id", req.user!.userId)
+            .limit(1)
+            .single();
+
+        const existing = (row?.parsed_data as any) ?? {};
+        const versions = [...((existing.versions as unknown[]) ?? []), version].slice(-10);
+        await supabaseAdmin
+            .from("resumes")
+            .update({ parsed_data: { ...existing, versions } })
+            .eq("user_id", req.user!.userId);
+
+        res.json({ version });
+    } catch (err: any) {
+        console.error("Save version error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// ── DELETE /api/resume/versions/:id ───────────────────────
+router.delete("/versions/:id", async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { data: row } = await supabaseAdmin
+            .from("resumes")
+            .select("parsed_data")
+            .eq("user_id", req.user!.userId)
+            .limit(1)
+            .single();
+
+        const existing = (row?.parsed_data as any) ?? {};
+        const versions = ((existing.versions as any[]) ?? []).filter((v: any) => v.id !== id);
+        await supabaseAdmin
+            .from("resumes")
+            .update({ parsed_data: { ...existing, versions } })
+            .eq("user_id", req.user!.userId);
+
+        res.json({ success: true });
+    } catch (err: any) {
+        console.error("Delete version error:", err);
         res.status(500).json({ error: "Internal server error" });
     }
 });

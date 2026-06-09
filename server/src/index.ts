@@ -4,9 +4,12 @@ import cors from "cors";
 import authRoutes from "./routes/auth.js";
 import profileRoutes from "./routes/profile.js";
 import resumeRoutes from "./routes/resume.js";
+import linkedinRoutes from "./routes/linkedin.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+app.disable("x-powered-by");
 
 // Middleware
 app.use(cors({
@@ -19,6 +22,7 @@ app.use(express.json({ limit: "15mb" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/resume", resumeRoutes);
+app.use("/api/linkedin", linkedinRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {
