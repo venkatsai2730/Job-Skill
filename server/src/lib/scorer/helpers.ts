@@ -1,0 +1,213 @@
+// ═══════════════════════════════════════════════════════════════
+// SCORER HELPERS — Power verbs, tech skills, typo counter, bullet extractor
+// ═══════════════════════════════════════════════════════════════
+
+import type { ParsedSections } from '../advanced-scorer.js';
+
+export interface ParsedResume {
+    rawText: string;
+    sections: {
+        summary?: { raw: string };
+        objective?: { raw: string };
+        profile?: { raw: string };
+        experience?: { raw: string; bullets: string[] };
+        education?: { raw: string };
+        skills?: { raw: string };
+        projects?: { raw: string; bullets: string[] };
+        achievements?: { raw: string };
+        [key: string]: { raw: string; bullets?: string[] } | undefined;
+    };
+    metadata?: { fileSizeBytes?: number; fileSizeMB?: number; isPdf?: boolean; fileName?: string };
+}
+
+// ── POWER VERBS ─────────────────────────────────────────────
+export const POWER_VERBS = new Set([
+    'built','engineered','developed','created','designed','architected',
+    'implemented','deployed','shipped','launched','released','published',
+    'optimised','optimized','improved','enhanced','accelerated','automated',
+    'modernised','modernized','refactored','upgraded','scaled','migrated',
+    'led','managed','mentored','directed','spearheaded','orchestrated',
+    'achieved','delivered','generated','drove','grew','increased','reduced',
+    'analysed','analyzed','researched','evaluated','diagnosed','resolved',
+    'debugged','troubleshot','identified','investigated','assessed',
+    'crafted','authored','wrote','conceptualised','conceptualized','pioneered',
+    'bootstrapped','revamped','streamlined','integrated','configured',
+    'trained','fine-tuned','containerised','containerized',
+]);
+
+export function computePowerVerbRatio(bullets: string[]): number {
+    if (bullets.length === 0) return 0;
+    const strong = bullets.filter(b => {
+        const firstWord = b.trim()
+            .replace(/^[•\-–—*▪►\s]+/, '')
+            .split(/\s+/)[0]
+            ?.toLowerCase()
+            .replace(/(ing|ed|es|d)$/, '');
+        return firstWord ? POWER_VERBS.has(firstWord) : false;
+    }).length;
+    return strong / bullets.length;
+}
+
+// ── GLOBAL TECH SKILLS ──────────────────────────────────────
+export const GLOBAL_TECH_SKILLS = [
+    'python','javascript','typescript','java','c++','c#','go','rust',
+    'kotlin','swift','r','scala','php','ruby','dart',
+    'react','vue','angular','next.js','nuxt','tailwind','html','css',
+    'bootstrap','svelte','redux',
+    'node.js','express','django','flask','spring','fastapi','graphql',
+    'rest api','grpc','kafka','rabbitmq',
+    'sql','postgresql','mysql','mongodb','redis','elasticsearch',
+    'pandas','numpy','tensorflow','pytorch','scikit-learn','keras',
+    'langchain','huggingface','llm','rag','nlp','computer vision',
+    'machine learning','deep learning','power bi','tableau',
+    'apache airflow','spark','hadoop','dbt','etl','snowflake',
+    'bigquery','databricks',
+    'aws','gcp','azure','docker','kubernetes','terraform',
+    'ci/cd','github actions','jenkins','linux','bash','git',
+    'postman','figma','jira','agile','scrum',
+];
+
+export function countMatchedSkills(rawText: string): number {
+    const lower = rawText.toLowerCase();
+    return GLOBAL_TECH_SKILLS.filter(s => lower.includes(s)).length;
+}
+
+// ── TYPO COUNTER ────────────────────────────────────────────
+export const TYPO_LIST: Record<string, string> = {
+    'certifcations':  'certifications',  'certifictions': 'certifications',
+    'expereince':     'experience',      'managment':     'management',
+    'developement':   'development',     'implementaion': 'implementation',
+    'recieved':       'received',        'achivements':   'achievements',
+    'achivement':     'achievement',     'sumary':        'summary',
+    'progamming':     'programming',     'programing':    'programming',
+    'knowlege':       'knowledge',       'enviroment':    'environment',
+    'seperately':     'separately',      'definately':    'definitely',
+    'calender':       'calendar',        'begining':      'beginning',
+    'concious':       'conscious',       'occured':       'occurred',
+};
+
+export function countTypos(rawText: string): number {
+    const lower = rawText.toLowerCase();
+    return Object.keys(TYPO_LIST).filter(t => lower.includes(t)).length;
+}
+
+// ── BULLET EXTRACTOR (from raw section text) ────────────────
+// Extracts bullet-like lines from a section's raw text.
+// This is the PRIMARY source of bullets — .bullets arrays from
+// the parser are often empty, so we parse .raw directly.
+const SECTION_TITLE_REGEX = /^(experience|projects?|education|skills?|summary|profile|objective|achievements?|certifications?|interests?|hobbies|contact|personal\s+details?)/i;
+
+export function extractBullets(sectionRaw: string | undefined): string[] {
+    if (!sectionRaw || sectionRaw.trim().length === 0) return [];
+
+    return sectionRaw
+        .split('\n')
+        .map(line => line.replace(/^[\s\t•\-–—*▪►◆▸]+/, '').trim())
+        .filter(line =>
+            line.length > 15 &&          // not a header
+            line.length < 400 &&         // not a paragraph
+            !SECTION_TITLE_REGEX.test(line) && // not a section title
+            /[a-z]/i.test(line)          // has actual text
+        );
+}
+
+// Legacy bullet extractor — used for readability scoring
+export function getAllBullets(resume: ParsedResume): string[] {
+    const raw = [
+        resume.sections.experience?.raw,
+        resume.sections.projects?.raw,
+        resume.sections.summary?.raw,
+    ].filter(Boolean).join('\n');
+
+    return raw
+        .split('\n')
+        .map(l => l.replace(/^[\s•\-–—*▪►]+/, '').trim())
+        .filter(l => l.length > 15 && l.length < 350);
+}
+
+// ── CONVERT ParsedSections to ParsedResume ──────────────────
+// Bridge from old interface to new
+export function sectionsToResume(
+    sections: ParsedSections,
+    rawText: string,
+    metadata?: { fileSizeMB?: number; isPdf?: boolean; fileName?: string }
+): ParsedResume {
+    const expBullets = sections.experience.flatMap(e => e.bullets);
+    
+    // Build expRaw from BOTH structured data AND raw text extraction
+    // This ensures the scorer sees all experience content even if parsing missed bullets
+    let expRaw = sections.experience.map(e =>
+        `${e.title} ${e.company} ${e.dates}\n${e.bullets.join('\n')}`
+    ).join('\n');
+    
+    // If parsed bullets are sparse, supplement with raw text from the experience section
+    if (expBullets.length < 3) {
+        const expSectionMatch = rawText.match(/(?:^|\n)\s*(?:experience|work\s+experience|professional\s+experience|employment)\s*[\n:]/i);
+        if (expSectionMatch) {
+            const startIdx = expSectionMatch.index! + expSectionMatch[0].length;
+            const nextSection = rawText.slice(startIdx).match(/\n\s*(?:projects?|education|skills?|technical\s+skills|certifications?|achievements?|summary|profile)\s*[\n:]/i);
+            const rawExpText = nextSection
+                ? rawText.slice(startIdx, startIdx + nextSection.index!)
+                : rawText.slice(startIdx, startIdx + 3000);
+            if (rawExpText.trim().length > expRaw.trim().length) {
+                expRaw = rawExpText;
+            }
+        }
+    }
+
+    const projBullets = sections.projects.flatMap(p => {
+        return p.description ? p.description.split(/[.\n]+/).filter(s => s.trim().length > 20) : [];
+    });
+    
+    // Same approach for projects — supplement with raw text if parsing is sparse
+    let projRaw = sections.projects.map(p =>
+        `${p.name}\n${p.description}\n${p.tech.join(', ')}`
+    ).join('\n');
+    
+    if (projBullets.length < 3) {
+        const projSectionMatch = rawText.match(/(?:^|\n)\s*(?:projects?|personal\s+projects|key\s+projects)\s*[\n:]/i);
+        if (projSectionMatch) {
+            const startIdx = projSectionMatch.index! + projSectionMatch[0].length;
+            const nextSection = rawText.slice(startIdx).match(/\n\s*(?:experience|education|skills?|technical\s+skills|certifications?|achievements?|summary|profile)\s*[\n:]/i);
+            const rawProjText = nextSection
+                ? rawText.slice(startIdx, startIdx + nextSection.index!)
+                : rawText.slice(startIdx, startIdx + 3000);
+            if (rawProjText.trim().length > projRaw.trim().length) {
+                projRaw = rawProjText;
+            }
+        }
+    }
+
+    const skillsRaw = sections.skills.map(g => `${g.category}: ${g.items.join(', ')}`).join('\n');
+    const eduRaw = sections.education.map(e =>
+        `${e.degree} ${e.school} ${e.dates} ${e.gpa} ${e.courses.join(', ')}`
+    ).join('\n');
+
+    // Extract achievements section from rawText
+    const achMatch = rawText.match(/(?:^|\n)\s*(?:achievements?|awards?\s*(?:&|and)?\s*achievements?|honors?\s*(?:&|and)?\s*awards?)\s*[\n:]/i);
+    let achRaw = '';
+    if (achMatch) {
+        const startIdx = achMatch.index! + achMatch[0].length;
+        const nextSection = rawText.slice(startIdx).match(/\n\s*(?:experience|projects?|education|skills?|summary|profile|objective|certifications?|interests?|hobbies|contact|personal\s+details?)\s*[\n:]/i);
+        achRaw = nextSection
+            ? rawText.slice(startIdx, startIdx + nextSection.index!)
+            : rawText.slice(startIdx);
+    }
+
+    return {
+        rawText,
+        sections: {
+            summary: { raw: sections.summary || '' },
+            experience: { raw: expRaw, bullets: expBullets },
+            education: { raw: eduRaw },
+            skills: { raw: skillsRaw },
+            projects: { raw: projRaw, bullets: projBullets },
+            ...(achRaw.trim() ? { achievements: { raw: achRaw } } : {}),
+        },
+        metadata: metadata ? {
+            fileSizeMB: metadata.fileSizeMB,
+            isPdf: metadata.isPdf,
+            fileName: metadata.fileName,
+        } : undefined,
+    };
+}

@@ -1,0 +1,23 @@
+services:
+  server:
+    build: ./server
+    container_name: jobskill-server
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./server/.env
+    environment:
+      - CLIENT_URL=http://localhost
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      args:
+        - VITE_API_URL=http://localhost
+    container_name: jobskill-client
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+    restart: unless-stopped

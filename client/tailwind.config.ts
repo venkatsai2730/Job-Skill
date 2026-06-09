@@ -62,7 +62,15 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
-        // Custom Stellar Blue tokens
+        // Semantic Tokens (Aria Light Theme)
+        "bg-page": "hsl(var(--bg-page))",
+        "bg-card": "hsl(var(--bg-card))",
+        "text-primary": "hsl(var(--text-primary))",
+        "text-secondary": "hsl(var(--text-secondary))",
+        "border-soft": "hsl(var(--border-soft))",
+        "accent-primary": "hsl(var(--accent-primary))",
+
+        // Custom Legacy tokens
         page: "hsl(var(--page))",
         "surface-1": "hsl(var(--surface-1))",
         "surface-2": "hsl(var(--surface-2))",
@@ -115,5 +123,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
 } satisfies Config;

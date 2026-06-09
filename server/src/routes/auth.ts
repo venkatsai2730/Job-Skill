@@ -21,12 +21,19 @@ router.post("/signup", async (req: Request, res: Response) => {
             return;
         }
 
+        const generateReferralCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
+        const refCode = generateReferralCode();
+
         // Create user via Supabase Admin (skips email verification)
         const { data, error } = await supabaseAdmin.auth.admin.createUser({
             email,
             password,
             email_confirm: true, // Auto-confirm — no verification email
-            user_metadata: { full_name: fullName || "" },
+            user_metadata: { 
+                full_name: fullName || "",
+                referral_code: refCode,
+                referred_by: req.body.referredBy || null 
+            },
         });
 
         if (error) {
@@ -105,6 +112,9 @@ router.post("/google", async (req: Request, res: Response) => {
             provider: "google",
             options: {
                 redirectTo,
+                queryParams: {
+                    prompt: "select_account",
+                },
             },
         });
 
@@ -116,6 +126,17 @@ router.post("/google", async (req: Request, res: Response) => {
         res.json({ url: data.url });
     } catch (error: any) {
         console.error("Google auth error:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// POST /api/auth/logout
+router.post("/logout", async (req: Request, res: Response) => {
+    try {
+        await supabaseAdmin.auth.signOut();
+        res.json({ message: "Signed out successfully" });
+    } catch (error: any) {
+        console.error("Logout error:", error);
         res.status(500).json({ error: "Internal server error" });
     }
 });

@@ -5,6 +5,16 @@ import authRoutes from "./routes/auth.js";
 import profileRoutes from "./routes/profile.js";
 import resumeRoutes from "./routes/resume.js";
 import linkedinRoutes from "./routes/linkedin.js";
+import chatRoutes from "./routes/chat.js";
+import jobsRoutes from "./routes/jobs.js";
+import jobListingsRoutes from "./routes/jobListings.js";
+import notificationRoutes from "./routes/notifications.js";
+import geocodeRoutes from "./routes/geocode.js";
+import chatbotRoutes from "./routes/chatbot.js";
+import activityRoutes from "./routes/activity.js";
+import resumeDataRoutes from "./routes/resumeData.js";
+import { fetchAtsJobs, autoExpireJobs, verifyTopJobs } from "./services/jobFetcher.js";
+import { startMCPJobCron } from "./mcp/jobSyncCron.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -13,8 +23,8 @@ app.disable("x-powered-by");
 
 // Middleware
 app.use(cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
-    credentials: true,
+  origin: "http://localhost:5173",
+  credentials: true,
 }));
 app.use(express.json({ limit: "15mb" }));
 
@@ -23,11 +33,68 @@ app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/resume", resumeRoutes);
 app.use("/api/linkedin", linkedinRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/jobs", jobsRoutes);
+app.use("/api/job-listings", jobListingsRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/geocode", geocodeRoutes);
+app.use("/api/chatbot", chatbotRoutes);
+app.use("/api/activity", activityRoutes);
+app.use("/api/resume/data", resumeDataRoutes);
+
 
 // Health check
 app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// JOB FETCHING ARCHITECTURE
+//
+// PRIMARY: MCP-based scraping (zero API keys, zero rate limits)
+//   → LinkedIn, Indeed, Naukri, RemoteOK, Remotive, Arbeitnow,
+//     Internshala, SimplyHired, Glassdoor, Google Jobs
+//   → Runs every 2 hours with 60+ queries
+//
+// SECONDARY: ATS board APIs (free, no rate limits)
+//   → Greenhouse, Lever, Ashby (public company job board APIs)
+//   → Runs every 15 minutes
+//
+// REMOVED: JSearch (RapidAPI — rate limited, paid)
+// REMOVED: RSS feeds (unreliable, low volume)
+// REMOVED: Legacy scrapers (replaced by MCP scrapers)
+// ═══════════════════════════════════════════════════════════════
+
+const ATS_INTERVAL = 15 * 60 * 1000;       // 15 minutes (free APIs, no limits)
+const EXPIRY_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+const VERIFY_INTERVAL = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function startATSBoardCron() {
+    // ATS boards (Greenhouse, Lever, Ashby) — free public APIs
+    // These are reliable and don't need API keys
+    setTimeout(() => {
+        fetchAtsJobs().catch(err => console.warn("[Cron] Initial ATS fetch failed:", err.message));
+        autoExpireJobs().catch(e => console.warn("[Cron] Expiry failed", e.message));
+    }, 45000); // Start after MCP initial sync
+
+    setInterval(() => {
+        fetchAtsJobs().catch(err => console.warn("[Cron] ATS fetch failed:", err.message));
+    }, ATS_INTERVAL);
+
+    setInterval(() => {
+        autoExpireJobs().catch(err => console.warn("[Cron] Expiry failed:", err.message));
+    }, EXPIRY_INTERVAL);
+
+    setInterval(() => {
+        verifyTopJobs().catch(err => console.warn("[Cron] Verification failed:", err.message));
+    }, VERIFY_INTERVAL);
+
+    console.log(`⏰ ATS Board cron started: Greenhouse/Lever/Ashby (15m), Expiry (24h), Verify (7d)`);
+}
+
+// Start both engines
+startMCPJobCron();     // PRIMARY: MCP scraping (2h cycle, 10 sources)
+startATSBoardCron();   // SECONDARY: ATS boards (15m cycle, free APIs)
 
 // Global Error Handling Middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
