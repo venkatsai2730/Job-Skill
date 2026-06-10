@@ -14,7 +14,7 @@ import {
 import { parseLatex } from "../lib/latex-parser.js";
 import { generateLatex } from "../lib/latex-generator.js";
 import { enrichMissingSkills } from "../lib/learning-resources.js";
-import { inferSemanticSkills, applyResumeFix } from "../services/chatService.js";
+import { inferSemanticSkills, applyResumeFix, getAIReply } from "../services/chatService.js";
 import { logActivity } from "../services/activityService.js";
 import { denormalizeToSections } from "../types/resumePatchTypes.js";
 
@@ -1091,7 +1091,7 @@ router.get("/download/docx", async (req: AuthRequest, res: Response) => {
     }
 });
 
-// ── POST /api/resume/ai-edit — streaming SSE ──────────────
+// ── POST /api/resume/ai-edit — HugPDF-style: Gemini Flash edits sections → preview updates ──
 router.post("/ai-edit", async (req: AuthRequest, res: Response) => {
     const { prompt, sections } = req.body;
 
@@ -1104,14 +1104,7 @@ router.post("/ai-edit", async (req: AuthRequest, res: Response) => {
         return;
     }
 
-    // Sanitise: strip control chars, cap length
     const safePrompt = prompt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim().slice(0, 500);
-
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey || apiKey === "your_groq_api_key_here") {
-        res.status(500).json({ error: "AI service not configured. Add GROQ_API_KEY to server .env" });
-        return;
-    }
 
     // SSE headers
     res.setHeader("Content-Type", "text/event-stream");
@@ -1122,48 +1115,29 @@ router.post("/ai-edit", async (req: AuthRequest, res: Response) => {
     const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
     try {
-        const groq = new Groq({ apiKey });
+        // Show activity tokens while Gemini processes (HugPDF-style thinking indicator)
+        send({ type: "token", text: "Gemini Flash is analyzing your resume" });
+        send({ type: "token", text: "..." });
 
-        const systemPrompt = `You are an expert resume writer and career coach. The user will give you their current resume sections as JSON and an instruction. Apply ONLY the requested change. Return ONLY the updated sections JSON — same structure as input, no markdown fences, no explanation. Preserve all IDs exactly as-is.`;
+        const userPrompt = `Current resume sections:\n${JSON.stringify(sections, null, 2)}\n\nInstruction: "${safePrompt}"\n\nReturn the complete updated sections JSON. Preserve all "id" fields exactly. Only change what was requested.`;
 
-        const userPrompt = `Current resume sections:
-${JSON.stringify(sections, null, 2)}
+        const { reply } = await getAIReply(
+            [{ role: "user", content: userPrompt }],
+            "resume_section_edit"
+        );
 
-Instruction: "${safePrompt}"
-
-Apply this instruction and return the complete updated sections JSON. Preserve all section structure, IDs, and fields that were not asked to change.`;
-
-        const stream = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt },
-            ],
-            max_tokens: 3000,
-            temperature: 0.25,
-            stream: true,
-        });
-
-        let fullText = "";
-        for await (const chunk of stream) {
-            const token = chunk.choices[0]?.delta?.content ?? "";
-            if (token) {
-                fullText += token;
-                send({ type: "token", text: token });
-            }
-        }
-
-        // Parse the streamed JSON
+        // Parse the returned JSON
         let updatedSections: ParsedSections;
         try {
-            updatedSections = JSON.parse(fullText);
+            const cleaned = reply.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+            updatedSections = JSON.parse(cleaned);
         } catch {
-            const match = fullText.match(/\{[\s\S]*\}/);
-            if (!match) throw new Error("AI returned malformed JSON");
+            const match = reply.match(/\{[\s\S]*\}/);
+            if (!match) throw new Error("Gemini returned malformed sections JSON");
             updatedSections = JSON.parse(match[0]);
         }
 
-        // Recompute ATS and persist updated sections to DB
+        // Recompute ATS and persist
         const { data: row } = await supabaseAdmin
             .from("resumes")
             .select("parsed_data")
@@ -1171,14 +1145,13 @@ Apply this instruction and return the complete updated sections JSON. Preserve a
             .limit(1)
             .single();
 
-        let newAts: ATSResult | undefined;
+        let newAts: AdvancedATSResult | undefined;
         if (row?.parsed_data) {
             const existing = row.parsed_data as ParsedData;
-            newAts = computeATS(updatedSections, existing.rawText ?? "");
-            const newParsedData = { ...existing, sections: updatedSections, ats: newAts };
+            newAts = computeAdvancedATS(updatedSections, existing.rawText ?? "");
             await supabaseAdmin
                 .from("resumes")
-                .update({ parsed_data: newParsedData })
+                .update({ parsed_data: { ...existing, sections: updatedSections, ats: newAts } })
                 .eq("user_id", req.user!.userId);
         }
 
@@ -1186,7 +1159,7 @@ Apply this instruction and return the complete updated sections JSON. Preserve a
         res.write("data: [DONE]\n\n");
         res.end();
     } catch (err: any) {
-        console.error("AI edit stream error:", err?.message ?? err);
+        console.error("[ai-edit] Error:", err?.message ?? err);
         send({ type: "error", message: err?.message ?? "AI edit failed" });
         res.write("data: [DONE]\n\n");
         res.end();
@@ -1209,7 +1182,7 @@ router.put("/sections", async (req: AuthRequest, res: Response) => {
         if (!row) { res.status(404).json({ error: "No resume found" }); return; }
 
         const existing = row.parsed_data ?? {};
-        const updatedAts = computeATS(sections as ParsedSections, existing.rawText ?? "");
+        const updatedAts = computeAdvancedATS(sections as ParsedSections, existing.rawText ?? "");
         const newParsedData = { ...existing, sections, ats: updatedAts };
 
         await supabaseAdmin
@@ -1393,7 +1366,7 @@ router.post("/simulate-ats", async (req: AuthRequest, res: Response) => {
             console.error("[Simulate ATS] parseSections utterly failed, falling back to empty:", parseFail);
             // If the parser completely bombs out on weird text, pass an empty structure
             // This ensures the ATS simulators still run and correctly dock points for missing headers!
-            sections = { summary: "", experience: [], education: [], skills: [], projects: [] };
+            sections = { name: "", email: "", phone: "", location: "", summary: "", experience: [], education: [], skills: [], projects: [] };
         }
 
         const greenhouse = simulateGreenhouse(sections, resumeText, jobDescription);
