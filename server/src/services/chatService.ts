@@ -33,7 +33,8 @@ export type AIFeature =
     | "fix_bullets"
     | "create_bullets"
     | "resume_fix"
-    | "resume_edit";
+    | "resume_edit"
+    | "resume_section_edit";
 
 const SYSTEM_PROMPTS: Record<string, string> = {
     chat: `You are an expert AI Career Coach inside JobSkill AI named Aria.
@@ -389,7 +390,18 @@ FIELD RULES:
 - "new_skills": full skills list as array of strings
 - Only include sections you are actually changing
 - Strong verbs: Developed, Implemented, Engineered, Built, Optimized, Delivered, Led, Reduced, Improved
-- Start response with { and end with }. Nothing else.`
+- Start response with { and end with }. Nothing else.`,
+
+    resume_section_edit: `You are an expert resume writer and ATS optimization specialist.
+The user will provide their current resume sections as JSON and a natural language instruction.
+Apply ONLY the requested change — do not alter sections that were not asked to change.
+Return ONLY the complete updated sections JSON with EXACTLY the same structure as the input.
+Rules:
+- Preserve all "id" fields exactly as-is
+- Use strong action verbs and quantified metrics where possible
+- Remove personal details (DOB, gender, marital status) if present
+- Keep bullets under 120 characters each
+- No markdown, no explanation, no code fences — only raw JSON starting with { and ending with }`,
 };
 
 // ── Model Configuration ─────────────────────────────────────
@@ -397,6 +409,7 @@ const MODELS = {
     scout: "meta-llama/llama-4-scout-17b-16e-instruct",
     maverick: "meta-llama/llama-4-scout-17b-16e-instruct",  // Maverick deprecated Mar 2026 → Scout
     gemini: "gemini-2.5-pro",
+    geminiFlash: "gemini-2.0-flash",
     codestral: "codestral-latest",
 };
 
@@ -418,7 +431,8 @@ const FEATURE_MODEL_MAP: Record<AIFeature, { provider: string; model: string }> 
     fix_bullets: { provider: "groq", model: MODELS.maverick },
     create_bullets: { provider: "groq", model: MODELS.maverick },
     resume_fix: { provider: "groq", model: MODELS.maverick },
-    resume_edit: { provider: "google", model: MODELS.gemini },  // Gemini follows JSON schema reliably
+    resume_edit: { provider: "gemini", model: MODELS.geminiFlash },      // AriaEdit JSON via Gemini Flash
+    resume_section_edit: { provider: "gemini", model: MODELS.geminiFlash }, // Full sections JSON via Gemini Flash
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -506,13 +520,12 @@ async function callGroq(messages: any[], model: string, systemPrompt: string, ma
     };
 }
 
-// ── Gemini Cooldown (skip for 1 hour if quota exhausted) ──
-let geminiCooldownUntil = 0;
+// ── Per-model Gemini cooldown (quota exhausted → 1-hour skip) ──
+const geminiCooldownMap: Record<string, number> = {};
 
 async function callGemini(messages: any[], model: string, systemPrompt: string, maxTokens = 4000, jsonMode = false) {
-    // If Gemini is in cooldown, throw immediately so fallback kicks in
-    if (Date.now() < geminiCooldownUntil) {
-        throw new Error(`Gemini quota cooldown active (resets at ${new Date(geminiCooldownUntil).toLocaleTimeString()})`);
+    if (Date.now() < (geminiCooldownMap[model] ?? 0)) {
+        throw new Error(`Gemini quota cooldown active for ${model}`);
     }
 
     const geminiMessages: any[] = [];
@@ -567,18 +580,22 @@ async function callGemini(messages: any[], model: string, systemPrompt: string, 
         const err = await res.json().catch(() => ({}));
         const errMsg = err.error?.message || '';
 
-        // Quota exhausted → set 1-hour cooldown, fall back to Groq
+        // Quota exhausted → set per-model 1-hour cooldown, fall back to Groq
         if (res.status === 429 || errMsg.includes('Quota exceeded') || errMsg.includes('quota')) {
-            console.warn(`[Gemini] Quota exhausted. Cooldown for 1 hour. Falling back to Groq.`);
-            geminiCooldownUntil = Date.now() + 60 * 60 * 1000;
-            throw new Error(`Gemini quota exceeded — cooldown active`);
+            console.warn(`[Gemini] Quota exhausted for ${model}. Cooldown 1 hour.`);
+            geminiCooldownMap[model] = Date.now() + 60 * 60 * 1000;
+            throw new Error(`Gemini quota exceeded for ${model} — cooldown active`);
         }
 
         throw new Error(`Gemini (${model}): ${errMsg || res.status}`);
     }
     const data = await res.json();
+    // Handle thinking tokens: find the last non-thought text part
+    const parts: any[] = data.candidates[0]?.content?.parts || [];
+    const textPart = [...parts].reverse().find((p: any) => !p.thought && typeof p.text === "string");
+    const replyText = textPart?.text ?? parts[parts.length - 1]?.text ?? "";
     return {
-        reply: data.candidates[0].content.parts[0].text,
+        reply: replyText,
         provider: "gemini",
         model,
         tokens: data.usageMetadata?.totalTokenCount || 0,

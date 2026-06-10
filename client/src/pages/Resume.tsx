@@ -2,12 +2,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload, Download, FileText, GraduationCap, Code2,
   FolderOpen, Trash2, Loader2, Eye, Edit3, Check,
-  AlertTriangle, BookOpen, Palette,
+  AlertTriangle, BookOpen, Palette, Sparkles,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 import { useResumeStore } from "@/features/resume/store/resumeStore";
 import { useAIEdit } from "@/features/resume/hooks/useAIEdit";
@@ -48,7 +50,7 @@ function useEditorShortcuts(undo: () => void, redo: () => void) {
 const Resume = () => {
   const { token } = useAuth();
   const store = useResumeStore();
-  const { submit: submitAIEdit } = useAIEdit();
+  const { submit: submitAIEditRaw } = useAIEdit();
   const { exportPDF, exporting } = usePDFExport();
 
   const canUndo = store.past.length > 0;
@@ -68,8 +70,14 @@ const Resume = () => {
   const [downloading, setDownloading] = useState<"docx" | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Original PDF blob URL (shown before any AI edits) ────
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [loadingPdf, setLoadingPdf] = useState(false);
+  // True once the user has applied at least one AI edit — switches view to React preview
+  const [hasAIEdits, setHasAIEdits] = useState(false);
+
   // ── UI state ─────────────────────────────────────────────
-  const [viewMode, setViewMode] = useState<"editor" | "preview">("editor");
+  const [viewMode, setViewMode] = useState<"editor" | "preview">("preview");
   const [activeSection, setActiveSection] = useState("Summary");
   const [showVersions, setShowVersions] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
@@ -78,6 +86,35 @@ const Resume = () => {
     store.sections.summary !== "" ||
     store.sections.experience.length > 0 ||
     store.sections.skills.length > 0;
+
+  // ── Load original PDF as blob URL (for iframe display) ──
+  const loadPdfBlob = useCallback(async () => {
+    setLoadingPdf(true);
+    try {
+      const authToken = localStorage.getItem("auth_token");
+      const res = await fetch(`${API_URL}/api/resume/download/pdf`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setPdfBlobUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+    } catch {
+      // silently fail — will fall back to React preview
+    } finally {
+      setLoadingPdf(false);
+    }
+  }, []);
+
+  // Revoke blob URL on unmount to free memory
+  useEffect(() => {
+    return () => {
+      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+    };
+  }, [pdfBlobUrl]);
 
   // ── Load resume on mount ─────────────────────────────────
   useEffect(() => {
@@ -96,6 +133,12 @@ const Resume = () => {
       })
       .catch(() => {})
       .finally(() => setLoadingParsed(false));
+  }, [token, resumeFile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load PDF blob whenever we have a resume file (on mount and after upload)
+  useEffect(() => {
+    if (!token || !resumeFile) return;
+    loadPdfBlob();
   }, [token, resumeFile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-save dirty sections ─────────────────────────────
@@ -128,6 +171,9 @@ const Resume = () => {
 
       setResumeFile(meta.resume);
       if (meta.parsed) store.setSections(meta.parsed.sections, meta.parsed.ats);
+      setHasAIEdits(false);
+      setViewMode("preview");
+      // loadPdfBlob runs automatically via the resumeFile effect above
       toast.success(`"${file.name}" uploaded ✦`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Upload failed.");
@@ -150,17 +196,24 @@ const Resume = () => {
     try {
       await api.delete("/api/resume");
       setResumeFile(null);
+      if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
+      setHasAIEdits(false);
       store.reset();
       toast.success("Resume deleted.");
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : "Delete failed."); }
   };
 
   // ── Downloads ────────────────────────────────────────────
-  // PDF is generated from current editor state via html2canvas
   const handleDownloadPDF = async () => {
     try {
       const name = (resumeFile?.file_name || "resume").replace(/\.pdf$/i, "") + ".pdf";
-      await exportPDF(PDF_PREVIEW_ID, name);
+      if (!hasAIEdits) {
+        // No AI edits yet — download the original uploaded PDF
+        await api.downloadBlob("/api/resume/download/pdf", name);
+      } else {
+        // AI has edited the resume — export the live React preview
+        await exportPDF(PDF_PREVIEW_ID, name);
+      }
       toast.success("PDF downloaded ✦");
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : "PDF export failed."); }
   };
@@ -195,6 +248,13 @@ const Resume = () => {
     setActiveSection(section);
     document.getElementById(`section-${section.toLowerCase()}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  // ── AI edit — switch to preview, then mark AI edits done so we show React preview ──
+  const submitAIEdit = useCallback(async (prompt: string) => {
+    setViewMode("preview");
+    await submitAIEditRaw(prompt);
+    setHasAIEdits(true); // switch from original PDF iframe to live React preview
+  }, [submitAIEditRaw]);
 
   // ── Derived ATS values ───────────────────────────────────
   const ats = store.ats;
@@ -242,17 +302,29 @@ const Resume = () => {
           </p>
         )}
 
-        {/* Section nav */}
-        <nav className="space-y-1 flex-1">
-          {SECTIONS.map((s) => (
-            <button type="button" key={s} onClick={() => scrollToSection(s)}
-              className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeSection === s ? "bg-blue-electric/10 text-blue-electric border-l-[3px] border-blue-electric" : "text-white-60 hover:bg-surface-2"}`}
-            >{s}</button>
-          ))}
-        </nav>
+        {/* Section nav — only useful when showing the AI-edited React preview or editor */}
+        {hasAIEdits && (
+          <nav className="space-y-1 flex-1">
+            {SECTIONS.map((s) => (
+              <button type="button" key={s} onClick={() => scrollToSection(s)}
+                className={`w-full text-left px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeSection === s ? "bg-blue-electric/10 text-blue-electric border-l-[3px] border-blue-electric" : "text-white-60 hover:bg-surface-2"}`}
+              >{s}</button>
+            ))}
+          </nav>
+        )}
 
-        {/* Template picker */}
-        {hasParsed && (
+        {/* When showing original PDF: hint to use the AI bar */}
+        {!hasAIEdits && resumeFile && (
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 px-2 py-4 text-center">
+            <Sparkles className="w-7 h-7 text-blue-electric opacity-70" />
+            <p className="text-white-60 text-xs leading-relaxed">
+              Type a prompt below to let Gemini AI update your resume
+            </p>
+          </div>
+        )}
+
+        {/* Template picker — only after AI edits */}
+        {hasAIEdits && (
           <div className="mt-4">
             <button type="button" onClick={() => setShowTemplates((p) => !p)}
               className="w-full flex items-center gap-2 text-xs text-white-60 hover:text-foreground px-2 py-1.5 rounded-lg hover:bg-surface-2 transition-colors">
@@ -275,7 +347,8 @@ const Resume = () => {
 
         {/* Downloads */}
         <div className="space-y-2 mt-4">
-          <button type="button" onClick={handleDownloadPDF} disabled={!hasParsed || exporting}
+          <button type="button" onClick={handleDownloadPDF}
+            disabled={!resumeFile || exporting}
             className="w-full bg-blue-electric hover:bg-blue-bright text-primary-foreground text-sm py-2.5 rounded-lg font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
             {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} Export PDF
           </button>
@@ -292,38 +365,48 @@ const Resume = () => {
         <div className="flex items-center justify-between px-6 py-3 border-b border-border/60 bg-surface-1 shrink-0">
           <h2 className="font-display font-bold text-lg text-foreground">Resume Editor</h2>
           <div className="flex items-center gap-3">
-            {hasParsed && store.isDirty && <span className="text-xs text-amber-400">Unsaved changes</span>}
-            {hasParsed && !store.isDirty && (
+            {/* Status badges */}
+            {!hasAIEdits && resumeFile && (
+              <span className="text-xs text-blue-electric/80 bg-blue-electric/10 px-2.5 py-1 rounded-full">Original PDF</span>
+            )}
+            {hasAIEdits && store.isDirty && <span className="text-xs text-amber-400">Unsaved changes</span>}
+            {hasAIEdits && !store.isDirty && (
               <span className="text-xs text-emerald-500 flex items-center gap-1"><Check className="w-3 h-3" /> Saved</span>
             )}
-            {/* View toggle */}
-            <div className="flex bg-surface-2 rounded-lg p-0.5 border border-border/60">
-              <button type="button" onClick={() => setViewMode("editor")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === "editor" ? "bg-blue-electric text-white shadow-sm" : "text-white-60 hover:text-foreground"}`}>
-                <Edit3 className="w-3.5 h-3.5" /> Edit
+            {/* View toggle — Edit only available after AI edits */}
+            {hasAIEdits && (
+              <div className="flex bg-surface-2 rounded-lg p-0.5 border border-border/60">
+                <button type="button" onClick={() => setViewMode("editor")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === "editor" ? "bg-blue-electric text-white shadow-sm" : "text-white-60 hover:text-foreground"}`}>
+                  <Edit3 className="w-3.5 h-3.5" /> Edit
+                </button>
+                <button type="button" onClick={() => setViewMode("preview")}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === "preview" ? "bg-blue-electric text-white shadow-sm" : "text-white-60 hover:text-foreground"}`}>
+                  <Eye className="w-3.5 h-3.5" /> Preview
+                </button>
+              </div>
+            )}
+            {hasAIEdits && (
+              <button type="button" onClick={() => setShowVersions((p) => !p)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-colors border ${showVersions ? "bg-blue-electric/10 text-blue-electric border-blue-electric/30" : "text-white-60 hover:text-foreground border-border/60"}`}>
+                <BookOpen className="w-3.5 h-3.5" /> Versions
               </button>
-              <button type="button" onClick={() => setViewMode("preview")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === "preview" ? "bg-blue-electric text-white shadow-sm" : "text-white-60 hover:text-foreground"}`}>
-                <Eye className="w-3.5 h-3.5" /> Preview
-              </button>
-            </div>
-            <button type="button" onClick={() => setShowVersions((p) => !p)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-colors border ${showVersions ? "bg-blue-electric/10 text-blue-electric border-blue-electric/30" : "text-white-60 hover:text-foreground border-border/60"}`}>
-              <BookOpen className="w-3.5 h-3.5" /> Versions
-            </button>
+            )}
           </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          {loadingParsed && (
+        <div className="flex-1 overflow-hidden">
+          {/* Loading state */}
+          {(loadingParsed || (resumeFile && loadingPdf && !pdfBlobUrl)) && (
             <div className="flex flex-col items-center justify-center h-full gap-3">
               <Loader2 className="w-8 h-8 text-blue-electric animate-spin" />
-              <p className="text-white-60">Parsing your resume…</p>
+              <p className="text-white-60 text-sm">Loading your resume…</p>
             </div>
           )}
 
-          {!loadingParsed && !hasParsed && (
+          {/* Empty state */}
+          {!resumeFile && !loadingParsed && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
               className="flex flex-col items-center justify-center h-full gap-4 text-center p-8">
               <FileText className="w-16 h-16 text-white-30" />
@@ -335,45 +418,66 @@ const Resume = () => {
           )}
 
           <AnimatePresence mode="wait">
-            {!loadingParsed && hasParsed && viewMode === "editor" && (
+            {/* EDITOR MODE — only after AI edits (sections are reliable) */}
+            {resumeFile && hasParsed && viewMode === "editor" && (
               <motion.div key="editor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className="max-w-3xl mx-auto p-6 lg:p-8 space-y-8">
-                <div id="section-summary">
-                  <SectionHeader icon={<FileText className="w-5 h-5 text-blue-electric" />} title="Summary" />
-                  <SummaryEditor summary={store.sections.summary} dispatch={dispatch} />
-                </div>
-                <div id="section-experience">
-                  <SectionHeader icon={<FileText className="w-5 h-5 text-blue-electric" />} title="Experience" />
-                  <ExperienceEditor experience={store.sections.experience} dispatch={dispatch} />
-                </div>
-                <div id="section-education">
-                  <SectionHeader icon={<GraduationCap className="w-5 h-5 text-blue-electric" />} title="Education" />
-                  <EducationEditor education={store.sections.education} dispatch={dispatch} />
-                </div>
-                <div id="section-skills">
-                  <SectionHeader icon={<Code2 className="w-5 h-5 text-blue-electric" />} title="Skills" />
-                  <SkillsEditor skills={store.sections.skills} dispatch={dispatch} />
-                </div>
-                <div id="section-projects">
-                  <SectionHeader icon={<FolderOpen className="w-5 h-5 text-blue-electric" />} title="Projects" />
-                  <ProjectsEditor projects={store.sections.projects} dispatch={dispatch} />
+                className="h-full overflow-y-auto">
+                <div className="max-w-3xl mx-auto p-6 lg:p-8 space-y-8">
+                  <div id="section-summary">
+                    <SectionHeader icon={<FileText className="w-5 h-5 text-blue-electric" />} title="Summary" />
+                    <SummaryEditor summary={store.sections.summary} dispatch={dispatch} />
+                  </div>
+                  <div id="section-experience">
+                    <SectionHeader icon={<FileText className="w-5 h-5 text-blue-electric" />} title="Experience" />
+                    <ExperienceEditor experience={store.sections.experience} dispatch={dispatch} />
+                  </div>
+                  <div id="section-education">
+                    <SectionHeader icon={<GraduationCap className="w-5 h-5 text-blue-electric" />} title="Education" />
+                    <EducationEditor education={store.sections.education} dispatch={dispatch} />
+                  </div>
+                  <div id="section-skills">
+                    <SectionHeader icon={<Code2 className="w-5 h-5 text-blue-electric" />} title="Skills" />
+                    <SkillsEditor skills={store.sections.skills} dispatch={dispatch} />
+                  </div>
+                  <div id="section-projects">
+                    <SectionHeader icon={<FolderOpen className="w-5 h-5 text-blue-electric" />} title="Projects" />
+                    <ProjectsEditor projects={store.sections.projects} dispatch={dispatch} />
+                  </div>
                 </div>
               </motion.div>
             )}
 
-            {!loadingParsed && hasParsed && viewMode === "preview" && (
+            {/* PREVIEW MODE */}
+            {resumeFile && viewMode === "preview" && !loadingPdf && (
               <motion.div key="preview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className="flex justify-center p-6 bg-gray-200 min-h-full">
-                <div className="shadow-2xl">
-                  <ResumePreview sections={store.sections} template={store.template} />
-                </div>
+                className="h-full">
+                {!hasAIEdits && pdfBlobUrl ? (
+                  // ── Original PDF: show exact uploaded file in iframe ──
+                  <iframe
+                    src={`${pdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+                    title="Your Resume"
+                    className="w-full h-full border-0 bg-white"
+                    style={{ display: "block" }}
+                  />
+                ) : hasParsed ? (
+                  // ── AI-edited: show React-rendered preview ──
+                  <div className="h-full overflow-y-auto flex justify-center p-6 bg-gray-200">
+                    <div className="shadow-2xl">
+                      <ResumePreview sections={store.sections} template={store.template} />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-full">
+                    <Loader2 className="w-6 h-6 text-blue-electric animate-spin" />
+                  </div>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
-        {/* AI Prompt bar */}
-        {hasParsed && (
+        {/* AI Prompt bar — visible whenever a resume is loaded */}
+        {resumeFile && (
           <AIPromptBar
             onSubmit={submitAIEdit}
             onUndo={store.undo}
