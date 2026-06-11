@@ -317,23 +317,12 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             const userCity = ((city || location || "") as string).toLowerCase();
             const userCountry = ((country || preferred_location || "") as string).toLowerCase();
 
-            // 1. Drop non-tech jobs that slipped in via skills-array overlap (e.g. HR, French student jobs)
+            // Drop non-tech jobs (e.g. HR, admin, sales) — only tech titles enter the domain split.
+            // Country filtering is intentionally not applied here because many Indian jobs are stored
+            // as "Hyderabad, Telangana" (no "India" suffix) — a strict country check drops them.
+            // Location is already handled by the DB sort (city proximity first) and the relevance
+            // scorer's locationMatch signal.
             let domainInputJobs = finalJobs.filter((j: any) => isTechTitle(j.title || ""));
-
-            // 2. Drop jobs from wrong countries — keep user's country + remote
-            //    (only apply when we have a meaningful country context)
-            if (userCountry.length >= 3) {
-                const countryFiltered = domainInputJobs.filter((j: any) => {
-                    const loc = (j.location || "").toLowerCase();
-                    return loc.includes(userCountry) ||
-                           loc.includes("remote") ||
-                           loc.includes("wfh") ||
-                           loc.includes("anywhere");
-                });
-                if (countryFiltered.length >= 20) {
-                    domainInputJobs = countryFiltered;
-                }
-            }
             const userExp = userExperienceYears || 0;
             const userSeniorityStr = userSeniority || (userExp <= 1 ? "intern" : userExp <= 3 ? "entry" : userExp <= 6 ? "mid" : "senior");
 
