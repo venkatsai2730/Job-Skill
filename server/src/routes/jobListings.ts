@@ -182,6 +182,10 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             // Use the domain classifier on the user's own profile
             userDomain = inferUserDomain(userCurrentRole, userSkills);
         }
+        // Logged-in users with no detectable domain still get domain-split routing
+        if (user_id && userDomain === null) {
+            userDomain = "generic-fresher";
+        }
 
         // Debug: Log what skills are being used for matching
         if (user_id && userSkills.length > 0) {
