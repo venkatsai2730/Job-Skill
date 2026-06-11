@@ -880,25 +880,14 @@ export async function searchJobs(filters: {
         const userDom = filters.user_primary_domain || "";
         const primaryTerms = domainTitleTerms[userDom] || [];
 
-        // Top user skills for skills-array overlap filter (fetch jobs whose skills[] contains user's skills)
-        const topUserSkills = filters.user_skills
-            .filter(s => s.length >= 3)
-            .map(s => s.toLowerCase().trim())
-            .slice(0, 15);
-
-        const titleFilters = primaryTerms.map(t => `title.ilike.%${t}%`);
-
-        // Add skills array overlap: catches jobs like "Software Engineer" whose skills[] has python/react
-        const skillsOvFilter = topUserSkills.length > 0
-            ? `skills.ov.{${topUserSkills.join(",")}}`
-            : null;
-
-        const allDbFilters = [...titleFilters, ...(skillsOvFilter ? [skillsOvFilter] : [])];
-
-        if (allDbFilters.length > 0) {
-            q = q.or(allDbFilters.join(","));
+        // Title-based filter: broad domain terms to cast a wide net at DB level.
+        // Skill-level relevance is handled in-memory by the relevance scorer after fetch.
+        // Note: PostgREST array-overlap syntax inside .or() is unreliable with multi-word
+        // skills (spaces break parsing), so we stick to safe ilike title terms only.
+        if (primaryTerms.length > 0) {
+            q = q.or(primaryTerms.map(t => `title.ilike.%${t}%`).join(","));
         }
-        // If no domain and no skills — no filter; fetch all active jobs (sorted by date)
+        // If no domain terms — no filter; fetch all active jobs sorted by date
     }
 
     const { data, error } = await q;
