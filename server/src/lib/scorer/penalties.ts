@@ -1,21 +1,24 @@
 // ═══════════════════════════════════════════════════════════════
-// PENALTY DETECTION — All 13 calibrated penalties
+// PENALTY DETECTION — All 21 calibrated penalties
+// All numeric constants live in scoring-config.ts — none here.
 // ═══════════════════════════════════════════════════════════════
 
-import { PENALTY_WEIGHTS } from './penalty-weights.js';
+import { DEFAULT_CONFIG, type ScoringConfig } from './scoring-config.js';
 import type { ParsedResume } from './helpers.js';
 import { TYPO_LIST, extractBullets } from './helpers.js';
 
-const W = PENALTY_WEIGHTS;
-
 export interface PenaltyResult {
-    id:        string;
-    triggered: boolean;
-    deduction: number;
-    evidence:  string;
-    fix:       string;
-    priority:  1 | 2 | 3;
-    scoreGain: string;
+    id:           string;
+    triggered:    boolean;
+    deduction:    number;
+    evidence:     string;
+    fix:          string;
+    priority:     1 | 2 | 3;
+    scoreGain:    string;
+    /** True when this penalty was detected but zeroed out by an exclusion group */
+    suppressed?:  boolean;
+    /** ID of the penalty that caused suppression */
+    suppressedBy?: string;
 }
 
 const STRONG_NUM = /\d+(?:\.\d+)?\s*(%|x\b|times\b|users?|people|requests?|queries|ms\b|seconds?|records?|rows?|million|lakh|crore|\$|₹|lpa|accuracy|score|chunks?|throughput)/i;
@@ -36,7 +39,6 @@ const FILLER_PHRASES = [
     'grow professionally',     'eager to learn and grow',
     'self-motivated individual', 'dedicated and motivated',
     'passion for learning',    'enthusiastic fresher',
-    // Bug 3 fix: additional phrases for Krishna-style filler
     'focused and goal-oriented',
     'goal-oriented engineering',
     'goal-oriented',
@@ -55,13 +57,14 @@ const SOFT_TERMS = [
     'analytical thinking',
 ];
 
-export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
-    const raw      = resume.rawText;
-    const lower    = raw.toLowerCase();
+export function detectAllPenalties(resume: ParsedResume, config: ScoringConfig = DEFAULT_CONFIG): PenaltyResult[] {
+    const W       = config.penalties;
+    const T       = config.thresholds;
+    const raw     = resume.rawText;
+    const lower   = raw.toLowerCase();
     const sections = resume.sections;
     const results: PenaltyResult[] = [];
 
-    // Bug 1 fix: extract bullets from .raw text, not .bullets (which is often empty)
     let expBullets  = extractBullets(sections.experience?.raw);
     let projBullets = extractBullets(sections.projects?.raw);
 
@@ -90,14 +93,12 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
 
     let allBullets  = [...expBullets, ...projBullets];
 
-    // Fallback: if both empty, extract from rawText
     if (allBullets.length === 0 && raw.length > 100) {
         allBullets = extractBullets(raw)
             .filter(line => !/^(education|skills|summary|objective|contact|personal)/i.test(line));
     }
 
     // ── P1. PERSONAL DETAILS ────────────────────────────────
-    // Bug 3 fix: Removed colon requirement + added 'personal details' keyword
     const personalHits = (raw.match(
         /\b(date\s+of\s+birth|d\.?o\.?b\.?|gender|marital\s+status|personal\s+details|nationality|religion|caste|father'?s?\s+name|mother'?s?\s+name)\b/gi
     ) ?? []);
@@ -112,8 +113,8 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P2. FULL ZERO QUANTIFICATION ────────────────────────
-    const anyStrongNum     = allBullets.some(b => STRONG_NUM.test(b) || METRIC_CONTEXT.test(b));
-    const anyNumber        = allBullets.some(b => ANY_NUM.test(b));
+    const anyStrongNum      = allBullets.some(b => STRONG_NUM.test(b) || METRIC_CONTEXT.test(b));
+    const anyNumber         = allBullets.some(b => ANY_NUM.test(b));
     const fullZeroTriggered = allBullets.length > 0 && !anyStrongNum && !anyNumber;
 
     results.push({
@@ -157,14 +158,10 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P5. TRIVIAL PROJECTS ────────────────────────────────
-    // Bug 3 fix: use includes() for broader title matching + search rawText as fallback
     const projectsRaw = sections.projects?.raw ?? '';
     const projRawForSearch = projectsRaw.length > 10 ? projectsRaw : raw;
 
-    // Match ", 3 Days" OR ", Days" OR standalone "X days"
     const trivialByTime  = /,\s*\d*\s*days?\b/gi.test(projRawForSearch) || /\b[1-7]\s*days?\b/gi.test(projRawForSearch);
-
-    // Use includes() for broader title matching — catches "Todo list", "Restaurant Website" etc.
     const projLower = projRawForSearch.toLowerCase();
     const trivialByTitle = [
         'todo', 'to-do list', 'calculator', 'restaurant website',
@@ -186,7 +183,6 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P6. FILLER OBJECTIVE / SUMMARY ──────────────────────
-    // Bug 3 fix: search rawText too (for cases where sections aren't parsed properly)
     const summaryText = (
         sections.summary?.raw  ||
         sections.objective?.raw ||
@@ -195,10 +191,8 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     ).toLowerCase();
 
     const fillerHits = FILLER_PHRASES.filter(f => summaryText.includes(f));
-
-    // Bug 3 fix: threshold >= 1 when summary/profile/objective section exists
     const hasSummarySection = !!(sections.summary?.raw || sections.profile?.raw || sections.objective?.raw);
-    const fillerThreshold = hasSummarySection ? 1 : 3;
+    const fillerThreshold = hasSummarySection ? T.fillerWithSection : T.fillerWithout;
     const fillerTriggered = fillerHits.length >= fillerThreshold;
 
     results.push({
@@ -211,7 +205,6 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P7. HOBBIES / INTERESTS SECTION ─────────────────────
-    // FIX: Search rawText directly (not section-parsed text) to catch section headers
     const hobbiesHits = raw.match(
         /\b(hobbies|other\s+interests|special\s+interests|extracurricular\s+activities|personal\s+interests|outside\s+interests)\b/gi
     ) ?? [];
@@ -226,7 +219,6 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P8. MISSING GITHUB URL ──────────────────────────────
-    // Check for github in any form: URL, text, icon label, etc.
     const hasGitHubUrl = /github/i.test(raw) || /gh\s*:/i.test(raw);
 
     results.push({
@@ -244,8 +236,8 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
 
     results.push({
         id: 'soft_in_tech', priority: 3,
-        triggered:  softHits.length >= 2,
-        deduction:  softHits.length >= 2 ? W.soft_in_tech : 0,
+        triggered:  softHits.length >= T.softSkillsCount,
+        deduction:  softHits.length >= T.softSkillsCount ? W.soft_in_tech : 0,
         evidence:   softHits.slice(0, 3).join(', '),
         fix:        'Remove soft skills from the technical skills section. ATS parses this for hard skills only.',
         scoreGain:  `+${W.soft_in_tech} pts`,
@@ -267,7 +259,6 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P11. DUPLICATE METRICS ──────────────────────────────
-    // FIX: Normalise "40 %" → "40%", also match "40 percent"
     const pctValues: string[] = [];
     allBullets.forEach(b => {
         const matches = b.match(/(\d+)\s*(%|percent\b)/gi) ?? [];
@@ -281,7 +272,7 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     pctValues.forEach(p => { pctCounts[p] = (pctCounts[p] ?? 0) + 1; });
 
     const dupeMetrics = Object.entries(pctCounts)
-        .filter(([, n]) => n >= 3)
+        .filter(([, n]) => n >= T.duplicateMetricsCount)
         .map(([p, n]) => `${p} used ${n} times`);
 
     results.push({
@@ -324,8 +315,8 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P14. SHORT BULLETS ──────────────────────────────────
-    const shortBullets = allBullets.filter(b => b.length < 30);
-    const shortBulletTriggered = shortBullets.length >= 3;
+    const shortBullets = allBullets.filter(b => b.length < T.shortBulletChars);
+    const shortBulletTriggered = shortBullets.length >= T.shortBulletCount;
 
     results.push({
         id: 'short_bullets', priority: 2,
@@ -337,14 +328,14 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P15. LONG BULLETS ───────────────────────────────────
-    const longBullets = allBullets.filter(b => b.length > 200);
-    const longBulletTriggered = longBullets.length >= 3;
+    const longBullets = allBullets.filter(b => b.length > T.longBulletChars);
+    const longBulletTriggered = longBullets.length >= T.longBulletCount;
 
     results.push({
         id: 'long_bullets', priority: 3,
         triggered:  longBulletTriggered,
         deduction:  longBulletTriggered ? W.long_bullets : 0,
-        evidence:   `${longBullets.length} bullets exceed 200 characters`,
+        evidence:   `${longBullets.length} bullets exceed ${T.longBulletChars} characters`,
         fix:        'Break long bullets into 2 concise points. Each bullet should be 1 line (50-150 chars).',
         scoreGain:  `+${W.long_bullets} pts`,
     });
@@ -352,7 +343,7 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     // ── P16. WEAK VERBS ─────────────────────────────────────
     const WEAK_VERB_RE = /^(responsible\s+for|worked\s+on|helped|assisted|participated|involved\s+in|tasked\s+with|duties\s+included|was\s+part\s+of|contributed\s+to)\b/i;
     const weakVerbBullets = allBullets.filter(b => WEAK_VERB_RE.test(b.trim()));
-    const weakVerbTriggered = weakVerbBullets.length >= 2;
+    const weakVerbTriggered = weakVerbBullets.length >= T.weakVerbCount;
 
     results.push({
         id: 'weak_verbs', priority: 2,
@@ -383,7 +374,9 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
             firstVerbs[firstWord] = (firstVerbs[firstWord] || 0) + 1;
         }
     });
-    const repeatedVerbs = Object.entries(firstVerbs).filter(([, n]) => n >= 4).map(([v, n]) => `"${v}" (${n}x)`);
+    const repeatedVerbs = Object.entries(firstVerbs)
+        .filter(([, n]) => n >= T.repetitiveVerbCount)
+        .map(([v, n]) => `"${v}" (${n}x)`);
     const repetitiveTriggered = repeatedVerbs.length > 0;
 
     results.push({
@@ -411,7 +404,7 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     });
 
     // ── P20. TOO FEW BULLETS ────────────────────────────────
-    const tooFewTriggered = hasExpSection && expBullets.length < 3 && expBullets.length > 0;
+    const tooFewTriggered = hasExpSection && expBullets.length < T.tooFewBulletsCount && expBullets.length > 0;
 
     results.push({
         id: 'too_few_bullets', priority: 1,
@@ -425,7 +418,7 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
     // ── P21. EXCESSIVE SKILLS ───────────────────────────────
     const skillsRawText = sections.skills?.raw ?? '';
     const skillTokens = skillsRawText.split(/[,|•\n]/).map(s => s.trim()).filter(s => s.length > 1);
-    const excessiveSkillsTriggered = skillTokens.length > 35;
+    const excessiveSkillsTriggered = skillTokens.length > T.excessiveSkillsCount;
 
     results.push({
         id: 'excessive_skills', priority: 3,
@@ -435,6 +428,86 @@ export function detectAllPenalties(resume: ParsedResume): PenaltyResult[] {
         fix:        'Trim to 15-20 most relevant skills. Long lists dilute your strongest skills.',
         scoreGain:  `+${W.excessive_skills} pts`,
     });
+
+    // ══════════════════════════════════════════════════════════
+    // EXCLUSION GROUPS — applied after all 21 penalties are built
+    // ══════════════════════════════════════════════════════════
+
+    const eg = config.exclusionGroups;
+
+    // ── Group 1: Quantification (P2, P3, P4) ─────────────────
+    const p2 = results.find(r => r.id === eg.quantification.p2Id);
+    const p3 = results.find(r => r.id === eg.quantification.p3Id);
+    const p4 = results.find(r => r.id === eg.quantification.p4Id);
+
+    if (p2?.triggered) {
+        // P2 fires → suppress P3 and P4 entirely
+        if (p3?.triggered) {
+            p3.suppressed   = true;
+            p3.suppressedBy = eg.quantification.p2Id;
+            p3.deduction    = 0;
+        }
+        if (p4?.triggered) {
+            p4.suppressed   = true;
+            p4.suppressedBy = eg.quantification.p2Id;
+            p4.deduction    = 0;
+        }
+    } else if (p3?.triggered && p4?.triggered) {
+        // P3 fires but not P2 → suppress P4 for experience bullets only
+        const vagueExpBullets  = expBullets.filter(b => VAGUE_VERBS.test(b) && !ANY_NUM.test(b) && !METRIC_CONTEXT.test(b));
+        const vagueProjBullets = projBullets.filter(b => VAGUE_VERBS.test(b) && !ANY_NUM.test(b) && !METRIC_CONTEXT.test(b));
+
+        if (vagueProjBullets.length === 0) {
+            // All vague bullets are in experience — P3 already covers this root cause
+            p4.suppressed   = true;
+            p4.suppressedBy = eg.quantification.p3Id;
+            p4.deduction    = 0;
+        } else {
+            // Some vague bullets are in projects — P4 fires only for those
+            p4.deduction = Math.round(vagueProjBullets.length * W.vague_per_bullet * 10) / 10;
+        }
+    }
+
+    // Apply the combined quantification deduction cap
+    const quantIds = [eg.quantification.p2Id, eg.quantification.p3Id, eg.quantification.p4Id];
+    const quantTotal = results
+        .filter(r => quantIds.includes(r.id) && r.triggered && !r.suppressed)
+        .reduce((s, r) => s + r.deduction, 0);
+
+    if (quantTotal > eg.quantification.maxCombinedDeduction) {
+        // Reduce P4 first (lowest-priority in this group), then P3, then P2
+        const overBy = quantTotal - eg.quantification.maxCombinedDeduction;
+        const p4Active = p4 && p4.triggered && !p4.suppressed;
+        const p3Active = p3 && p3.triggered && !p3.suppressed;
+
+        if (p4Active && p4!.deduction >= overBy) {
+            p4!.deduction = Math.max(0, p4!.deduction - overBy);
+        } else if (p4Active && p3Active) {
+            const remainder = overBy - p4!.deduction;
+            p4!.deduction = 0;
+            p3!.deduction = Math.max(0, p3!.deduction - remainder);
+        }
+    }
+
+    // ── Group 2: Bullet quality cap (P14 + P15) ──────────────
+    const p14 = results.find(r => r.id === eg.bulletQuality.p14Id);
+    const p15 = results.find(r => r.id === eg.bulletQuality.p15Id);
+
+    if (p14?.triggered && p15?.triggered) {
+        const larger  = Math.max(p14.deduction, p15.deduction);
+        const smaller = Math.min(p14.deduction, p15.deduction);
+        const cap     = larger + eg.bulletQuality.combinedCapFactor * smaller;
+        const current = p14.deduction + p15.deduction;
+
+        if (current > cap) {
+            // Reduce the penalty with the smaller deduction
+            if (p14.deduction <= p15.deduction) {
+                p14.deduction = Math.max(0, cap - p15.deduction);
+            } else {
+                p15.deduction = Math.max(0, cap - p14.deduction);
+            }
+        }
+    }
 
     return results;
 }

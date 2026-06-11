@@ -96,13 +96,12 @@ export function AIPromptBar({
 
         {/* Input */}
         <div className="flex-1 flex items-center gap-2 bg-surface-2 border border-blue-muted/50 rounded-xl px-3 py-2.5 focus-within:border-blue-electric transition-colors">
-          <Sparkles className="w-4 h-4 text-blue-electric shrink-0" />
           <input
             ref={inputRef}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) handleSubmit(); }}
-            placeholder='e.g. "Add metrics to my experience bullets"'
+            placeholder=""
             className="flex-1 bg-transparent text-foreground text-sm outline-none placeholder:text-white-30"
             disabled={isEditing}
             maxLength={500}

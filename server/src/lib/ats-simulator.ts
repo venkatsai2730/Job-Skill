@@ -1,11 +1,41 @@
+// ═══════════════════════════════════════════════════════════════
+// ATS SIMULATOR — Phase 3 rewrite
+//
+// Platform profiles are config-driven and consume the Phase 2
+// parse-fidelity report. Each platform's strictness determines
+// how hard formatting issues hit the simulation score.
+//
+// Backward compat: fidelity param is optional so existing call
+// sites in routes/chatbot.ts and routes/resume.ts keep working.
+// ═══════════════════════════════════════════════════════════════
+
+import type { ParseFidelityReport } from './scorer/parse-fidelity.js';
+import type { CanonicalSection } from './scorer/section-synonyms.js';
+import { DEFAULT_CONFIG, type AtsSimDeductions } from './scorer/scoring-config.js';
+import { GLOBAL_TECH_SKILLS } from "./keywords.js";
+import { analyzeAllBullets } from "./bullet-scorer.js";
+import { expandSynonyms } from "./synonym-map.js";
+
+// ── Public types ─────────────────────────────────────────────
+
 export interface ATSParsedField {
     extracted: string | string[] | null;
     status: "success" | "warning" | "dropped";
     suggestion?: string;
 }
 
+/** A single parse-fidelity finding attached to a simulation */
+export interface FidelityFlag {
+    /** What was checked (e.g. "layout", "image_pdf", "table_artifacts") */
+    field: string;
+    /** pass = no issue; warn = moderate risk; fail = ATS likely drops content */
+    severity: "pass" | "warn" | "fail";
+    /** One-line reason grounded in the fidelity report */
+    reason: string;
+}
+
 export interface ATSSimulationResult {
-    platform: "Greenhouse" | "Lever" | "Ashby" | "Naukri";
+    platform: "Greenhouse" | "Lever" | "Ashby" | "Naukri" | "Workday" | "Legacy";
     fields: {
         name: ATSParsedField;
         email: ATSParsedField;
@@ -31,9 +61,12 @@ export interface ATSSimulationResult {
         };
     };
     overallScore: number;
+    /** Fidelity-driven checks — pass/warn/fail per structural concern */
+    fidelityFlags?: FidelityFlag[];
+    /** Parser strictness tier for this platform */
+    parserStrictness?: "lenient" | "medium" | "strict";
 }
 
-// Minimal structure matched from our parsers
 interface RawParsedSections {
     summary: string;
     experience: any[];
@@ -42,693 +75,725 @@ interface RawParsedSections {
     projects: any[];
 }
 
-import { GLOBAL_TECH_SKILLS } from "./keywords.js";
-import { analyzeAllBullets } from "./bullet-scorer.js";
-import { expandSynonyms } from "./synonym-map.js";
+type Strictness = "lenient" | "medium" | "strict";
 
-/**
- * Greenhouse is notoriously struct-heavy.
- * - Drops "Work History" or "Employment" if it isn't specifically "Experience".
- * - Frequently fails on custom multi-column skills.
- * - Requires standard Contact headers.
- */
-export function simulateGreenhouse(sections: RawParsedSections, rawText: string, jobDescription?: string): ATSSimulationResult {
-    const fields: ATSSimulationResult["fields"] = {} as any;
-    let score = 100;
+// ── Shared helpers ───────────────────────────────────────────
 
-    // Name (Usually first line, but Greenhouse drops non-standard header formats)
-    const hasClearName = rawText.split('\n').slice(0, 3).some(l => /[A-Z][a-z]+ [A-Z][a-z]+/.test(l));
-    if (hasClearName) {
-        fields.name = { extracted: "Found", status: "success" };
-    } else {
-        fields.name = { extracted: null, status: "dropped", suggestion: "Greenhouse could not find a standard Name header. Ensure name is the largest, first text on the page." };
-        score -= 15;
-    }
-
-    // Email
-    const emailMatch = rawText.match(/[\w.-]+@[\w.-]+\.\w+/);
-    if (emailMatch) {
-         fields.email = { extracted: emailMatch[0], status: "success" };
-    } else {
-         fields.email = { extracted: null, status: "dropped", suggestion: "No standard email detected. Avoid inserting emails into images or icons." };
-         score -= 10;
-    }
-
-    // Phone
-    const phoneMatch = rawText.match(/(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/);
-    if (phoneMatch) {
-        fields.phone = { extracted: phoneMatch[0], status: "success" };
-    } else {
-        fields.phone = { extracted: null, status: "warning", suggestion: "Phone number parsing failed. Use a standard format like (555) 555-5555" };
-        score -= 5;
-    }
-
-    // Location
-    fields.location = { extracted: "Parsed from Profile", status: "success" }; // Placeholder
-
-    // Links (Greenhouse strictly looks for linkedin.com or github.com strings)
-    const isLinkedin = rawText.toLowerCase().includes("linkedin.com");
-    if (isLinkedin) {
-        fields.links = { extracted: "LinkedIn Detected", status: "success" };
-    } else {
-         fields.links = { extracted: null, status: "warning", suggestion: "Greenhouse requires full URLs (e.g., https://linkedin.com/in/...). Hyperlinked text is often dropped." };
-         score -= 5;
-    }
-
-    // Experience (Greenhouse strictly needs 'Experience')
-    if (sections.experience.length > 0) {
-        // Did they use a standard header? Let's check raw text.
-        if (!/experience/i.test(rawText)) {
-             fields.experience = { extracted: "Partial / Dropped", status: "dropped", suggestion: "Greenhouse strictly looks for the header 'Experience'. Custom headers like 'Work History' often cause this section to be dropped entirely." };
-             score -= 25;
-        } else {
-             fields.experience = { extracted: `${sections.experience.length} Roles Found`, status: "success" };
-        }
-    } else {
-        fields.experience = { extracted: null, status: "dropped", suggestion: "No experience section found." };
-        score -= 25;
-    }
-
-    // Education
-    if (sections.education.length > 0) {
-        fields.education = { extracted: `${sections.education.length} Degrees Found`, status: "success" };
-    } else {
-        fields.education = { extracted: null, status: "dropped", suggestion: "Education section missing or used a non-standard title." };
-        score -= 15;
-    }
-
-    // Skills
-    if (sections.skills.length > 0) {
-        fields.skills = { extracted: `${sections.skills.reduce((acc, g) => acc + g.items.length, 0)} Skills Extracted`, status: "success" };
-    } else {
-        fields.skills = { extracted: null, status: "warning", suggestion: "Greenhouse failed to extract skills. Avoid multi-column formatting for this section." };
-        score -= 10;
-    }
-
-    // Keyword Match against JD (If JD provided)
-    if (jobDescription && jobDescription.trim().length > 50) {
-        const lowerRes = rawText.toLowerCase();
-        const lowerJd = jobDescription.toLowerCase();
-        const expandedRes = expandSynonyms(lowerRes);
-        
-        // Find core skills requested in JD
-        const jdSkills = GLOBAL_TECH_SKILLS.filter(kw => {
-            const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`(?:^|\\s[^a-z0-9]|\\b)${escaped}(?:[^a-z0-9]\\s|\\b|$)`, "i");
-            return regex.test(lowerJd);
-        });
-
-        if (jdSkills.length > 0) {
-            const matchedSkills = jdSkills.filter(kw => expandedRes.includes(kw));
-            const missingSkills = jdSkills.filter(kw => !expandedRes.includes(kw));
-            const matchRate = matchedSkills.length / jdSkills.length;
-            
-            let keywordStatus: "success" | "warning" | "dropped" = "success";
-            let suggestion = "";
-            let penalty = 0;
-
-            if (matchRate < 0.3) {
-                keywordStatus = "dropped";
-                suggestion = "Catastrophic keyword miss. Most ATS systems will auto-reject you.";
-                penalty = 30;
-            } else if (matchRate < 0.6) {
-                keywordStatus = "warning";
-                suggestion = "Moderate keyword match. Try to include more of the missing skills to pass initial ATS filters.";
-                penalty = 15;
-            } else {
-                suggestion = "Excellent keyword match rate.";
-            }
-
-            score -= penalty;
-            fields.keywords = {
-                extracted: `${Math.round(matchRate * 100)}% JD Keyword Match`,
-                status: keywordStatus,
-                suggestion,
-                matched: matchedSkills,
-                missing: missingSkills,
-                scorePoints: -penalty
-            };
-        }
-    }
-
-    // Bullet Analysis
-    const allBullets = sections.experience?.flatMap(exp => exp.bullets || []) || [];
-    if (allBullets.length > 0) {
-        const bulletData = analyzeAllBullets(allBullets);
-        let status: "success" | "warning" | "dropped" = "success";
-        let suggestion = "Bullets are highly impactful with action verbs and metrics.";
-        
-        if (bulletData.overallScore < 50) {
-            status = "dropped";
-            suggestion = "Bullets are weak. They lack action verbs and quantified metrics.";
-            score -= 15;
-        } else if (bulletData.overallScore < 75) {
-            status = "warning";
-            suggestion = "Bullets could be better optimized for ATS parsing (add more metrics & power verbs).";
-            score -= 5;
-        }
-
-        fields.bulletAnalysis = {
-            extracted: `Analyzed ${allBullets.length} bullet points`,
-            status,
-            overallScore: bulletData.overallScore,
-            suggestion
-        };
-    } else {
-         fields.bulletAnalysis = {
-            extracted: null,
-            status: "warning",
-            overallScore: 0,
-            suggestion: "No experience bullets to analyze."
-        };
-    }
-
-    return {
-        platform: "Greenhouse",
-        fields,
-        overallScore: Math.max(0, score)
-    };
+/** Extract contact fields from raw text (same for all platforms) */
+function extractContact(rawText: string) {
+    const email       = rawText.match(/[\w.+%-]+@[\w.-]+\.\w{2,}/)?.[0] ?? null;
+    const phone       = rawText.match(/(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/)?.[0] ?? null;
+    const indianPhone = rawText.match(/(?:\+91[\s.-]?)?\d{10}/)?.[0]
+                     || rawText.match(/(?:\+91[\s.-]?)?\d{5}[\s.-]?\d{5}/)?.[0]
+                     || null;
+    const hasLinkedIn = rawText.toLowerCase().includes("linkedin.com");
+    const hasGitHub   = rawText.toLowerCase().includes("github.com");
+    const hasUrl      = rawText.includes("http://") || rawText.includes("https://") || hasLinkedIn || hasGitHub;
+    const hasClearName = rawText.split('\n').slice(0, 5).some(l => /[A-Z][a-z]+ [A-Z][a-z]+/.test(l));
+    return { email, phone, indianPhone, hasLinkedIn, hasGitHub, hasUrl, hasClearName };
 }
 
 /**
- * Lever is better at semantic matching and fuzzy matching.
- * - Extracts "Work History" easily.
- * - Extremely good at grabbing raw links.
- * - Often merges Summary and Education if no line break exists.
+ * Whether a canonical section was detected — prefers fidelity's synonym-aware
+ * header scan over the raw parsed sections array.
  */
-export function simulateLever(sections: RawParsedSections, rawText: string, jobDescription?: string): ATSSimulationResult {
-    const fields: ATSSimulationResult["fields"] = {} as any;
-    let score = 100;
-
-    fields.name = { extracted: "Found", status: "success" }; // Lever is very robust at name extraction
-
-    const emailMatch = rawText.match(/[\w.-]+@[\w.-]+\.\w+/);
-    fields.email = emailMatch 
-        ? { extracted: emailMatch[0], status: "success" }
-        : { extracted: null, status: "dropped", suggestion: "Missing standard email." };
-    if (!emailMatch) score -= 10;
-
-    const phoneMatch = rawText.match(/(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/);
-    fields.phone = phoneMatch
-        ? { extracted: phoneMatch[0], status: "success" }
-        : { extracted: null, status: "warning", suggestion: "Phone number parsing failed." };
-    if (!phoneMatch) score -= 5;
-
-    fields.location = { extracted: "Parsed from Profile", status: "success" };
-
-    // Links (Lever extracts ANY hyperlink)
-    const hasHttp = rawText.includes("http://") || rawText.includes("https://") || rawText.toLowerCase().includes("github.com") || rawText.toLowerCase().includes("linkedin.com");
-    if (hasHttp) {
-        fields.links = { extracted: "URLs Extracted", status: "success" };
-    } else {
-         fields.links = { extracted: null, status: "warning", suggestion: "Lever easily parses inline links and full URLs, but none were detected." };
+function sectionDetected(
+    canonical: CanonicalSection,
+    sections: RawParsedSections,
+    fidelity?: ParseFidelityReport,
+): boolean {
+    if (fidelity && fidelity.recognizedSections.length > 0) {
+        return fidelity.recognizedSections.includes(canonical);
     }
-
-    // Experience (Lever allows "Work History", etc.)
-    if (sections.experience.length > 0) {
-        fields.experience = { extracted: `${sections.experience.length} Roles Found`, status: "success" };
-    } else {
-        fields.experience = { extracted: null, status: "dropped", suggestion: "No experience roles could be parsed. Consider using simple block limits." };
-        score -= 25;
+    switch (canonical) {
+        case 'experience': return sections.experience.length > 0;
+        case 'education':  return sections.education.length > 0;
+        case 'skills':     return sections.skills.length > 0;
+        case 'projects':   return sections.projects.length > 0;
+        default:           return false;
     }
-
-    // Education
-    if (sections.education.length > 0) {
-        // Lever merging bug heuristic: If spacing between exp & edu is tight, it merges them.
-        const mergedBug = !rawText.includes("\n\nEducation") && !rawText.includes("\n\nEDUCATION");
-        if (mergedBug) {
-             fields.education = { extracted: "Merged with Experience", status: "warning", suggestion: "Lever frequently merges Education into Experience if there is insufficient spacing between sections. Add whitespace." };
-             score -= 10;
-        } else {
-             fields.education = { extracted: `${sections.education.length} Degrees Found`, status: "success" };
-        }
-    } else {
-        fields.education = { extracted: null, status: "dropped", suggestion: "Education section missing." };
-        score -= 15;
-    }
-
-    // Skills
-    if (sections.skills.length > 0) {
-        fields.skills = { extracted: `${sections.skills.reduce((acc, g) => acc + g.items.length, 0)} Skills Mapped`, status: "success" };
-    } else {
-        fields.skills = { extracted: null, status: "warning", suggestion: "No skills grouped." };
-        score -= 10;
-    }
-
-    // Keyword Match against JD (If JD provided)
-    if (jobDescription && jobDescription.trim().length > 50) {
-        const lowerRes = rawText.toLowerCase();
-        const lowerJd = jobDescription.toLowerCase();
-        const expandedRes = expandSynonyms(lowerRes);
-        
-        // Find core skills requested in JD
-        const jdSkills = GLOBAL_TECH_SKILLS.filter(kw => {
-            const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`(?:^|\\s[^a-z0-9]|\\b)${escaped}(?:[^a-z0-9]\\s|\\b|$)`, "i");
-            return regex.test(lowerJd);
-        });
-
-        if (jdSkills.length > 0) {
-            const matchedSkills = jdSkills.filter(kw => expandedRes.includes(kw));
-            const missingSkills = jdSkills.filter(kw => !expandedRes.includes(kw));
-            const matchRate = matchedSkills.length / jdSkills.length;
-            
-            // Lever is slightly more forgiving on semantic matches, so penalty is slightly lower
-            let keywordStatus: "success" | "warning" | "dropped" = "success";
-            let suggestion = "";
-            let penalty = 0;
-
-            if (matchRate < 0.25) {
-                keywordStatus = "dropped";
-                suggestion = "Severe keyword miss. Most ATS systems will deprioritize your application.";
-                penalty = 25;
-            } else if (matchRate < 0.55) {
-                keywordStatus = "warning";
-                suggestion = "Average keyword match. Include more missing skills to rank higher in searches.";
-                penalty = 10;
-            } else {
-                suggestion = "Strong keyword match rate.";
-            }
-
-            score -= penalty;
-            fields.keywords = {
-                extracted: `${Math.round(matchRate * 100)}% JD Keyword Match`,
-                status: keywordStatus,
-                suggestion,
-                matched: matchedSkills,
-                missing: missingSkills,
-                scorePoints: -penalty
-            };
-        }
-    }
-
-    // Bullet Analysis
-    const allBullets = sections.experience?.flatMap(exp => exp.bullets || []) || [];
-    if (allBullets.length > 0) {
-        const bulletData = analyzeAllBullets(allBullets);
-        let status: "success" | "warning" | "dropped" = "success";
-        let suggestion = "Bullets are highly impactful with action verbs and metrics.";
-        
-        if (bulletData.overallScore < 50) {
-            status = "dropped";
-            suggestion = "Bullets are weak. They lack action verbs and quantified metrics.";
-            score -= 15;
-        } else if (bulletData.overallScore < 75) {
-            status = "warning";
-            suggestion = "Bullets could be better optimized for ATS parsing (add more metrics & power verbs).";
-            score -= 5;
-        }
-
-        fields.bulletAnalysis = {
-            extracted: `Analyzed ${allBullets.length} bullet points`,
-            status,
-            overallScore: bulletData.overallScore,
-            suggestion
-        };
-    } else {
-         fields.bulletAnalysis = {
-            extracted: null,
-            status: "warning",
-            overallScore: 0,
-            suggestion: "No experience bullets to analyze."
-        };
-    }
-
-    return {
-        platform: "Lever",
-        fields,
-        overallScore: Math.max(0, score)
-    };
 }
 
 /**
- * Ashby is strict about section structure and formatting.
- * - Extracts: title, company, skills, location
- * - Strict: drops content outside standard section tags
- * - Warns if: bullet count > 7 per role
- * - Warns if: dates not in "Month Year" format
+ * Build fidelity-driven structural flags for a given strictness level.
+ * Returns both the flags and the total score penalty to apply.
  */
-export function simulateAshby(sections: RawParsedSections, rawText: string, jobDescription?: string): ATSSimulationResult {
+function buildFidelityFlags(
+    fidelity: ParseFidelityReport | undefined,
+    strictness: Strictness,
+    platform: string,
+): { flags: FidelityFlag[]; penalty: number } {
+    if (!fidelity) return { flags: [], penalty: 0 };
+
+    const D = DEFAULT_CONFIG.atsSimulator.deductions[strictness];
+    const flags: FidelityFlag[] = [];
+    let penalty = 0;
+
+    // Image-only PDF
+    if (!fidelity.extractable) {
+        const sev: FidelityFlag["severity"] = strictness === 'lenient' ? 'warn' : 'fail';
+        flags.push({
+            field: "image_pdf",
+            severity: sev,
+            reason: sev === 'fail'
+                ? `${platform} cannot extract text from an image-only PDF. Convert to a text-based PDF immediately.`
+                : `PDF appears to be image-based. ${platform} may struggle to extract your details.`,
+        });
+        penalty += D.imagePdf;
+    }
+
+    // Multi-column layout
+    if (fidelity.multiColumnRisk !== 'LOW') {
+        const isHigh = fidelity.multiColumnRisk === 'HIGH';
+        const sev: FidelityFlag["severity"] =
+            strictness === 'lenient' ? 'pass' :
+            (strictness === 'medium' || !isHigh) ? 'warn' : 'fail';
+        flags.push({
+            field: "layout",
+            severity: sev,
+            reason: sev === 'pass'
+                ? `${platform} reviewers read the original PDF directly — multi-column layout is not a concern here.`
+                : sev === 'warn'
+                ? `Multi-column layout detected. ${platform}'s parser may read sections out of order.`
+                : `Multi-column layout will likely scramble ${platform}'s structured parser, causing sections to be dropped.`,
+        });
+        penalty += isHigh ? D.multiColHigh : D.multiColMedium;
+    }
+
+    // Table artifacts
+    if (fidelity.tableArtifactRisk === 'HIGH') {
+        const sev: FidelityFlag["severity"] = strictness === 'lenient' ? 'pass' : 'warn';
+        flags.push({
+            field: "table_artifacts",
+            severity: sev,
+            reason: sev === 'pass'
+                ? `Table formatting is visible in the PDF — ${platform} reviewers will see it as intended.`
+                : `Table cell separators (pipes/tabs) may appear as garbled text in ${platform}'s parsed view.`,
+        });
+        penalty += D.tableArtifact;
+    }
+
+    return { flags, penalty };
+}
+
+/** Build keyword match field if a JD is provided (shared across all platforms) */
+function buildKeywords(
+    rawText: string,
+    jobDescription: string | undefined,
+    matched_threshold_low: number,
+    matched_threshold_high: number,
+    penalty_low: number,
+    penalty_high: number,
+): { field: ATSSimulationResult["fields"]["keywords"]; penalty: number } | null {
+    if (!jobDescription || jobDescription.trim().length < 50) return null;
+
+    const expandedRes = expandSynonyms(rawText.toLowerCase());
+    const lowerJd = jobDescription.toLowerCase();
+    const jdSkills = GLOBAL_TECH_SKILLS.filter(kw => {
+        const esc = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`(?:^|\\s[^a-z0-9]|\\b)${esc}(?:[^a-z0-9]\\s|\\b|$)`, "i").test(lowerJd);
+    });
+
+    if (jdSkills.length === 0) return null;
+
+    const matched = jdSkills.filter(kw => expandedRes.includes(kw));
+    const missing = jdSkills.filter(kw => !expandedRes.includes(kw));
+    const rate = matched.length / jdSkills.length;
+
+    let status: "success" | "warning" | "dropped" = "success";
+    let suggestion = "Strong keyword match rate.";
+    let penalty = 0;
+
+    if (rate < matched_threshold_low) {
+        status = "dropped";
+        suggestion = "Critical keyword gap — low match rate may cause auto-rejection.";
+        penalty = penalty_high;
+    } else if (rate < matched_threshold_high) {
+        status = "warning";
+        suggestion = "Moderate keyword match. Add more JD-specific skills to rank higher.";
+        penalty = penalty_low;
+    }
+
+    return {
+        field: { extracted: `${Math.round(rate * 100)}% JD Keyword Match`, status, suggestion, matched, missing, scorePoints: -penalty },
+        penalty,
+    };
+}
+
+/** Build bullet analysis field (shared across all platforms) */
+function buildBulletAnalysis(
+    sections: RawParsedSections,
+    lowThreshold: number,
+    highThreshold: number,
+    penaltyLow: number,
+    penaltyHigh: number,
+): { field: ATSSimulationResult["fields"]["bulletAnalysis"]; penalty: number } {
+    const allBullets = sections.experience?.flatMap((exp: any) => exp.bullets || []) || [];
+    if (allBullets.length === 0) {
+        return { field: { extracted: null, status: "warning", overallScore: 0, suggestion: "No experience bullets to analyze." }, penalty: 0 };
+    }
+    const data = analyzeAllBullets(allBullets);
+    let status: "success" | "warning" | "dropped" = "success";
+    let suggestion = "Bullets are impactful with strong action verbs and metrics.";
+    let penalty = 0;
+    if (data.overallScore < lowThreshold) {
+        status = "dropped"; suggestion = "Bullets lack action verbs and quantified metrics."; penalty = penaltyHigh;
+    } else if (data.overallScore < highThreshold) {
+        status = "warning"; suggestion = "Bullets need more quantified metrics and action verbs."; penalty = penaltyLow;
+    }
+    return { field: { extracted: `Analyzed ${allBullets.length} bullet points`, status, overallScore: data.overallScore, suggestion }, penalty };
+}
+
+
+// ── GREENHOUSE — Lenient ─────────────────────────────────────
+/**
+ * Greenhouse recruiters primarily view the rendered PDF; parsed fields
+ * are sidebar metadata. Only image-only PDFs and missing contact info
+ * are critical. Formatting issues (columns, tables) carry LOW severity.
+ */
+export function simulateGreenhouse(
+    sections: RawParsedSections,
+    rawText: string,
+    fidelityOrJd?: ParseFidelityReport | string,
+    maybeJd?: string,
+): ATSSimulationResult {
+    // Handle old signature simulateGreenhouse(sections, rawText, jobDescription?)
+    const fidelity = (fidelityOrJd && typeof fidelityOrJd === 'object') ? fidelityOrJd as ParseFidelityReport : undefined;
+    const jobDescription = fidelity ? maybeJd : (fidelityOrJd as string | undefined);
+
+    const { flags, penalty: fidelityPenalty } = buildFidelityFlags(fidelity, 'lenient', 'Greenhouse');
+    const C = extractContact(rawText);
     const fields: ATSSimulationResult["fields"] = {} as any;
-    let score = 100;
+    let score = 100 - fidelityPenalty;
 
     // Name
-    const hasClearName = rawText.split('\n').slice(0, 3).some(l => /[A-Z][a-z]+ [A-Z][a-z]+/.test(l));
-    if (hasClearName) {
-        fields.name = { extracted: "Found", status: "success" };
-    } else {
-        fields.name = { extracted: null, status: "dropped", suggestion: "Ashby expects the candidate name to be clearly the first text element. Avoid fancy formatting." };
-        score -= 10;
-    }
+    fields.name = C.hasClearName
+        ? { extracted: "Found", status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Place your full name as the first text on the page." };
+    if (!C.hasClearName) score -= 10;
 
     // Email
-    const emailMatch = rawText.match(/[\w.-]+@[\w.-]+\.\w+/);
-    fields.email = emailMatch
-        ? { extracted: emailMatch[0], status: "success" }
-        : { extracted: null, status: "dropped", suggestion: "No standard email detected." };
-    if (!emailMatch) score -= 10;
+    fields.email = C.email
+        ? { extracted: C.email, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "No email detected. Avoid embedding contact info in images." };
+    if (!C.email) score -= DEFAULT_CONFIG.atsSimulator.deductions.lenient.missingContact;
 
     // Phone
-    const phoneMatch = rawText.match(/(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/);
-    fields.phone = phoneMatch
-        ? { extracted: phoneMatch[0], status: "success" }
-        : { extracted: null, status: "warning", suggestion: "Phone number parsing failed." };
-    if (!phoneMatch) score -= 5;
+    fields.phone = C.phone
+        ? { extracted: C.phone, status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Use a standard phone format." };
+    if (!C.phone) score -= 3;
 
     // Location
     fields.location = { extracted: "Parsed from Profile", status: "success" };
 
-    // Links
-    const hasLinks = rawText.toLowerCase().includes("linkedin.com") || rawText.toLowerCase().includes("github.com");
-    fields.links = hasLinks
-        ? { extracted: "URLs Detected", status: "success" }
-        : { extracted: null, status: "warning", suggestion: "Ashby prefers full URLs for LinkedIn/GitHub profiles." };
+    // Links — Greenhouse wants full URLs
+    fields.links = C.hasLinkedIn
+        ? { extracted: "LinkedIn detected", status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Include a full LinkedIn URL (e.g. linkedin.com/in/...)." };
 
-    // Experience — Ashby strictly parses standard "Experience" headers
-    if (sections.experience.length > 0) {
-        const hasStandardHeader = /\b(experience|work\s+experience|professional\s+experience)\b/i.test(rawText);
-        if (!hasStandardHeader) {
-            fields.experience = { extracted: "Partial / Dropped", status: "dropped", suggestion: "Ashby requires a standard 'Experience' section header. Non-standard headers like 'Career History' may be dropped." };
-            score -= 20;
-        } else {
-            fields.experience = { extracted: `${sections.experience.length} Roles Found`, status: "success" };
-        }
-
-        // Ashby warns if > 7 bullets per role
-        const overBulletRoles = sections.experience.filter(exp => (exp.bullets || []).length > 7);
-        if (overBulletRoles.length > 0) {
-            score -= 5;
-            // Add to experience suggestion
-            if (fields.experience.status === "success") {
-                fields.experience.suggestion = `${overBulletRoles.length} role(s) have more than 7 bullet points. Ashby may truncate or deprioritize long bullet lists. Aim for 4-6 bullets per role.`;
-                fields.experience.status = "warning";
-            }
-        }
-
-        // Ashby warns if dates are not in "Month Year" format
-        const badDateRoles = sections.experience.filter(exp => {
-            const dates = exp.dates || "";
-            // Valid: "Jan 2020 - Present", "January 2020 - Dec 2021"
-            const validPattern = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\b/i;
-            return dates.length > 0 && !validPattern.test(dates);
-        });
-        if (badDateRoles.length > 0) {
-            score -= 5;
-        }
+    // Experience — lenient: synonym headers pass; image PDF → dropped
+    const hasExp = !fidelity || fidelity.extractable
+        ? sectionDetected('experience', sections, fidelity)
+        : false;
+    if (!hasExp) {
+        fields.experience = { extracted: null, status: fidelity && !fidelity.extractable ? "dropped" : "warning",
+            suggestion: "Experience section not found. Ensure a clear section header is present." };
+        score -= DEFAULT_CONFIG.atsSimulator.deductions.lenient.missingSection;
     } else {
-        fields.experience = { extracted: null, status: "dropped", suggestion: "No experience section found." };
-        score -= 25;
+        fields.experience = { extracted: `${sections.experience.length} role(s) found`, status: "success" };
     }
 
     // Education
-    if (sections.education.length > 0) {
-        fields.education = { extracted: `${sections.education.length} Degrees Found`, status: "success" };
-    } else {
-        fields.education = { extracted: null, status: "dropped", suggestion: "Education section missing." };
-        score -= 15;
-    }
+    const hasEdu = sectionDetected('education', sections, fidelity);
+    fields.education = hasEdu
+        ? { extracted: `${sections.education.length} degree(s) found`, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Education section missing." };
+    if (!hasEdu) score -= DEFAULT_CONFIG.atsSimulator.deductions.lenient.missingSection;
 
     // Skills
-    if (sections.skills.length > 0) {
-        fields.skills = { extracted: `${sections.skills.reduce((acc, g) => acc + g.items.length, 0)} Skills Extracted`, status: "success" };
-    } else {
-        fields.skills = { extracted: null, status: "warning", suggestion: "Ashby could not extract a structured skills section. Use a clear 'Skills' header." };
-        score -= 10;
-    }
+    const hasSkills = sectionDetected('skills', sections, fidelity);
+    const skillCount = sections.skills.reduce((a: number, g: any) => a + (g.items?.length ?? 0), 0);
+    fields.skills = hasSkills
+        ? { extracted: `${skillCount} skills extracted`, status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Skills section not detected. Use a clear Skills header." };
+    if (!hasSkills) score -= 5;
 
-    // Keyword Match (if JD provided)
-    if (jobDescription && jobDescription.trim().length > 50) {
-        const lowerRes = rawText.toLowerCase();
-        const lowerJd = jobDescription.toLowerCase();
-        const expandedRes = expandSynonyms(lowerRes);
+    // Keywords
+    const kw = buildKeywords(rawText, jobDescription, 0.30, 0.60, 15, 30);
+    if (kw) { fields.keywords = kw.field; score -= kw.penalty; }
 
-        const jdSkills = GLOBAL_TECH_SKILLS.filter(kw => {
-            const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`(?:^|\\s[^a-z0-9]|\\b)${escaped}(?:[^a-z0-9]\\s|\\b|$)`, "i");
-            return regex.test(lowerJd);
-        });
+    // Bullets
+    const ba = buildBulletAnalysis(sections, 50, 75, 5, 15);
+    fields.bulletAnalysis = ba.field; score -= ba.penalty;
 
-        if (jdSkills.length > 0) {
-            const matchedSkills = jdSkills.filter(kw => expandedRes.includes(kw));
-            const missingSkills = jdSkills.filter(kw => !expandedRes.includes(kw));
-            const matchRate = matchedSkills.length / jdSkills.length;
-
-            let keywordStatus: "success" | "warning" | "dropped" = "success";
-            let suggestion = "Excellent keyword match rate.";
-            let penalty = 0;
-
-            if (matchRate < 0.3) {
-                keywordStatus = "dropped";
-                suggestion = "Ashby's strict matching flagged a critical keyword gap. Your application may be auto-screened out.";
-                penalty = 25;
-            } else if (matchRate < 0.6) {
-                keywordStatus = "warning";
-                suggestion = "Moderate keyword match. Ashby heavily weights exact skill terms from the JD.";
-                penalty = 12;
-            }
-
-            score -= penalty;
-            fields.keywords = {
-                extracted: `${Math.round(matchRate * 100)}% JD Keyword Match`,
-                status: keywordStatus,
-                suggestion,
-                matched: matchedSkills,
-                missing: missingSkills,
-                scorePoints: -penalty
-            };
-        }
-    }
-
-    // Bullet Analysis
-    const allBullets = sections.experience?.flatMap(exp => exp.bullets || []) || [];
-    if (allBullets.length > 0) {
-        const bulletData = analyzeAllBullets(allBullets);
-        let bStatus: "success" | "warning" | "dropped" = "success";
-        let bSuggestion = "Bullets are highly impactful.";
-
-        if (bulletData.overallScore < 50) {
-            bStatus = "dropped";
-            bSuggestion = "Bullets are weak. Ashby penalizes low-impact descriptions.";
-            score -= 15;
-        } else if (bulletData.overallScore < 75) {
-            bStatus = "warning";
-            bSuggestion = "Bullets need more quantified metrics and action verbs for Ashby.";
-            score -= 5;
-        }
-
-        fields.bulletAnalysis = {
-            extracted: `Analyzed ${allBullets.length} bullet points`,
-            status: bStatus,
-            overallScore: bulletData.overallScore,
-            suggestion: bSuggestion
-        };
-    } else {
-        fields.bulletAnalysis = {
-            extracted: null,
-            status: "warning",
-            overallScore: 0,
-            suggestion: "No experience bullets to analyze."
-        };
-    }
-
-    return {
-        platform: "Ashby",
-        fields,
-        overallScore: Math.max(0, score)
-    };
+    return { platform: "Greenhouse", fields, overallScore: Math.max(0, score), fidelityFlags: flags, parserStrictness: "lenient" };
 }
 
+
+// ── LEVER — Parse-first ──────────────────────────────────────
 /**
- * Naukri — Indian-specific ATS simulation.
- * - Checks: phone number in Indian format (+91 or 10-digit)
- * - Checks: CGPA/GPA if fresh graduate
- * - Checks: Indian university name recognition
- * - Warns if: resume > 2 pages (Naukri recommends max 2)
- * - Warns if: objective/summary > 3 lines
+ * Lever's structured profile is the recruiter's primary view.
+ * Section detection failures and column/table issues are HIGH severity.
+ * Synonym headers pass via semantic matching.
  */
-export function simulateNaukri(sections: RawParsedSections, rawText: string, jobDescription?: string): ATSSimulationResult {
+export function simulateLever(
+    sections: RawParsedSections,
+    rawText: string,
+    fidelityOrJd?: ParseFidelityReport | string,
+    maybeJd?: string,
+): ATSSimulationResult {
+    const fidelity = (fidelityOrJd && typeof fidelityOrJd === 'object') ? fidelityOrJd as ParseFidelityReport : undefined;
+    const jobDescription = fidelity ? maybeJd : (fidelityOrJd as string | undefined);
+
+    const { flags, penalty: fidelityPenalty } = buildFidelityFlags(fidelity, 'strict', 'Lever');
+    const C = extractContact(rawText);
+    const D = DEFAULT_CONFIG.atsSimulator.deductions.strict;
     const fields: ATSSimulationResult["fields"] = {} as any;
-    let score = 100;
+    let score = 100 - fidelityPenalty;
 
-    // Name — Naukri is quite lenient
-    const hasClearName = rawText.split('\n').slice(0, 5).some(l => /[A-Z][a-z]+ [A-Z][a-z]+/.test(l));
-    fields.name = hasClearName
-        ? { extracted: "Found", status: "success" }
-        : { extracted: null, status: "warning", suggestion: "Naukri could not find a clear name. Ensure your full name is prominently placed." };
-    if (!hasClearName) score -= 5;
+    fields.name = { extracted: "Found", status: "success" }; // Lever is robust at name
 
-    // Email
-    const emailMatch = rawText.match(/[\w.-]+@[\w.-]+\.\w+/);
-    fields.email = emailMatch
-        ? { extracted: emailMatch[0], status: "success" }
-        : { extracted: null, status: "dropped", suggestion: "Email is required for Naukri profile completion." };
-    if (!emailMatch) score -= 10;
+    fields.email = C.email
+        ? { extracted: C.email, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Email is required for Lever structured profile." };
+    if (!C.email) score -= D.missingContact;
 
-    // Phone — Indian format check (+91 or 10-digit)
-    const indianPhoneMatch = rawText.match(/(?:\+91[\s.-]?)?\d{10}/) || rawText.match(/(?:\+91[\s.-]?)?\d{5}[\s.-]?\d{5}/);
-    if (indianPhoneMatch) {
-        fields.phone = { extracted: indianPhoneMatch[0], status: "success" };
-    } else {
-        const anyPhone = rawText.match(/(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/);
-        if (anyPhone) {
-            fields.phone = { extracted: anyPhone[0], status: "warning", suggestion: "Phone number detected but not in standard Indian format (+91 XXXXX XXXXX or 10-digit). Naukri prefers Indian format." };
-            score -= 3;
-        } else {
-            fields.phone = { extracted: null, status: "dropped", suggestion: "No phone number found. Naukri requires a valid Indian mobile number." };
-            score -= 10;
-        }
-    }
+    fields.phone = C.phone
+        ? { extracted: C.phone, status: "success" }
+        : { extracted: null, status: "warning", suggestion: "No phone number detected." };
+    if (!C.phone) score -= 5;
 
-    // Location
     fields.location = { extracted: "Parsed from Profile", status: "success" };
 
-    // Links
-    const hasLinkedIn = rawText.toLowerCase().includes("linkedin.com");
-    fields.links = hasLinkedIn
-        ? { extracted: "LinkedIn Detected", status: "success" }
-        : { extracted: null, status: "warning", suggestion: "Adding a LinkedIn profile URL helps Naukri auto-populate your profile." };
+    fields.links = C.hasUrl
+        ? { extracted: "URL(s) extracted", status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Lever parses inline URLs well — add LinkedIn/GitHub." };
+
+    // Lever: synonym headers pass; multi-column degrades to warning
+    const hasExp = !fidelity || fidelity.extractable
+        ? sectionDetected('experience', sections, fidelity)
+        : false;
+    const layoutDegrades = fidelity && (fidelity.multiColumnRisk !== 'LOW' || fidelity.tableArtifactRisk === 'HIGH');
+
+    if (!hasExp) {
+        fields.experience = { extracted: null, status: "dropped", suggestion: "Experience section not recognized. Use a standard or common header (e.g. Work Experience, Professional Experience)." };
+        score -= D.missingSection;
+    } else if (layoutDegrades && fidelity!.multiColumnRisk === 'HIGH') {
+        fields.experience = { extracted: `${sections.experience.length} role(s) (layout risk)`, status: "warning",
+            suggestion: "Multi-column layout may cause Lever's parser to scramble experience entries." };
+    } else {
+        fields.experience = { extracted: `${sections.experience.length} role(s) found`, status: "success" };
+    }
+
+    const hasEdu = sectionDetected('education', sections, fidelity);
+    fields.education = hasEdu
+        ? { extracted: `${sections.education.length} degree(s) found`, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Education section not detected." };
+    if (!hasEdu) score -= D.missingSection;
+
+    const hasSkills = sectionDetected('skills', sections, fidelity);
+    const skillCount = sections.skills.reduce((a: number, g: any) => a + (g.items?.length ?? 0), 0);
+    fields.skills = hasSkills
+        ? { extracted: `${skillCount} skills mapped`, status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Skills section not detected. Lever's structured view expects an explicit Skills section." };
+    if (!hasSkills) score -= 8;
+
+    const kw = buildKeywords(rawText, jobDescription, 0.25, 0.55, 10, 25);
+    if (kw) { fields.keywords = kw.field; score -= kw.penalty; }
+
+    const ba = buildBulletAnalysis(sections, 50, 75, 5, 15);
+    fields.bulletAnalysis = ba.field; score -= ba.penalty;
+
+    return { platform: "Lever", fields, overallScore: Math.max(0, score), fidelityFlags: flags, parserStrictness: "strict" };
+}
+
+
+// ── WORKDAY — Strict + job-title match ───────────────────────
+/**
+ * Workday is the dominant enterprise ATS. It weights job-title match
+ * heavily and relies on structured form fields as much as resume text.
+ * Multi-column and table layouts cause HIGH-severity drops.
+ */
+export function simulateWorkday(
+    sections: RawParsedSections,
+    rawText: string,
+    fidelityOrJd?: ParseFidelityReport | string,
+    maybeJd?: string,
+): ATSSimulationResult {
+    const fidelity = (fidelityOrJd && typeof fidelityOrJd === 'object') ? fidelityOrJd as ParseFidelityReport : undefined;
+    const jobDescription = fidelity ? maybeJd : (fidelityOrJd as string | undefined);
+
+    const { flags, penalty: fidelityPenalty } = buildFidelityFlags(fidelity, 'strict', 'Workday');
+    const C = extractContact(rawText);
+    const D = DEFAULT_CONFIG.atsSimulator.deductions.strict;
+    const fields: ATSSimulationResult["fields"] = {} as any;
+    let score = 100 - fidelityPenalty;
+
+    fields.name = C.hasClearName
+        ? { extracted: "Found", status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Ensure full name is prominently placed at the top." };
+    if (!C.hasClearName) score -= 10;
+
+    fields.email = C.email
+        ? { extracted: C.email, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Email required for Workday application form." };
+    if (!C.email) score -= D.missingContact;
+
+    fields.phone = C.phone
+        ? { extracted: C.phone, status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Phone number not detected." };
+    if (!C.phone) score -= 5;
+
+    fields.location = { extracted: "Parsed from Profile", status: "success" };
+
+    fields.links = C.hasLinkedIn
+        ? { extracted: "LinkedIn detected", status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Add LinkedIn URL — Workday auto-imports from LinkedIn." };
+
+    // Workday: multi-column/table → fail
+    const layoutFail = fidelity && (fidelity.multiColumnRisk === 'HIGH' || fidelity.tableArtifactRisk === 'HIGH');
+
+    const hasExp = !fidelity || fidelity.extractable
+        ? sectionDetected('experience', sections, fidelity)
+        : false;
+    if (!hasExp) {
+        fields.experience = { extracted: null, status: "dropped", suggestion: "Experience not detected. Use standard header." };
+        score -= D.missingSection;
+    } else if (layoutFail) {
+        fields.experience = { extracted: `${sections.experience.length} role(s) (layout risk)`, status: "warning",
+            suggestion: "Multi-column/table layout degrades Workday's structured parsing." };
+    } else {
+        fields.experience = { extracted: `${sections.experience.length} role(s) found`, status: "success" };
+    }
+
+    const hasEdu = sectionDetected('education', sections, fidelity);
+    fields.education = hasEdu
+        ? { extracted: `${sections.education.length} degree(s) found`, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Education section missing." };
+    if (!hasEdu) score -= D.missingSection;
+
+    const hasSkills = sectionDetected('skills', sections, fidelity);
+    const skillCount = sections.skills.reduce((a: number, g: any) => a + (g.items?.length ?? 0), 0);
+    fields.skills = hasSkills
+        ? { extracted: `${skillCount} skills extracted`, status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Skills section not detected." };
+    if (!hasSkills) score -= 8;
+
+    // Workday always adds form-fields advisory as a fidelity flag
+    flags.push({
+        field: "form_fields",
+        severity: "warn",
+        reason: "Workday requires manual data entry into structured form fields after upload. Ensure dates, titles, and company names are parseable.",
+    });
+
+    const kw = buildKeywords(rawText, jobDescription, 0.30, 0.60, 12, 28);
+    if (kw) { fields.keywords = kw.field; score -= kw.penalty; }
+
+    const ba = buildBulletAnalysis(sections, 50, 75, 5, 15);
+    fields.bulletAnalysis = ba.field; score -= ba.penalty;
+
+    return { platform: "Workday", fields, overallScore: Math.max(0, score), fidelityFlags: flags, parserStrictness: "strict" };
+}
+
+
+// ── ASHBY — Medium strictness ────────────────────────────────
+/**
+ * Ashby is a modern ATS with medium strictness.
+ * Warns if any role has > 7 bullets; otherwise well-suited to
+ * standard resume formats.
+ */
+export function simulateAshby(
+    sections: RawParsedSections,
+    rawText: string,
+    fidelityOrJd?: ParseFidelityReport | string,
+    maybeJd?: string,
+): ATSSimulationResult {
+    const fidelity = (fidelityOrJd && typeof fidelityOrJd === 'object') ? fidelityOrJd as ParseFidelityReport : undefined;
+    const jobDescription = fidelity ? maybeJd : (fidelityOrJd as string | undefined);
+
+    const { flags, penalty: fidelityPenalty } = buildFidelityFlags(fidelity, 'medium', 'Ashby');
+    const C = extractContact(rawText);
+    const D = DEFAULT_CONFIG.atsSimulator.deductions.medium;
+    const fields: ATSSimulationResult["fields"] = {} as any;
+    let score = 100 - fidelityPenalty;
+
+    const hasClearName = rawText.split('\n').slice(0, 3).some(l => /[A-Z][a-z]+ [A-Z][a-z]+/.test(l));
+    fields.name = hasClearName
+        ? { extracted: "Found", status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Place name as the first element — Ashby reads it from the top." };
+    if (!hasClearName) score -= 10;
+
+    fields.email = C.email
+        ? { extracted: C.email, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "No email detected." };
+    if (!C.email) score -= D.missingContact;
+
+    fields.phone = C.phone
+        ? { extracted: C.phone, status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Phone number not found." };
+    if (!C.phone) score -= 5;
+
+    fields.location = { extracted: "Parsed from Profile", status: "success" };
+
+    fields.links = (C.hasLinkedIn || C.hasGitHub)
+        ? { extracted: "Profile URL(s) detected", status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Include full LinkedIn/GitHub URLs." };
 
     // Experience
-    if (sections.experience.length > 0) {
-        fields.experience = { extracted: `${sections.experience.length} Roles Found`, status: "success" };
+    const hasExp = !fidelity || fidelity.extractable
+        ? sectionDetected('experience', sections, fidelity)
+        : false;
+    if (!hasExp) {
+        fields.experience = { extracted: null, status: "dropped", suggestion: "Experience section not found." };
+        score -= D.missingSection;
     } else {
-        fields.experience = { extracted: null, status: "dropped", suggestion: "No experience section found. Even freshers should list internships or projects." };
-        score -= 20;
-    }
-
-    // Education — CGPA/GPA check for freshers
-    if (sections.education.length > 0) {
-        fields.education = { extracted: `${sections.education.length} Degrees Found`, status: "success" };
-
-        // Check for CGPA/GPA if fresher
-        const isFresher = sections.experience.length <= 1;
-        if (isFresher) {
-            const hasCGPA = /\b(cgpa|gpa|percentage|marks)\s*[:\s]?\s*\d/i.test(rawText);
-            if (!hasCGPA) {
-                fields.education.status = "warning";
-                fields.education.suggestion = "As a fresher, Naukri recommends including your CGPA/GPA or percentage. Many recruiters filter by academic scores.";
-                score -= 5;
-            }
+        // Ashby: warn if any role has > 7 bullets
+        const overBulletRoles = sections.experience.filter((e: any) => (e.bullets || []).length > 7);
+        if (overBulletRoles.length > 0) {
+            fields.experience = {
+                extracted: `${sections.experience.length} role(s) found`,
+                status: "warning",
+                suggestion: `${overBulletRoles.length} role(s) exceed 7 bullets. Ashby may truncate long bullet lists — aim for 4–6 per role.`,
+            };
+            score -= 5;
+        } else {
+            fields.experience = { extracted: `${sections.experience.length} role(s) found`, status: "success" };
         }
 
-        // Indian university recognition check
-        const KNOWN_INDIAN_UNIS = [
-            "iit", "nit", "iiit", "bits", "vit", "srm", "manipal", "amity",
-            "delhi university", "mumbai university", "pune university", "anna university",
-            "jadavpur", "bhu", "jnu", "ism", "iisc", "isb", "iim",
-            "osmania", "hyderabad university", "calcutta university",
-        ];
-        const lowerEdu = sections.education.map(e => (e.school || "").toLowerCase()).join(" ");
-        const hasKnownUni = KNOWN_INDIAN_UNIS.some(u => lowerEdu.includes(u));
-        if (hasKnownUni) {
-            // Bonus for recognized university
-            score = Math.min(100, score + 2);
-        }
-    } else {
-        fields.education = { extracted: null, status: "dropped", suggestion: "Education section missing. This is critical for Naukri profiles." };
-        score -= 15;
+        // Date format check
+        const badDates = sections.experience.filter((e: any) => {
+            const d = e.dates || "";
+            return d.length > 0 && !/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\b/i.test(d);
+        });
+        if (badDates.length > 0) score -= 5;
     }
 
-    // Skills
-    if (sections.skills.length > 0) {
-        fields.skills = { extracted: `${sections.skills.reduce((acc, g) => acc + g.items.length, 0)} Skills Mapped`, status: "success" };
+    const hasEdu = sectionDetected('education', sections, fidelity);
+    fields.education = hasEdu
+        ? { extracted: `${sections.education.length} degree(s) found`, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Education section missing." };
+    if (!hasEdu) score -= D.missingSection;
+
+    const hasSkills = sectionDetected('skills', sections, fidelity);
+    const skillCount = sections.skills.reduce((a: number, g: any) => a + (g.items?.length ?? 0), 0);
+    fields.skills = hasSkills
+        ? { extracted: `${skillCount} skills extracted`, status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Use a clear Skills header." };
+    if (!hasSkills) score -= 8;
+
+    const kw = buildKeywords(rawText, jobDescription, 0.30, 0.60, 12, 25);
+    if (kw) { fields.keywords = kw.field; score -= kw.penalty; }
+
+    const ba = buildBulletAnalysis(sections, 50, 75, 5, 15);
+    fields.bulletAnalysis = ba.field; score -= ba.penalty;
+
+    return { platform: "Ashby", fields, overallScore: Math.max(0, score), fidelityFlags: flags, parserStrictness: "medium" };
+}
+
+
+// ── NAUKRI — India-specific ──────────────────────────────────
+/**
+ * Naukri serves the Indian job market. Checks Indian phone format and
+ * CGPA for freshers. Does NOT flag DOB or photo as failures
+ * (conventional in IN market — see Phase 6 region rules).
+ */
+export function simulateNaukri(
+    sections: RawParsedSections,
+    rawText: string,
+    fidelityOrJd?: ParseFidelityReport | string,
+    maybeJd?: string,
+): ATSSimulationResult {
+    const fidelity = (fidelityOrJd && typeof fidelityOrJd === 'object') ? fidelityOrJd as ParseFidelityReport : undefined;
+    const jobDescription = fidelity ? maybeJd : (fidelityOrJd as string | undefined);
+
+    const { flags, penalty: fidelityPenalty } = buildFidelityFlags(fidelity, 'medium', 'Naukri');
+    const C = extractContact(rawText);
+    const D = DEFAULT_CONFIG.atsSimulator.deductions.medium;
+    const fields: ATSSimulationResult["fields"] = {} as any;
+    let score = 100 - fidelityPenalty;
+
+    fields.name = C.hasClearName
+        ? { extracted: "Found", status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Place full name prominently at the top." };
+    if (!C.hasClearName) score -= 5;
+
+    fields.email = C.email
+        ? { extracted: C.email, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Email required for Naukri profile." };
+    if (!C.email) score -= D.missingContact;
+
+    // Indian phone format
+    if (C.indianPhone) {
+        fields.phone = { extracted: C.indianPhone, status: "success" };
+    } else if (C.phone) {
+        fields.phone = { extracted: C.phone, status: "warning", suggestion: "Use Indian format: +91 XXXXX XXXXX or 10-digit." };
+        score -= 3;
     } else {
-        fields.skills = { extracted: null, status: "warning", suggestion: "Naukri's skill-based search relies heavily on an explicit Skills section." };
+        fields.phone = { extracted: null, status: "dropped", suggestion: "No phone number found. Naukri requires a valid Indian mobile number." };
         score -= 10;
     }
 
-    // Resume length check (Naukri recommends max 2 pages ≈ 800 words)
-    const wordCount = rawText.split(/\s+/).length;
-    if (wordCount > 900) {
-        score -= 5;
-    }
+    fields.location = { extracted: "Parsed from Profile", status: "success" };
 
-    // Objective/Summary length check (Naukri warns > 3 lines ≈ 60 words)
-    if (sections.summary) {
-        const summaryWords = sections.summary.split(/\s+/).length;
-        if (summaryWords > 60) {
-            score -= 3;
+    fields.links = C.hasLinkedIn
+        ? { extracted: "LinkedIn detected", status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Add a LinkedIn URL to boost profile visibility on Naukri." };
+
+    // Experience
+    const hasExp = sectionDetected('experience', sections, fidelity);
+    fields.experience = hasExp
+        ? { extracted: `${sections.experience.length} role(s) found`, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "No experience section. Even freshers should list internships or projects." };
+    if (!hasExp) score -= D.missingSection;
+
+    // Education — CGPA check for freshers
+    const hasEdu = sectionDetected('education', sections, fidelity);
+    if (hasEdu) {
+        fields.education = { extracted: `${sections.education.length} degree(s) found`, status: "success" };
+        const isFresher = sections.experience.length <= 1;
+        if (isFresher && !/\b(cgpa|gpa|percentage|marks)\s*[:\s]?\s*\d/i.test(rawText)) {
+            fields.education.status = "warning";
+            fields.education.suggestion = "As a fresher, include CGPA/percentage — many Naukri recruiters filter by academic scores.";
+            score -= 5;
         }
-    }
-
-    // Keyword Match (if JD provided)
-    if (jobDescription && jobDescription.trim().length > 50) {
-        const lowerRes = rawText.toLowerCase();
-        const lowerJd = jobDescription.toLowerCase();
-        const expandedRes = expandSynonyms(lowerRes);
-
-        const jdSkills = GLOBAL_TECH_SKILLS.filter(kw => {
-            const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`(?:^|\\s[^a-z0-9]|\\b)${escaped}(?:[^a-z0-9]\\s|\\b|$)`, "i");
-            return regex.test(lowerJd);
-        });
-
-        if (jdSkills.length > 0) {
-            const matchedSkills = jdSkills.filter(kw => expandedRes.includes(kw));
-            const missingSkills = jdSkills.filter(kw => !expandedRes.includes(kw));
-            const matchRate = matchedSkills.length / jdSkills.length;
-
-            let keywordStatus: "success" | "warning" | "dropped" = "success";
-            let suggestion = "Strong keyword match for Naukri search visibility.";
-            let penalty = 0;
-
-            if (matchRate < 0.3) {
-                keywordStatus = "dropped";
-                suggestion = "Very low keyword match. Naukri search results are heavily keyword-driven.";
-                penalty = 20;
-            } else if (matchRate < 0.55) {
-                keywordStatus = "warning";
-                suggestion = "Average keyword match. Adding more JD-specific skills will improve Naukri search ranking.";
-                penalty = 8;
-            }
-
-            score -= penalty;
-            fields.keywords = {
-                extracted: `${Math.round(matchRate * 100)}% JD Keyword Match`,
-                status: keywordStatus,
-                suggestion,
-                matched: matchedSkills,
-                missing: missingSkills,
-                scorePoints: -penalty
-            };
-        }
-    }
-
-    // Bullet Analysis
-    const allBullets = sections.experience?.flatMap(exp => exp.bullets || []) || [];
-    if (allBullets.length > 0) {
-        const bulletData = analyzeAllBullets(allBullets);
-        let bStatus: "success" | "warning" | "dropped" = "success";
-        let bSuggestion = "Bullets demonstrate quantified impact.";
-
-        if (bulletData.overallScore < 50) {
-            bStatus = "dropped";
-            bSuggestion = "Bullets lack quantification and strong verbs. Indian recruiters on Naukri skim quickly — make every bullet count.";
-            score -= 10;
-        } else if (bulletData.overallScore < 75) {
-            bStatus = "warning";
-            bSuggestion = "Bullets could be more impactful with numbers and metrics.";
-            score -= 3;
-        }
-
-        fields.bulletAnalysis = {
-            extracted: `Analyzed ${allBullets.length} bullet points`,
-            status: bStatus,
-            overallScore: bulletData.overallScore,
-            suggestion: bSuggestion
-        };
+        // Indian university bonus
+        const knownUnis = ["iit","nit","iiit","bits","vit","srm","manipal","amity","delhi university","mumbai university","pune university","anna university","jadavpur","bhu","jnu","ism","iisc","isb","iim","osmania","hyderabad university","calcutta university"];
+        const eduText = sections.education.map((e: any) => (e.school || "").toLowerCase()).join(" ");
+        if (knownUnis.some(u => eduText.includes(u))) score = Math.min(100, score + 2);
     } else {
-        fields.bulletAnalysis = {
-            extracted: null,
-            status: "warning",
-            overallScore: 0,
-            suggestion: "No experience bullets to analyze."
-        };
+        fields.education = { extracted: null, status: "dropped", suggestion: "Education section missing — critical for Naukri profiles." };
+        score -= D.missingSection;
     }
 
-    return {
-        platform: "Naukri",
-        fields,
-        overallScore: Math.max(0, score)
-    };
+    const hasSkills = sectionDetected('skills', sections, fidelity);
+    const skillCount = sections.skills.reduce((a: number, g: any) => a + (g.items?.length ?? 0), 0);
+    fields.skills = hasSkills
+        ? { extracted: `${skillCount} skills mapped`, status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Naukri's skill-based search relies heavily on an explicit Skills section." };
+    if (!hasSkills) score -= 8;
+
+    // Resume length (Naukri recommends ≤ 2 pages ≈ 800 words)
+    if (rawText.split(/\s+/).length > 900) score -= 5;
+
+    // Summary length
+    if (sections.summary && sections.summary.split(/\s+/).length > 60) score -= 3;
+
+    const kw = buildKeywords(rawText, jobDescription, 0.30, 0.55, 8, 20);
+    if (kw) { fields.keywords = kw.field; score -= kw.penalty; }
+
+    const ba = buildBulletAnalysis(sections, 50, 75, 3, 10);
+    fields.bulletAnalysis = ba.field; score -= ba.penalty;
+
+    return { platform: "Naukri", fields, overallScore: Math.max(0, score), fidelityFlags: flags, parserStrictness: "medium" };
+}
+
+
+// ── LEGACY STRICT — Taleo / iCIMS class ─────────────────────
+/**
+ * Legacy parsers (Taleo, iCIMS) are where formatting genuinely kills
+ * resumes. Every fidelity flag is HIGH severity. Multi-column PDFs cause
+ * sections to be completely dropped. Non-standard headers fail silently.
+ */
+export function simulateLegacyStrict(
+    sections: RawParsedSections,
+    rawText: string,
+    fidelityOrJd?: ParseFidelityReport | string,
+    maybeJd?: string,
+): ATSSimulationResult {
+    const fidelity = (fidelityOrJd && typeof fidelityOrJd === 'object') ? fidelityOrJd as ParseFidelityReport : undefined;
+    const jobDescription = fidelity ? maybeJd : (fidelityOrJd as string | undefined);
+
+    const { flags, penalty: fidelityPenalty } = buildFidelityFlags(fidelity, 'strict', 'legacy Taleo/iCIMS parsers');
+    const C = extractContact(rawText);
+    const D = DEFAULT_CONFIG.atsSimulator.deductions.strict;
+    const fields: ATSSimulationResult["fields"] = {} as any;
+    let score = 100 - fidelityPenalty;
+
+    fields.name = C.hasClearName
+        ? { extracted: "Found", status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "Legacy parsers expect name as plain text on line 1." };
+    if (!C.hasClearName) score -= 15;
+
+    fields.email = C.email
+        ? { extracted: C.email, status: "success" }
+        : { extracted: null, status: "dropped", suggestion: "No email detected." };
+    if (!C.email) score -= D.missingContact;
+
+    fields.phone = C.phone
+        ? { extracted: C.phone, status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Use standard phone format." };
+    if (!C.phone) score -= 5;
+
+    fields.location = { extracted: "Parsed from Profile", status: "success" };
+
+    fields.links = C.hasUrl
+        ? { extracted: "URL detected", status: "success" }
+        : { extracted: null, status: "warning", suggestion: "Include plain-text URLs — legacy parsers cannot click hyperlinks." };
+
+    // Multi-column → all sections potentially scrambled
+    const multiColFail = fidelity && fidelity.multiColumnRisk === 'HIGH';
+    const imageFail    = fidelity && !fidelity.extractable;
+
+    const hasExp = !imageFail ? sectionDetected('experience', sections, fidelity) : false;
+
+    if (!hasExp) {
+        fields.experience = { extracted: null, status: "dropped",
+            suggestion: imageFail
+                ? "Image-only PDF — no text was extracted."
+                : "Experience section not found. Legacy parsers require exactly the header 'Experience'." };
+        score -= D.missingSection;
+    } else if (multiColFail) {
+        fields.experience = { extracted: null, status: "dropped",
+            suggestion: "Multi-column layout causes legacy parsers to scramble or drop the experience section." };
+        score -= D.missingSection;
+    } else {
+        fields.experience = { extracted: `${sections.experience.length} role(s) found`, status: "success" };
+    }
+
+    const hasEdu = !imageFail ? sectionDetected('education', sections, fidelity) : false;
+    fields.education = hasEdu && !multiColFail
+        ? { extracted: `${sections.education.length} degree(s) found`, status: "success" }
+        : { extracted: null, status: "dropped",
+            suggestion: multiColFail
+                ? "Multi-column layout may have dropped the Education section."
+                : "Education section not detected. Use header 'Education' exactly." };
+    if (!hasEdu || multiColFail) score -= D.missingSection;
+
+    const hasSkills = !imageFail ? sectionDetected('skills', sections, fidelity) : false;
+    const skillCount = sections.skills.reduce((a: number, g: any) => a + (g.items?.length ?? 0), 0);
+    fields.skills = hasSkills && !multiColFail
+        ? { extracted: `${skillCount} skills extracted`, status: "success" }
+        : { extracted: null, status: "dropped",
+            suggestion: multiColFail
+                ? "Multi-column layouts cause skills to be scattered across text — legacy parsers cannot reconstruct them."
+                : "Skills section not detected." };
+    if (!hasSkills || multiColFail) score -= 10;
+
+    const kw = buildKeywords(rawText, jobDescription, 0.30, 0.60, 15, 30);
+    if (kw) { fields.keywords = kw.field; score -= kw.penalty; }
+
+    const ba = buildBulletAnalysis(sections, 50, 75, 5, 15);
+    fields.bulletAnalysis = ba.field; score -= ba.penalty;
+
+    return { platform: "Legacy", fields, overallScore: Math.max(0, score), fidelityFlags: flags, parserStrictness: "strict" };
+}
+
+
+// ── Convenience: run all 6 platforms ────────────────────────
+
+export function simulateAll(
+    sections: RawParsedSections,
+    rawText: string,
+    fidelity?: ParseFidelityReport,
+    jobDescription?: string,
+): ATSSimulationResult[] {
+    return [
+        simulateGreenhouse(sections, rawText, fidelity, jobDescription),
+        simulateLever(sections, rawText, fidelity, jobDescription),
+        simulateWorkday(sections, rawText, fidelity, jobDescription),
+        simulateAshby(sections, rawText, fidelity, jobDescription),
+        simulateNaukri(sections, rawText, fidelity, jobDescription),
+        simulateLegacyStrict(sections, rawText, fidelity, jobDescription),
+    ];
 }
