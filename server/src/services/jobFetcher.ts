@@ -864,46 +864,41 @@ export async function searchJobs(filters: {
             "data-engineering": ["apache spark", "airflow", "kafka", "data pipeline", "snowflake", "databricks", "data engineer", "hadoop", "dbt"],
         };
 
-        let coreSkills: string[];
-        
-        if (filters.user_primary_domain && DOMAIN_SKILLS[filters.user_primary_domain]) {
-            // Use domain-specific skills for DB filtering (much more targeted)
-            const domainSkills = DOMAIN_SKILLS[filters.user_primary_domain];
-            // Only include domain skills that the user actually has
-            const userSkillsLower = filters.user_skills.map(s => s.toLowerCase().trim());
-            const matchedSkills = domainSkills.filter(ds => 
-                userSkillsLower.some(us => us.includes(ds) || ds.includes(us))
-            );
+        // Broad domain title terms — used to fetch wide set of relevant jobs by title
+        const domainTitleTerms: Record<string, string[]> = {
+            "data-science-ml":  ["data scientist", "machine learning", "ml engineer", "ai engineer", "deep learning", "nlp", "computer vision", "llm", "data analyst"],
+            "data-analytics":   ["data analyst", "business intelligence", "bi analyst", "analytics engineer", "power bi", "tableau"],
+            "frontend":         ["frontend", "front end", "react developer", "ui developer", "web developer", "angular developer", "vue developer"],
+            "backend":          ["backend", "back end", "software engineer", "sde", "api developer", "java developer", "python developer", "node developer", "full stack"],
+            "mobile":           ["android developer", "ios developer", "mobile developer", "flutter developer", "react native"],
+            "devops":           ["devops", "cloud engineer", "sre", "infrastructure engineer", "platform engineer", "kubernetes"],
+            "data-engineering": ["data engineer", "etl developer", "data pipeline"],
+            // Freshers: broad set so they see all tech jobs
+            "generic-fresher":  ["software engineer", "developer", "engineer trainee", "intern", "fresher", "junior developer", "sde", "full stack"],
+        };
 
-            // Broad terms to always match against titles to capture all actual roles in that domain
-            const domainTerms: Record<string, string[]> = {
-                "data-science-ml": ["data scientist", "machine learning", "ml engineer", "ai engineer", "deep learning", "nlp", "computer vision", "llm"],
-                "frontend": ["frontend", "front end", "react developer", "ui developer", "web developer"],
-                "backend": ["backend", "back end", "api developer", "software engineer", "sde", "java developer", "python developer"],
-                "fullstack": ["full stack", "fullstack", "software engineer", "sde"],
-                "devops": ["devops", "cloud engineer", "sre", "infrastructure", "platform engineer"],
-                "data-engineering": ["data engineer", "etl", "data pipeline"],
-            };
+        const userDom = filters.user_primary_domain || "";
+        const primaryTerms = domainTitleTerms[userDom] || [];
 
-            const primaryTerms = domainTerms[filters.user_primary_domain] || [];
-            
-            // Combine broad domain terms with user's specific matching tools/skills
-            coreSkills = Array.from(new Set([...primaryTerms, ...matchedSkills])).slice(0, 12);
-        } else {
-            // No domain detected — use top skills but exclude generic web/devops terms
-            const genericTerms = new Set(["html", "css", "git", "linux", "agile", "scrum", "sql", "c", "r", "docker", "ci/cd", "javascript", "react", "node"]);
-            coreSkills = filters.user_skills
-                .filter(s => s.length >= 3 && !genericTerms.has(s.toLowerCase().trim()))
-                .map(s => s.toLowerCase().trim())
-                .slice(0, 10);
+        // Top user skills for skills-array overlap filter (fetch jobs whose skills[] contains user's skills)
+        const topUserSkills = filters.user_skills
+            .filter(s => s.length >= 3)
+            .map(s => s.toLowerCase().trim())
+            .slice(0, 15);
+
+        const titleFilters = primaryTerms.map(t => `title.ilike.%${t}%`);
+
+        // Add skills array overlap: catches jobs like "Software Engineer" whose skills[] has python/react
+        const skillsOvFilter = topUserSkills.length > 0
+            ? `skills.ov.{${topUserSkills.join(",")}}`
+            : null;
+
+        const allDbFilters = [...titleFilters, ...(skillsOvFilter ? [skillsOvFilter] : [])];
+
+        if (allDbFilters.length > 0) {
+            q = q.or(allDbFilters.join(","));
         }
-        
-        if (coreSkills.length > 0) {
-            const skillFilters = coreSkills.flatMap(skill => [
-                `title.ilike.%${skill}%`
-            ]);
-            q = q.or(skillFilters.join(","));
-        }
+        // If no domain and no skills — no filter; fetch all active jobs (sorted by date)
     }
 
     const { data, error } = await q;
@@ -1124,11 +1119,11 @@ export async function searchJobs(filters: {
             return { ...job, match_score: matchScore };
         });
 
-        // Filter out jobs with very low match scores to remove truly irrelevant results
-        const minMatchThreshold = 20;
+        // Filter out only completely irrelevant results (very low threshold to keep volume up)
+        const minMatchThreshold = 5;
         const relevantJobs = jobs.filter(job => (job.match_score || 0) >= minMatchThreshold);
-        // Only apply filter if we still have enough results
-        if (relevantJobs.length >= 15) {
+        // Only apply filter if we still have plenty of results
+        if (relevantJobs.length >= 50) {
             jobs = relevantJobs;
         }
     }

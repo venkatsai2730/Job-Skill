@@ -59,7 +59,9 @@ router.get("/", async (req: AuthRequest, res: Response) => {
 
         const { query, location, skills, experience_max, limit, page, preferred_location, city, country, user_id, category } = req.query;
 
-        const parsedLimit = limit ? parseInt(limit as string) : (hasUser ? 200 : 40);
+        const parsedLimit = limit ? parseInt(limit as string) : (hasUser ? 300 : 40);
+        // For domain-aware split we need a much larger raw pool; pagination happens after split
+        const dbFetchLimit = (hasUser && !category) ? Math.max(parsedLimit, 1000) : parsedLimit;
         const parsedPage = page ? parseInt(page as string) : 1;
         const parsedExpMax = experience_max !== undefined && experience_max !== "" 
             ? parseInt(experience_max as string) 
@@ -199,7 +201,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             location: location as string,
             skills: skills ? (skills as string).split(",") : undefined,
             experience_max: parsedExpMax ?? userExperienceYears,
-            limit: parsedLimit,
+            limit: dbFetchLimit,
             page: parsedPage,
             preferred_location: preferred_location as string,
             city: city as string,
@@ -395,31 +397,28 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             scoredPrimary.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
             scoredCross.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
 
-            // Apply minimum relevance threshold to primary pool
-            let primaryThreshold = MIN_PRIMARY_RELEVANCE;
-            let primaryFiltered = scoredPrimary.filter(j => (j.relevance_score || 0) >= primaryThreshold);
-
-            // Relax threshold if not enough primary jobs
-            if (primaryFiltered.length < MIN_PRIMARY_JOBS && scoredPrimary.length > primaryFiltered.length) {
-                primaryThreshold = RELAXED_PRIMARY_RELEVANCE;
-                primaryFiltered = scoredPrimary.filter(j => (j.relevance_score || 0) >= primaryThreshold);
-                console.log(`[JobListings] Relaxed primary threshold to ${primaryThreshold} (${primaryFiltered.length} jobs)`);
-            }
-
-            // If still not enough, include ALL scored primary jobs
+            // Apply a very loose relevance floor just to drop truly irrelevant noise
+            const minFloor = 0.10;
+            let primaryFiltered = scoredPrimary.filter(j => (j.relevance_score || 0) >= minFloor);
+            // If floor cuts too much, include everything
             if (primaryFiltered.length < MIN_PRIMARY_JOBS) {
                 primaryFiltered = scoredPrimary;
             }
 
+            // Cap each pool so the API response stays reasonable
+            const MAX_PRIMARY = 200;
+            const MAX_CROSS   = 100;
+
             const responseData = {
-                primary_jobs: primaryFiltered,
-                cross_domain_jobs: scoredCross,
+                primary_jobs: primaryFiltered.slice(0, MAX_PRIMARY),
+                cross_domain_jobs: scoredCross.slice(0, MAX_CROSS),
                 meta: {
                     user_domain: userDomain,
                     user_domain_label: JOB_DOMAIN_LABELS[userDomain] || userDomain,
-                    total_primary: primaryFiltered.length,
-                    total_cross: scoredCross.length,
-                    relevance_threshold: primaryThreshold,
+                    total_primary: Math.min(primaryFiltered.length, MAX_PRIMARY),
+                    total_cross: Math.min(scoredCross.length, MAX_CROSS),
+                    total_primary_available: primaryFiltered.length,
+                    total_cross_available: scoredCross.length,
                     user_skills_count: userSkills.length,
                     related_domains: getRelatedDomains(userDomain).map(d => ({
                         domain: d,
