@@ -785,7 +785,7 @@ export async function searchJobs(filters: {
     user_seniority?: string;
     user_primary_domain?: string;
 }) {
-    const limit = Math.min(filters.limit || 40, 300);
+    const limit = Math.min(filters.limit || 40, 500);
     const page = filters.page || 1;
     const effectiveLocation = filters.location || filters.city || "";
 

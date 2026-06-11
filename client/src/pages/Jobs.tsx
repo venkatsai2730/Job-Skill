@@ -470,7 +470,7 @@ export default function Jobs() {
     setLoadingFeed(true);
     if (reset) setPage(1);
     try {
-      const defaultLimit = overrides?.category ? "60" : (getUserId() ? "200" : "40");
+      const defaultLimit = overrides?.category ? "60" : (getUserId() ? "300" : "40");
       const params = new URLSearchParams({ page: currentPage.toString(), limit: overrides?.limit || defaultLimit });
       const q = overrides?.query ?? search;
       const loc = overrides?.location ?? location;

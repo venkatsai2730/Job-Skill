@@ -144,9 +144,14 @@ describe("getRelatedDomains", () => {
         expect(related).toContain("backend");
     });
 
-    it("generic-fresher has no related domains (prevents cross-domain leakage)", () => {
+    it("generic-fresher includes all 6 tech domains (broadest primary pool)", () => {
         const related = getRelatedDomains("generic-fresher");
-        expect(related.length).toBe(0);
+        expect(related).toContain("backend");
+        expect(related).toContain("frontend");
+        expect(related).toContain("data-science-ml");
+        expect(related).toContain("data-analytics");
+        expect(related).toContain("mobile");
+        expect(related).toContain("devops");
     });
 });
 
