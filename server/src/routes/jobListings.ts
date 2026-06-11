@@ -19,7 +19,7 @@ import { authenticateToken, AuthRequest } from "../middleware/auth.js";
 // ── New domain-aware imports ─────────────────────────────────
 import {
     classifyJobDomain, isDomainMatch, getRelatedDomains,
-    JOB_DOMAIN_LABELS, type JobDomain, JOB_DOMAIN_VALUES,
+    JOB_DOMAIN_LABELS, type JobDomain, JOB_DOMAIN_VALUES, isTechTitle,
 } from "../services/jobDomainClassifier.js";
 import {
     computeRelevanceScore, computeSkillOverlap, computeTitleSimilarity,
@@ -316,6 +316,24 @@ router.get("/", async (req: AuthRequest, res: Response) => {
         if (user_id && userDomain) {
             const userCity = ((city || location || "") as string).toLowerCase();
             const userCountry = ((country || preferred_location || "") as string).toLowerCase();
+
+            // 1. Drop non-tech jobs that slipped in via skills-array overlap (e.g. HR, French student jobs)
+            let domainInputJobs = finalJobs.filter((j: any) => isTechTitle(j.title || ""));
+
+            // 2. Drop jobs from wrong countries — keep user's country + remote
+            //    (only apply when we have a meaningful country context)
+            if (userCountry.length >= 3) {
+                const countryFiltered = domainInputJobs.filter((j: any) => {
+                    const loc = (j.location || "").toLowerCase();
+                    return loc.includes(userCountry) ||
+                           loc.includes("remote") ||
+                           loc.includes("wfh") ||
+                           loc.includes("anywhere");
+                });
+                if (countryFiltered.length >= 20) {
+                    domainInputJobs = countryFiltered;
+                }
+            }
             const userExp = userExperienceYears || 0;
             const userSeniorityStr = userSeniority || (userExp <= 1 ? "intern" : userExp <= 3 ? "entry" : userExp <= 6 ? "mid" : "senior");
 
@@ -331,7 +349,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             const scoredPrimary: any[] = [];
             const scoredCross: any[] = [];
 
-            for (const job of finalJobs) {
+            for (const job of domainInputJobs) {
                 // Classify job domain (use stored value or compute on-the-fly)
                 const jobDomain: JobDomain = (
                     job.job_domain && JOB_DOMAIN_VALUES.includes(job.job_domain)

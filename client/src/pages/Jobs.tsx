@@ -387,6 +387,8 @@ export default function Jobs() {
   const [userDomainLabel, setUserDomainLabel] = useState<string | null>(null);
   const [showCrossDomain, setShowCrossDomain] = useState(true);
   const [hasDomainData, setHasDomainData] = useState(false);
+  const [primaryPage, setPrimaryPage] = useState(1);
+  const PRIMARY_PAGE_SIZE = 40;
 
   // ── Legacy state (anonymous / backward compat) ──
   const [feedJobs, setFeedJobs] = useState<JobListing[]>([]);
@@ -500,6 +502,7 @@ export default function Jobs() {
       if (isDomainAwareResponse(res)) {
         setPrimaryJobs(res.primary_jobs || []);
         setCrossDomainJobs(res.cross_domain_jobs || []);
+        setPrimaryPage(1);
         setUserDomain(res.meta.user_domain);
         setUserDomainLabel(res.meta.user_domain_label);
         setHasDomainData(true);
@@ -743,20 +746,68 @@ export default function Jobs() {
                     <h2 className="text-xl font-bold text-foreground">{primarySectionTitle}</h2>
                     <p className="text-gray-500 text-[13px] mt-0.5">
                       {primaryJobs.length > 0
-                        ? `${primaryJobs.length} jobs matching your ${userDomainLabel || "domain"} profile`
+                        ? `${primaryJobs.length} jobs matching your ${userDomainLabel || "domain"} profile — page ${primaryPage} of ${Math.ceil(primaryJobs.length / PRIMARY_PAGE_SIZE)}`
                         : `No strong matches in ${userDomainLabel || "your domain"} yet`
                       }
                     </p>
                   </div>
                 </div>
 
-                {primaryJobs.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {primaryJobs.map((job) => (
-                      <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} userDomain={userDomain || undefined} userDomainLabel={userDomainLabel || undefined} />
-                    ))}
-                  </div>
-                ) : (
+                {primaryJobs.length > 0 ? (() => {
+                  const totalPrimaryPages = Math.ceil(primaryJobs.length / PRIMARY_PAGE_SIZE);
+                  const displayedPrimary = primaryJobs.slice((primaryPage - 1) * PRIMARY_PAGE_SIZE, primaryPage * PRIMARY_PAGE_SIZE);
+                  return (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {displayedPrimary.map((job) => (
+                          <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} userDomain={userDomain || undefined} userDomainLabel={userDomainLabel || undefined} />
+                        ))}
+                      </div>
+                      {totalPrimaryPages > 1 && (
+                        <div className="flex justify-center items-center gap-2 mt-10 mb-2">
+                          <button
+                            onClick={() => { setPrimaryPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                            disabled={primaryPage === 1}
+                            className="px-4 py-2 rounded-lg bg-gray-50 border border-border text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >Previous</button>
+                          <div className="flex items-center gap-1.5">
+                            {(() => {
+                              const pages: number[] = [];
+                              if (totalPrimaryPages <= 7) {
+                                for (let i = 1; i <= totalPrimaryPages; i++) pages.push(i);
+                              } else if (primaryPage <= 4) {
+                                pages.push(1,2,3,4,5,-1,totalPrimaryPages);
+                              } else if (primaryPage >= totalPrimaryPages - 3) {
+                                pages.push(1,-1,totalPrimaryPages-4,totalPrimaryPages-3,totalPrimaryPages-2,totalPrimaryPages-1,totalPrimaryPages);
+                              } else {
+                                pages.push(1,-1,primaryPage-1,primaryPage,primaryPage+1,-2,totalPrimaryPages);
+                              }
+                              return pages.map((p, i) =>
+                                p < 0 ? (
+                                  <span key={`ellipsis-${i}`} className="w-9 h-9 flex items-center justify-center text-gray-400 text-sm">…</span>
+                                ) : (
+                                  <button
+                                    key={p}
+                                    onClick={() => { setPrimaryPage(p); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                                    className={`w-9 h-9 rounded-lg flex items-center justify-center text-[13px] font-bold transition-all ${primaryPage === p ? "bg-blue-500 text-white shadow-md shadow-blue-500/20" : "bg-gray-50 border border-border text-gray-600 hover:bg-blue-50 hover:text-blue-500"}`}
+                                  >{p}</button>
+                                )
+                              );
+                            })()}
+                          </div>
+                          <button
+                            onClick={() => { setPrimaryPage(p => Math.min(totalPrimaryPages, p + 1)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                            disabled={primaryPage === totalPrimaryPages}
+                            className="px-4 py-2 rounded-lg bg-gray-50 border border-border text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >Next</button>
+                        </div>
+                      )}
+                      <p className="text-center text-gray-400 text-[12px] mt-2">
+                        Showing {(primaryPage - 1) * PRIMARY_PAGE_SIZE + 1}–{Math.min(primaryPage * PRIMARY_PAGE_SIZE, primaryJobs.length)} of {primaryJobs.length} jobs
+                      </p>
+                    </>
+                  );
+                })() : (
                   <div className="bg-gradient-to-r from-blue-500/5 to-purple-500/5 border border-blue-200/30 rounded-2xl p-8 text-center">
                     <div className="text-3xl mb-3">🔍</div>
                     <h3 className="text-lg font-semibold text-gray-800 mb-2">
