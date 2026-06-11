@@ -8,6 +8,8 @@ import { computeBaseScore } from './scorer/base-score.js';
 import { detectAllPenalties, PenaltyResult } from './scorer/penalties.js';
 import { sectionsToResume } from './scorer/helpers.js';
 import type { ParsedResume } from './scorer/helpers.js';
+import { DEFAULT_CONFIG, type ScoringConfig } from './scorer/scoring-config.js';
+import { analyzeParseFidelity, type ParseFidelityReport } from './scorer/parse-fidelity.js';
 
 // ── Re-export ParsedSections for backward compatibility ─────
 export interface ParsedSections {
@@ -65,6 +67,10 @@ export interface AdvancedATSResult {
     top_issues: TopIssueCategory[];
     completed_checks: CompletedCheck[];
     next_steps: { action: string; score_gain: string }[];
+    /** Penalties detected but zeroed out by exclusion groups — UI may surface these as lower-priority hints */
+    suppressedIssues?: PenaltyResult[];
+    /** Phase 2: parse-fidelity analysis — PDF structure issues that hurt ATS compatibility */
+    parseFidelity?: ParseFidelityReport;
 }
 
 
@@ -94,27 +100,33 @@ export function computeAdvancedATS(
     sections: ParsedSections,
     rawText: string,
     userId?: string,
-    metadata?: { fileSizeMB?: number; isPdf?: boolean; fileName?: string }
+    metadata?: { fileSizeMB?: number; isPdf?: boolean; fileName?: string },
+    config: ScoringConfig = DEFAULT_CONFIG,
 ): AdvancedATSResult {
+    const G = config.grades;
     const level = detectLevel(sections);
     const resume = sectionsToResume(sections, rawText, metadata);
 
+    // ── PHASE 2: Parse-Fidelity ──────────────────────────────
+    const parseFidelity = analyzeParseFidelity(rawText, metadata, config);
+
     // ── PHASE 1: Base Score ──────────────────────────────────
-    const baseScore = computeBaseScore(resume);
+    const baseScore = computeBaseScore(resume, config, parseFidelity);
 
     // ── PHASE 2: Penalty Deductions ─────────────────────────
-    const allPenalties = detectAllPenalties(resume);
-    const triggered    = allPenalties.filter(p => p.triggered);
+    const allPenalties = detectAllPenalties(resume, config);
+    const triggered    = allPenalties.filter(p => p.triggered && !p.suppressed);
     const totalPenalty = triggered.reduce((s, p) => s + p.deduction, 0);
 
     // THE ONLY ALLOWED FLOOR
-    const finalScore = Math.max(3, Math.round(baseScore - totalPenalty));
+    const finalScore = Math.max(config.scoreFloor, Math.round(baseScore - totalPenalty));
 
     console.log('[AdvancedATS]', {
         baseScore,
         totalPenalty: Math.round(totalPenalty * 10) / 10,
         finalScore,
         triggeredPenalties: triggered.map(p => `${p.id}(-${p.deduction})`).join(', '),
+        suppressed: allPenalties.filter(p => p.suppressed).map(p => p.id).join(', '),
         expRawLen: resume.sections.experience?.raw?.length ?? 0,
         projRawLen: resume.sections.projects?.raw?.length ?? 0,
         skillsRawLen: resume.sections.skills?.raw?.length ?? 0,
@@ -127,17 +139,17 @@ export function computeAdvancedATS(
 
     // ── Grade ────────────────────────────────────────────────
     const grade =
-        finalScore >= 88 ? 'A+' : finalScore >= 78 ? 'A'  :
-        finalScore >= 68 ? 'B+' : finalScore >= 58 ? 'B'  :
-        finalScore >= 45 ? 'C+' : finalScore >= 32 ? 'C'  :
-        finalScore >= 20 ? 'D'  : 'F';
+        finalScore >= G.Aplus  ? 'A+' : finalScore >= G.A     ? 'A'  :
+        finalScore >= G.Bplus  ? 'B+' : finalScore >= G.B     ? 'B'  :
+        finalScore >= G.Cplus  ? 'C+' : finalScore >= G.C     ? 'C'  :
+        finalScore >= G.D      ? 'D'  : 'F';
 
     // ── Percentile ───────────────────────────────────────────
     const percentile =
-        finalScore >= 88 ? 'Top 5%'     : finalScore >= 78 ? 'Top 15%'    :
-        finalScore >= 68 ? 'Top 30%'    : finalScore >= 58 ? 'Top 45%'    :
-        finalScore >= 45 ? 'Top 55%'    : finalScore >= 32 ? 'Bottom 40%' :
-        finalScore >= 20 ? 'Bottom 20%' : 'Bottom 10%';
+        finalScore >= G.Aplus  ? 'Top 5%'      : finalScore >= G.A    ? 'Top 15%'    :
+        finalScore >= G.Bplus  ? 'Top 30%'     : finalScore >= G.B    ? 'Top 45%'    :
+        finalScore >= G.Cplus  ? 'Top 55%'     : finalScore >= G.C    ? 'Bottom 40%' :
+        finalScore >= G.D      ? 'Bottom 20%'  : 'Bottom 10%';
 
     const CATEGORY_MAP: Record<string, string> = {
         duplicate_metrics:  "Repetition",
@@ -153,7 +165,6 @@ export function computeAdvancedATS(
         no_summary:         "Profile Summary",
         full_zero_quant:    "Quantified Impact",
         vague_achievement:  "Achievements",
-        // New penalties
         short_bullets:      "Bullet Detail",
         long_bullets:       "Bullet Length",
         weak_verbs:         "Action Verbs",
@@ -164,17 +175,16 @@ export function computeAdvancedATS(
         excessive_skills:   "Skills Section",
     };
 
-    const mappedIssues = triggered.map(p => {
-        // Estimate sub-issue count by looking at deduction vs base weight, or fallback to 1
-        return {
-            category: CATEGORY_MAP[p.id] || "Other Issues",
-            penalty_key: p.id,
-            count: p.id === 'vague_outcomes' || p.id === 'typos' ? Math.max(1, Math.round(p.deduction / (p.id === 'vague_outcomes' ? 1.2 : 2.5))) : 1,
-            point_gain: p.deduction,
-            is_locked: false,
-            sub_issues: [{ text: p.fix, gain: p.deduction }]
-        };
-    }).sort((a, b) => b.point_gain - a.point_gain);
+    const mappedIssues = triggered.map(p => ({
+        category: CATEGORY_MAP[p.id] || "Other Issues",
+        penalty_key: p.id,
+        count: p.id === 'vague_outcomes' || p.id === 'typos'
+            ? Math.max(1, Math.round(p.deduction / (p.id === 'vague_outcomes' ? 1.2 : 2.5)))
+            : 1,
+        point_gain: p.deduction,
+        is_locked: false,
+        sub_issues: [{ text: p.fix, gain: p.deduction }]
+    })).sort((a, b) => b.point_gain - a.point_gain);
 
     const topIssuesMapped = mappedIssues.map((issue, idx) => ({
         ...issue,
@@ -182,22 +192,22 @@ export function computeAdvancedATS(
     }));
 
     const COMPLETED_MAP: Record<string, { name: string, pts: number }> = {
-        personal_details:  { name: "No Personal Details", pts: 9 },
-        full_zero_quant:   { name: "Quantified Impact", pts: 19.3 },
-        no_github:         { name: "GitHub Profile Linked", pts: 3.5 },
-        duplicate_metrics: { name: "No Repeated Metrics", pts: 14 },
-        trivial_projects:  { name: "Strong Projects", pts: 5.5 },
-        filler_objective:  { name: "No Filler Language", pts: 6.5 },
-        hobbies_section:   { name: "No Irrelevant Sections", pts: 3.0 },
-        no_summary:        { name: "Summary Section Present", pts: 8.0 },
-        short_bullets:     { name: "Detailed Bullets", pts: 4.0 },
-        long_bullets:      { name: "Concise Bullets", pts: 3.0 },
-        weak_verbs:        { name: "Strong Action Verbs", pts: 3.5 },
-        no_linkedin:       { name: "LinkedIn Profile Linked", pts: 2.5 },
-        repetitive_language: { name: "Varied Language", pts: 4.0 },
-        missing_dates:     { name: "Dates Present", pts: 3.0 },
-        too_few_bullets:   { name: "Sufficient Detail", pts: 5.0 },
-        excessive_skills:  { name: "Focused Skills List", pts: 2.5 },
+        personal_details:  { name: "No Personal Details", pts: config.penalties.personal_details },
+        full_zero_quant:   { name: "Quantified Impact", pts: config.penalties.full_zero_quant },
+        no_github:         { name: "GitHub Profile Linked", pts: config.penalties.no_github },
+        duplicate_metrics: { name: "No Repeated Metrics", pts: config.penalties.duplicate_metrics },
+        trivial_projects:  { name: "Strong Projects", pts: config.penalties.trivial_projects },
+        filler_objective:  { name: "No Filler Language", pts: config.penalties.filler_objective },
+        hobbies_section:   { name: "No Irrelevant Sections", pts: config.penalties.hobbies_section },
+        no_summary:        { name: "Summary Section Present", pts: config.penalties.no_summary },
+        short_bullets:     { name: "Detailed Bullets", pts: config.penalties.short_bullets },
+        long_bullets:      { name: "Concise Bullets", pts: config.penalties.long_bullets },
+        weak_verbs:        { name: "Strong Action Verbs", pts: config.penalties.weak_verbs },
+        no_linkedin:       { name: "LinkedIn Profile Linked", pts: config.penalties.no_linkedin },
+        repetitive_language: { name: "Varied Language", pts: config.penalties.repetitive_language },
+        missing_dates:     { name: "Dates Present", pts: config.penalties.missing_dates },
+        too_few_bullets:   { name: "Sufficient Detail", pts: config.penalties.too_few_bullets },
+        excessive_skills:  { name: "Focused Skills List", pts: config.penalties.excessive_skills },
     };
 
     const completedChecks: CompletedCheck[] = [];
@@ -213,7 +223,7 @@ export function computeAdvancedATS(
     // ── Convert penalties to legacy ATSIssue format ──────────
     const issues: ATSIssue[] = [];
     for (const p of allPenalties) {
-        if (p.triggered) {
+        if (p.triggered && !p.suppressed) {
             issues.push({
                 type: "warning",
                 text: `${p.fix} (${p.scoreGain} if fixed)`,
@@ -223,7 +233,6 @@ export function computeAdvancedATS(
         }
     }
 
-    // Add success items for non-triggered penalties
     for (const p of allPenalties) {
         if (!p.triggered) {
             const successTexts: Record<string, string> = {
@@ -250,16 +259,11 @@ export function computeAdvancedATS(
                 'excessive_skills': 'Skills list is focused and relevant.',
             };
             if (successTexts[p.id]) {
-                issues.push({
-                    type: "success",
-                    text: successTexts[p.id],
-                    category: "ATS",
-                });
+                issues.push({ type: "success", text: successTexts[p.id], category: "ATS" });
             }
         }
     }
 
-    // Sort: warnings first
     issues.sort((a, b) => {
         if (a.type === 'warning' && b.type === 'success') return -1;
         if (a.type === 'success' && b.type === 'warning') return 1;
@@ -273,16 +277,16 @@ export function computeAdvancedATS(
 
     // ── ATS Risk ────────────────────────────────────────────
     const atsRisk: "LOW" | "MEDIUM" | "HIGH" =
-        finalScore < 45 ? 'HIGH' : finalScore < 65 ? 'MEDIUM' : 'LOW';
+        finalScore < config.atsRisk.high   ? 'HIGH'   :
+        finalScore < config.atsRisk.medium ? 'MEDIUM' : 'LOW';
 
     // ── Label ───────────────────────────────────────────────
     let label = "Needs Work";
-    if (finalScore >= 85) label = "Excellent";
-    else if (finalScore >= 70) label = "Good";
-    else if (finalScore >= 50) label = "Fair";
+    if      (finalScore >= config.labels.excellent) label = "Excellent";
+    else if (finalScore >= config.labels.good)      label = "Good";
+    else if (finalScore >= config.labels.fair)      label = "Fair";
 
     // ── Breakdown (approximate from base score components) ──
-    // We distribute the final score proportionally for UI display
     const totalBase = Math.max(1, baseScore);
     const ratio = finalScore / totalBase;
 
@@ -322,5 +326,7 @@ export function computeAdvancedATS(
             action:     p.sub_issues[0].text.split('\n')[0],
             score_gain: `+${p.point_gain} pts`,
         })),
+        suppressedIssues: allPenalties.filter(p => p.suppressed === true),
+        parseFidelity,
     };
 }

@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Golden file — score parity before and after Phase 1 refactor > Resume A (fresher, trivial projects, filler summary) score is stable 1`] = `12`;
+
+exports[`Golden file — score parity before and after Phase 1 refactor > Resume A (fresher, trivial projects, filler summary) score is stable 2`] = `"F"`;
+
+exports[`Golden file — score parity before and after Phase 1 refactor > Resume A (fresher, trivial projects, filler summary) score is stable 3`] = `31.3`;
+
+exports[`Golden file — score parity before and after Phase 1 refactor > Resume B (junior dev, partial numbers, weak verbs) score is stable 1`] = `62`;
+
+exports[`Golden file — score parity before and after Phase 1 refactor > Resume B (junior dev, partial numbers, weak verbs) score is stable 2`] = `"B"`;
+
+exports[`Golden file — score parity before and after Phase 1 refactor > Resume B (junior dev, partial numbers, weak verbs) score is stable 3`] = `2.5`;
+
+exports[`Golden file — score parity before and after Phase 1 refactor > Resume C (strong resume, quantified, IIT) score is stable 1`] = `74`;
+
+exports[`Golden file — score parity before and after Phase 1 refactor > Resume C (strong resume, quantified, IIT) score is stable 2`] = `"B+"`;
+
+exports[`Golden file — score parity before and after Phase 1 refactor > Resume C (strong resume, quantified, IIT) score is stable 3`] = `0`;
