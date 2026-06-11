@@ -784,6 +784,7 @@ export async function searchJobs(filters: {
     user_experience_years?: number;
     user_seniority?: string;
     user_primary_domain?: string;
+    bypassLocationFilter?: boolean; // set true for domain-aware users; location handled in-memory
 }) {
     const limit = Math.min(filters.limit || 40, 500);
     const page = filters.page || 1;
@@ -803,7 +804,11 @@ export async function searchJobs(filters: {
         q = q.or(`title.ilike.%${filters.query}%,company.ilike.%${filters.query}%,description.ilike.%${filters.query}%`);
     }
 
-    if (effectiveLocation) {
+    // For domain-aware logged-in users, skip the hard DB location filter.
+    // Location ranking is handled in-memory by computeLocationMatch() in the relevance scorer,
+    // so nearby jobs still appear first. Without this bypass, city detection (e.g. "Hyderabad")
+    // would restrict the raw DB pool to only ~30 jobs tagged with that city, starving domain-split.
+    if (effectiveLocation && !filters.bypassLocationFilter) {
         let loc = effectiveLocation.trim().toLowerCase();
         
         // Fix common misspellings

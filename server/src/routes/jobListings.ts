@@ -202,6 +202,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             skills: skills ? (skills as string).split(",") : undefined,
             experience_max: parsedExpMax ?? userExperienceYears,
             limit: dbFetchLimit,
+            bypassLocationFilter: !!userDomain,  // domain-aware users: location scored in-memory
             page: parsedPage,
             preferred_location: preferred_location as string,
             city: city as string,
@@ -317,12 +318,16 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             const userCity = ((city || location || "") as string).toLowerCase();
             const userCountry = ((country || preferred_location || "") as string).toLowerCase();
 
-            // Drop non-tech jobs (e.g. HR, admin, sales) — only tech titles enter the domain split.
-            // Country filtering is intentionally not applied here because many Indian jobs are stored
-            // as "Hyderabad, Telangana" (no "India" suffix) — a strict country check drops them.
-            // Location is already handled by the DB sort (city proximity first) and the relevance
-            // scorer's locationMatch signal.
-            let domainInputJobs = finalJobs.filter((j: any) => isTechTitle(j.title || ""));
+            // Remove clearly non-tech jobs that slipped in (e.g. telecallers, hospitality, delivery).
+            // We do NOT use the full isTechTitle() check here because it rejects legitimate roles
+            // with ambiguous titles ("Solution Architect", "Team Lead", "Intern") that don't contain
+            // explicit tech keywords. Instead we only block confirmed non-tech keyword patterns.
+            const OBVIOUS_NON_TECH = /\b(telecaller|telecalling|bpo\s*exec|call\s*center|fundraising|real\s*estate\s*agent|chef|cook|driver|delivery\s*(boy|exec|partner)|rider|warehouse|logistics\s*exec|hospital\s*staff|nurse|nursing|doctor|dentist|physiotherap|accountant|ca\s*article|chartered\s*account|content\s*writ(?!er.*tech)|fashion\s*design|textile|apparel|insurance\s*agent|loan\s*officer|mortgage|telecall)\b/i;
+            let domainInputJobs = finalJobs.filter((j: any) => {
+                const title = (j.title || "").trim();
+                if (!title) return false;               // drop blank-title rows
+                return !OBVIOUS_NON_TECH.test(title);   // keep everything that isn't clearly non-tech
+            });
             const userExp = userExperienceYears || 0;
             const userSeniorityStr = userSeniority || (userExp <= 1 ? "intern" : userExp <= 3 ? "entry" : userExp <= 6 ? "mid" : "senior");
 
@@ -426,6 +431,9 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                     total_cross: Math.min(scoredCross.length, MAX_CROSS),
                     total_primary_available: primaryFiltered.length,
                     total_cross_available: scoredCross.length,
+                    debug_db_fetched: allJobs.length,
+                    debug_after_rank: finalJobs.length,
+                    debug_after_tech_filter: domainInputJobs.length,
                     user_skills_count: userSkills.length,
                     related_domains: getRelatedDomains(userDomain).map(d => ({
                         domain: d,
