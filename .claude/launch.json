@@ -2,14 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "client",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev:client"],
-      "port": 5173,
-      "autoPort": false
-    },
-    {
-      "name": "server",
+      "name": "jobskill-app",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:server"],
       "port": 3001,
