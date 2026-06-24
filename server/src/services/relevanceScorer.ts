@@ -23,13 +23,13 @@ export const RELEVANCE_WEIGHTS = {
 
 // ── Thresholds ───────────────────────────────────────────────
 /** Minimum relevance score for a job to enter the primary pool */
-export const MIN_PRIMARY_RELEVANCE = 0.40;
+export const MIN_PRIMARY_RELEVANCE = 0.20;
 
 /** Relaxed threshold when the primary pool has fewer than MIN_PRIMARY_JOBS */
-export const RELAXED_PRIMARY_RELEVANCE = 0.25;
+export const RELAXED_PRIMARY_RELEVANCE = 0.10;
 
 /** If primary pool has fewer jobs than this, relax the threshold */
-export const MIN_PRIMARY_JOBS = 20;
+export const MIN_PRIMARY_JOBS = 50;
 
 // ── Input types ──────────────────────────────────────────────
 export interface RelevanceSignals {

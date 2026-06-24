@@ -46,11 +46,30 @@ export function ModernTemplate({ sections, id }: Props) {
         )}
 
         {/* Contact */}
-        {(sections.email || sections.phone || sections.location) && (
+        {(sections.email || sections.phone || sections.location || sections.links?.linkedin || sections.links?.github || sections.links?.portfolio) && (
           <SideSection title="Contact">
-            {sections.email && <SideItem>{sections.email}</SideItem>}
             {sections.phone && <SideItem>{sections.phone}</SideItem>}
+            {sections.email && (
+              <SideItem>
+                <a href={`mailto:${sections.email}`} style={{ color: "#cbd5e1", textDecoration: "none" }}>{sections.email}</a>
+              </SideItem>
+            )}
             {sections.location && <SideItem>{sections.location}</SideItem>}
+            {sections.links?.linkedin && (
+              <SideItem>
+                <a href={sections.links.linkedin} target="_blank" rel="noopener noreferrer" style={{ color: "#93c5fd", textDecoration: "underline" }}>LinkedIn</a>
+              </SideItem>
+            )}
+            {sections.links?.github && (
+              <SideItem>
+                <a href={sections.links.github} target="_blank" rel="noopener noreferrer" style={{ color: "#93c5fd", textDecoration: "underline" }}>GitHub</a>
+              </SideItem>
+            )}
+            {sections.links?.portfolio && (
+              <SideItem>
+                <a href={sections.links.portfolio} target="_blank" rel="noopener noreferrer" style={{ color: "#93c5fd", textDecoration: "underline" }}>Portfolio</a>
+              </SideItem>
+            )}
           </SideSection>
         )}
 
@@ -149,7 +168,9 @@ export function ModernTemplate({ sections, id }: Props) {
             {sections.projects.map((proj) => (
               <div key={proj.id} style={{ marginBottom: "12px" }}>
                 <div style={{ fontWeight: "700", fontSize: "10.5pt", color: "#111" }}>
-                  {proj.name}
+                  {proj.url ? (
+                    <a href={proj.url} target="_blank" rel="noopener noreferrer" style={{ color: "#111", textDecoration: "underline" }}>{proj.name}</a>
+                  ) : proj.name}
                   {proj.tech.length > 0 && (
                     <span style={{ fontWeight: "400", fontSize: "9pt", color: "#555", marginLeft: "8px" }}>
                       [{proj.tech.join(", ")}]
