@@ -25,12 +25,14 @@ import { SkillsEditor } from "@/features/resume/components/SectionEditors/Skills
 import { ProjectsEditor } from "@/features/resume/components/SectionEditors/ProjectsEditor";
 import type { ParsedData, ResumeTemplate } from "@/features/resume/types/resume.types";
 import type { ResumeAction } from "@/features/resume/types/patch.types";
+import type { AriaEdit, ResumePatch } from "@/lib/resumeTypes";
 
 const PDF_PREVIEW_ID = "resume-pdf-capture";
 
 const TEMPLATES: { id: ResumeTemplate; label: string }[] = [
-  { id: "classic", label: "Classic" },
+  { id: "professional", label: "Professional" },
   { id: "modern", label: "Modern" },
+  { id: "classic", label: "Classic" },
   { id: "minimal", label: "Minimal" },
 ];
 
@@ -81,6 +83,7 @@ const Resume = () => {
   const [activeSection, setActiveSection] = useState("Summary");
   const [showVersions, setShowVersions] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [reparsing, setReparsing] = useState(false);
 
   const hasParsed =
     store.sections.summary !== "" ||
@@ -203,6 +206,24 @@ const Resume = () => {
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : "Delete failed."); }
   };
 
+  // ── Re-parse stored PDF text with improved parser ────────
+  const handleReparse = async () => {
+    setReparsing(true);
+    try {
+      const d = await api.post<{ parsed: ParsedData | null }>("/api/resume/reparse", {});
+      if (d.parsed) {
+        store.setSections(d.parsed.sections, d.parsed.ats, d.parsed.versions);
+        setHasAIEdits(true);
+        setViewMode("preview");
+        toast.success("Resume re-scanned with improved parser ✦");
+      }
+    } catch {
+      toast.error("Re-scan failed. Try re-uploading the PDF.");
+    } finally {
+      setReparsing(false);
+    }
+  };
+
   // ── Downloads ────────────────────────────────────────────
   const handleDownloadPDF = async () => {
     try {
@@ -211,8 +232,24 @@ const Resume = () => {
         // No AI edits yet — download the original uploaded PDF
         await api.downloadBlob("/api/resume/download/pdf", name);
       } else {
-        // AI has edited the resume — export the live React preview
-        await exportPDF(PDF_PREVIEW_ID, name);
+        // AI has edited the resume — compile via LaTeX for a PDF with embedded hyperlinks
+        await api.downloadBlob(
+          "/api/resume/download/pdf-latex",
+          name,
+          "POST",
+          {
+            sections: store.sections,
+            templateId: store.template || "classic-academic",
+            userInfo: {
+              name: store.sections.name,
+              phone: store.sections.phone,
+              email: store.sections.email,
+              linkedin: store.sections.links?.linkedin || "",
+              github: store.sections.links?.github || "",
+              portfolio: store.sections.links?.portfolio || "",
+            },
+          }
+        );
       }
       toast.success("PDF downloaded ✦");
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : "PDF export failed."); }
@@ -255,6 +292,68 @@ const Resume = () => {
     await submitAIEditRaw(prompt);
     setHasAIEdits(true); // switch from original PDF iframe to live React preview
   }, [submitAIEditRaw]);
+
+  // ── Apply AriaEdit from chat toggle directly to store sections ──
+  const handleAriaEdit = useCallback((edit: AriaEdit) => {
+    const s = store.sections;
+    const next = { ...s, experience: [...s.experience], skills: [...s.skills], projects: [...s.projects] };
+
+    for (const change of edit.changes) {
+      switch (change.section) {
+        case "summary":
+          if (change.new_summary !== undefined) next.summary = change.new_summary;
+          break;
+        case "skills":
+          if (change.new_skills) {
+            next.skills = next.skills.length > 0
+              ? next.skills.map((g, i) => i === 0 ? { ...g, items: change.new_skills! } : g)
+              : [{ category: "Skills", items: change.new_skills }];
+          }
+          break;
+        case "experience": {
+          let idx = change.entry_name
+            ? s.experience.findIndex(e =>
+                (e.company || "").toLowerCase().includes(change.entry_name!.toLowerCase()) ||
+                (e.title || "").toLowerCase().includes(change.entry_name!.toLowerCase()))
+            : -1;
+          if (idx === -1) idx = change.entry_index ?? 0;
+          if (idx >= 0 && idx < next.experience.length && change.new_bullets) {
+            next.experience = next.experience.map((e, i) =>
+              i === idx ? { ...e, bullets: change.new_bullets! } : e
+            );
+          }
+          break;
+        }
+        case "projects": {
+          let idx = change.entry_name
+            ? s.projects.findIndex(p =>
+                (p.name || "").toLowerCase().includes(change.entry_name!.toLowerCase()))
+            : -1;
+          if (idx === -1) idx = change.entry_index ?? 0;
+          if (idx === -1 && next.projects.length > 0) idx = 0;
+          if (idx >= 0 && idx < next.projects.length) {
+            next.projects = next.projects.map((p, i) =>
+              i === idx ? {
+                ...p,
+                ...(change.new_bullets    && { bullets: change.new_bullets }),
+                ...(change.new_description && { description: change.new_description }),
+              } : p
+            );
+          }
+          break;
+        }
+      }
+    }
+
+    store.setSections(next, store.ats ?? undefined);
+    setHasAIEdits(true);
+    setViewMode("preview");
+  }, [store]);
+
+  // ── Legacy ResumePatch — proxy through the reliable ai-edit endpoint ──
+  const handleResumePatch = useCallback((patch: ResumePatch) => {
+    submitAIEdit(`Apply these changes: ${patch.explanation}`);
+  }, [submitAIEdit]);
 
   // ── Derived ATS values ───────────────────────────────────
   const ats = store.ats;
@@ -321,9 +420,18 @@ const Resume = () => {
           </nav>
         )}
 
-        {/* Template picker — only after AI edits */}
-        {hasAIEdits && (
-          <div className="mt-4">
+        {/* Re-scan button — visible when a file is loaded */}
+        {resumeFile && (
+          <button type="button" onClick={handleReparse} disabled={reparsing}
+            className="mt-3 w-full flex items-center justify-center gap-2 text-xs text-white-60 hover:text-foreground px-2 py-1.5 rounded-lg hover:bg-surface-2 transition-colors border border-border/40 disabled:opacity-40">
+            {reparsing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            Re-scan PDF
+          </button>
+        )}
+
+        {/* Template picker — always visible when a file is loaded */}
+        {resumeFile && (
+          <div className="mt-2">
             <button type="button" onClick={() => setShowTemplates((p) => !p)}
               className="w-full flex items-center gap-2 text-xs text-white-60 hover:text-foreground px-2 py-1.5 rounded-lg hover:bg-surface-2 transition-colors">
               <Palette className="w-3.5 h-3.5" />
@@ -614,8 +722,10 @@ const Resume = () => {
       {/* ── Floating AI chat bubble ──────────────────────── */}
       <ResumeChatbot
         hasParsedResume={hasParsed}
-        jobDescription=""
+        jobDescription={store.jobDescription}
         resumeData={hasParsed ? store.sections : null}
+        onAriaEdit={handleAriaEdit}
+        onResumePatch={handleResumePatch}
       />
     </div>
   );

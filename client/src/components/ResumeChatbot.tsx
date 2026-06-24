@@ -6,7 +6,7 @@ import {
     Wand2, Plus, Sparkles, Briefcase, GraduationCap,
     TrendingUp, ExternalLink, Copy, ChevronRight,
     Zap, BookOpen, MessageCircle, HelpCircle,
-    Trash2, MessageSquarePlus
+    Trash2, MessageSquarePlus, FileText
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -14,6 +14,7 @@ import { api } from "../lib/api";
 import { toast } from "sonner";
 import { DiffCard } from "./DiffCard";
 import type { ResumePatch, AriaEdit } from "@/lib/resumeTypes";
+import { useResumeStore } from "@/features/resume/store/resumeStore";
 
 // ── ErrorBoundary: prevents a single bad DiffCard from crashing the page ─────
 class DiffCardErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -87,12 +88,12 @@ const ACTION_TABS: { key: ActionTab; label: string; icon: React.ReactNode }[] = 
 
 const QUICK_ACTIONS: Record<ActionTab, { cmd: string; label: string; icon: React.ReactNode; needsResume: boolean }[]> = {
     resume: [
+        { cmd: "/latex", label: "Generate PDF", icon: <FileText className="w-3 h-3" />, needsResume: true },
+        { cmd: "/tailor", label: "Tailor to JD", icon: <Zap className="w-3 h-3" />, needsResume: true },
         { cmd: "/score", label: "ATS Score", icon: <Target className="w-3 h-3" />, needsResume: true },
         { cmd: "/fix", label: "Fix Bullets", icon: <Wand2 className="w-3 h-3" />, needsResume: true },
+        { cmd: "/improve", label: "Top Fixes", icon: <Sparkles className="w-3 h-3" />, needsResume: true },
         { cmd: "/create", label: "Create Bullets", icon: <Plus className="w-3 h-3" />, needsResume: false },
-        { cmd: "/improve", label: "Top Fixes", icon: <Zap className="w-3 h-3" />, needsResume: true },
-        { cmd: "/latex", label: "LaTeX PDF", icon: <Bot className="w-3 h-3" />, needsResume: true },
-        { cmd: "/draft", label: "Full Draft", icon: <BookOpen className="w-3 h-3" />, needsResume: true },
     ],
     jobs: [
         { cmd: "/jobs", label: "Find Jobs", icon: <Briefcase className="w-3 h-3" />, needsResume: false },
@@ -117,11 +118,12 @@ const QUICK_ACTIONS: Record<ActionTab, { cmd: string; label: string; icon: React
 
 // ── Professional Command Labels (shown instead of raw /create) ──
 const COMMAND_LABELS: Record<string, string> = {
+    "/tailor": "🎯 Tailoring resume to job description...",
     "/score": "📊 Analyzing ATS compatibility...",
     "/fix": "✨ Optimizing resume bullets...",
     "/create": "✍️ Creating new resume bullets...",
     "/improve": "⚡ Finding top improvements...",
-    "/latex": "📝 Generating LaTeX PDF...",
+    "/latex": "📝 Generating pixel-perfect PDF...",
     "/draft": "📄 Drafting full resume...",
     "/jobs": "🔍 Searching matching jobs...",
     "/match": "🎯 Matching against job description...",
@@ -301,10 +303,85 @@ function MarkdownContent({ content }: { content: string }) {
     );
 }
 
+// ── LaTeX result: pixel-perfect PDF preview + download + source ──
+function LatexResult({ latex, pdfBase64, compileError, onCopy }: {
+    latex: string;
+    pdfBase64?: string;
+    compileError?: string;
+    onCopy: (text: string) => void;
+}) {
+    const [showSource, setShowSource] = useState(false);
+
+    const downloadPdf = () => {
+        if (!pdfBase64) return;
+        const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "Resume.pdf";
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    return (
+        <div className="mt-3">
+            {pdfBase64 ? (
+                <>
+                    <div className="rounded-lg overflow-hidden border border-gray-300 shadow-sm bg-gray-100">
+                        <iframe
+                            title="Resume PDF preview"
+                            src={`data:application/pdf;base64,${pdfBase64}#toolbar=0&navpanes=0`}
+                            className="w-full"
+                            style={{ height: 420 }}
+                        />
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                        <button
+                            onClick={downloadPdf}
+                            className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            ⬇ Download PDF
+                        </button>
+                        <button
+                            onClick={() => setShowSource((s) => !s)}
+                            className="px-3 py-2 bg-white border border-gray-300 text-gray-600 rounded-lg text-[11px] font-medium hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            {showSource ? "Hide" : "View"} LaTeX
+                        </button>
+                    </div>
+                </>
+            ) : (
+                <p className="text-[10px] text-amber-600 mb-1.5">
+                    ⚠ Auto-compile unavailable{compileError ? " (service error)" : ""}. Copy the LaTeX below into Overleaf to get your PDF.
+                </p>
+            )}
+
+            {(showSource || !pdfBase64) && (
+                <div className="relative group mt-2">
+                    <textarea
+                        readOnly
+                        className="w-full h-28 bg-gray-50 border border-gray-300 rounded-lg p-2.5 text-[10px] font-mono text-gray-800 resize-none outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"
+                        value={latex}
+                    />
+                    <button
+                        onClick={() => onCopy(latex)}
+                        className="absolute top-2 right-2 px-2 py-1 bg-white border border-gray-200 text-gray-600 rounded text-[9px] font-medium opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-50 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                        Copy
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ════════════════════════════════════════════════════════════
 // ██ MAIN COMPONENT
 // ════════════════════════════════════════════════════════════
-export function ResumeChatbot({ hasParsedResume, jobDescription, resumeData, onAriaEdit, onResumePatch, onAcceptPatch, onUndoPatch }: ResumeChatbotProps) {
+export function ResumeChatbot({ hasParsedResume, jobDescription: jobDescProp, resumeData, onAriaEdit, onResumePatch, onAcceptPatch, onUndoPatch }: ResumeChatbotProps) {
+    const { jobDescription: storeJD } = useResumeStore();
+    const jobDescription = storeJD || jobDescProp || "";
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([{
         id: "welcome",
@@ -360,6 +437,16 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, resumeData, onA
         const messageText = autoCmd ? autoCmd : text.trim();
         const userMsgId = Date.now().toString();
 
+        // Guard: Tailor to JD requires a job description pasted in the JD panel
+        if (autoCmd === "/tailor" && !jobDescription.trim()) {
+            setMessages(prev => [
+                ...prev,
+                { id: userMsgId, role: "user", content: "🎯 Tailoring resume to job description...", timestamp: Date.now() },
+                { id: `${userMsgId}-reply`, role: "bot", content: "**Paste a job description first!**\n\nOpen the **JD Match** panel on the right side of the resume page, paste the target job description, then click **Tailor to JD** again. I'll rewrite your entire resume to maximize your shortlisting chances.", timestamp: Date.now() },
+            ]);
+            return;
+        }
+
         // Show professional label instead of raw slash command
         const displayText = autoCmd && COMMAND_LABELS[autoCmd]
             ? COMMAND_LABELS[autoCmd]
@@ -386,7 +473,9 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, resumeData, onA
                 body: JSON.stringify({
                     message: messageText,
                     command: explicitCommand,
-                    useAgent: true,
+                    // LaTeX PDF generation is deterministic — route it straight to the
+                    // legacy handler (generate .tex → cloud compile) instead of the agent.
+                    useAgent: explicitCommand !== "latex",
                     payload: { jobDescription: jobDescription || undefined },
                     // Send current resume data so the backend uses the correct UUIDs for patches
                     currentResumeData: resumeData || undefined,
@@ -447,8 +536,10 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, resumeData, onA
                 // Auto-apply AriaEdit (new, simple), or notify parent of legacy patch
                 if (sseAriaEdit && onAriaEdit) {
                     onAriaEdit(sseAriaEdit);
+                    toast.success("✦ Resume updated — check the preview", { duration: 3000 });
                 } else if (sseResumePatch && onResumePatch) {
                     onResumePatch(sseResumePatch);
+                    toast.success("✦ Resume patch applied", { duration: 3000 });
                 }
 
                 setMessages(prev => [...prev, {
@@ -479,8 +570,10 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, resumeData, onA
 
                 if (jsonAriaEdit && onAriaEdit) {
                     onAriaEdit(jsonAriaEdit);
+                    toast.success("✦ Resume updated — check the preview", { duration: 3000 });
                 } else if (jsonResumePatch && onResumePatch) {
                     onResumePatch(jsonResumePatch);
+                    toast.success("✦ Resume patch applied", { duration: 3000 });
                 }
 
                 setMessages(prev => [...prev, {
@@ -680,24 +773,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, resumeData, onA
 
         // ── 5. LATEX CODE ──
         if (msg.command === "latex" && msg.data?.latex) {
-            return (
-                <div className="mt-3">
-                    <div className="relative group">
-                        <textarea
-                            readOnly
-                            className="w-full h-28 bg-gray-50 border border-gray-300 rounded-lg p-2.5 text-[10px] font-mono text-gray-800 resize-none outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"
-                            value={msg.data.latex}
-                        />
-                        <button
-                            onClick={() => copyToClipboard(msg.data.latex)}
-                            className="absolute top-2 right-2 px-2 py-1 bg-white border border-gray-200 text-gray-600 rounded text-[9px] font-medium opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-50 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            Copy
-                        </button>
-                    </div>
-                    <p className="text-[9px] text-gray-500 mt-1.5">Paste into Overleaf or compile with pdflatex.</p>
-                </div>
-            );
+            return <LatexResult latex={msg.data.latex} pdfBase64={msg.data.pdfBase64} compileError={msg.data.compileError} onCopy={copyToClipboard} />;
         }
 
         // ── 6. JOB RESULTS (from /jobs command) ──
@@ -870,7 +946,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription, resumeData, onA
                                                     {msg.aria_edit && (
                                                         <div className="mt-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-700 font-medium">
                                                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                                                            <span>Changes applied to your resume — switch to <strong>Live Edit</strong> tab to see them</span>
+                                                            <span>✓ Changes applied — visible in the resume preview</span>
                                                         </div>
                                                     )}
 

@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { traceStandalone } from "../observability/langfuse.js";
+import { JAKES_TEMPLATE_SKELETON } from "../lib/latex-templates.js";
 
 // ── Feature → Model Routing ─────────────────────────────────
 // 💬 Job chatbot       → Llama 4 Scout         → Groq
@@ -34,7 +35,9 @@ export type AIFeature =
     | "create_bullets"
     | "resume_fix"
     | "resume_edit"
-    | "resume_section_edit";
+    | "resume_section_edit"
+    | "resume_tailor"
+    | "resume_latex";
 
 const SYSTEM_PROMPTS: Record<string, string> = {
     chat: `You are an expert AI Career Coach inside JobSkill AI named Aria.
@@ -356,7 +359,7 @@ JSON FORMAT (copy this structure exactly):
   "changes": [
     {
       "section": "summary",
-      "new_summary": "Results-driven software engineer with 2+ years building Python/Flask web apps. Strong in SQL, REST APIs, and Agile delivery."
+      "new_summary": "Final-year B.Tech Information Technology student at XYZ University (2025) with hands-on experience building web apps using HTML, CSS, JavaScript, and Python. Seeking a software developer role to apply full-stack skills in a product-focused team."
     },
     {
       "section": "experience",
@@ -370,16 +373,16 @@ JSON FORMAT (copy this structure exactly):
       "section": "projects",
       "entry_name": "ProjectName",
       "new_bullets": [
-        "Built task management app with Python Flask serving 200+ daily users",
-        "Integrated WebSocket notifications reducing missed updates by 60%"
+        "Built task management app with HTML, CSS, and JavaScript with full CRUD functionality",
+        "Designed responsive tourism website using semantic HTML and CSS Flexbox"
       ]
     },
     {
       "section": "skills",
-      "new_skills": ["Python", "Flask", "JavaScript", "SQL", "HTML", "CSS", "Git"]
+      "new_skills": ["Python", "Java", "JavaScript", "HTML", "CSS", "C", "SQL", "Git"]
     }
   ],
-  "description": "Improved summary, quantified experience bullets, added project impact metrics."
+  "description": "Improved summary with specific degree/year/target role, quantified project bullets, cleaned skills list."
 }
 
 FIELD RULES:
@@ -390,7 +393,54 @@ FIELD RULES:
 - "new_skills": full skills list as array of strings
 - Only include sections you are actually changing
 - Strong verbs: Developed, Implemented, Engineered, Built, Optimized, Delivered, Led, Reduced, Improved
+- URL PRESERVATION: The resume data may include a "links" object (linkedin/github/portfolio) and projects may have a "url" field. Never modify or omit these fields. Do not include URL changes in your response — only text content changes are valid.
+- Start response with { and end with }. Nothing else.
+
+SUMMARY RULES (critical — apply every time you write a new_summary):
+- NEVER open with "Results-driven", "Dynamic", "Passionate", "Dedicated", "Motivated", or "Hardworking"
+- For students and fresh graduates: state the degree (e.g. B.Tech IT), institution name, graduation year, and target role explicitly
+- Reference SPECIFIC technologies and projects from the actual resume — never use generic placeholders
+- Keep it 2–3 sentences. Lead with who they are → what they build → what they are seeking`,
+
+    resume_tailor: `You are an elite Resume Tailoring Specialist. Given a candidate's resume and a target job description, comprehensively rewrite the resume to maximize ATS score and shortlisting probability. Return ONLY a JSON object — no text before or after, no markdown fences.
+
+JSON FORMAT (same AriaEdit structure):
+{
+  "action": "ARIA_EDIT",
+  "changes": [
+    { "section": "summary", "new_summary": "..." },
+    { "section": "skills", "new_skills": ["JD keyword 1", "JD keyword 2", ...] },
+    { "section": "experience", "entry_name": "CompanyName", "new_bullets": ["..."] },
+    { "section": "projects", "entry_name": "ProjectName", "new_bullets": ["..."] }
+  ],
+  "description": "Tailored resume for [Role] at [Company]."
+}
+
+TAILORING RULES:
+1. SUMMARY: Rewrite to directly name the target role and mention 2–3 key JD requirements the candidate meets.
+2. SKILLS: Add ALL technical skills, tools, and frameworks named in the JD that the candidate plausibly has based on their background. Put JD-matching skills first. Return as a flat array of strings.
+3. EXPERIENCE BULLETS: Rewrite each bullet using JD keyword language. Preserve facts — do NOT fabricate companies, metrics, or experiences not implied by the original.
+4. PROJECTS: Add JD-relevant tech keywords to project descriptions. Lead with the most JD-relevant project.
+5. NEVER hallucinate job titles, company names, or quantified metrics that aren't present or clearly implied.
+6. Include ALL four sections (summary, skills, experience entries, project entries) in one response.
+7. URL PRESERVATION: The resume data may include a "links" object (linkedin/github/portfolio) and projects may have a "url" field. Never modify or omit these — they pass through automatically.
 - Start response with { and end with }. Nothing else.`,
+
+    resume_latex: `You are an elite LaTeX resume engineer. Convert the user's resume data into a COMPLETE, COMPILABLE LaTeX document using the exact "Jake Gutierrez" template below.
+
+OUTPUT RULES:
+- Output ONLY the raw LaTeX source. NO markdown fences, NO \`\`\`latex, NO prose before or after. Start with "%" or "\\documentclass" and end with "\\end{document}".
+- Use the EXACT preamble, packages, and custom commands from the skeleton — do not change them.
+- Populate every section from the user's real resume data. Omit a \\section entirely if the user has no data for it (e.g. no certifications).
+- Use the provided macros: \\resumeSubheading for experience/education, \\resumeProjectHeading for projects, \\resumeItem for bullets, and the skills \\item block for Technical Skills.
+- ESCAPE all LaTeX special characters in user content: & % $ # _ { } ~ ^ and backslash. (e.g. "C++" is fine, but "R&D" becomes "R\\&D", "95%" becomes "95\\%").
+- Keep bullets concise and action-led; preserve the user's facts and metrics — never invent companies, dates, or numbers.
+- If the user gives natural-language instructions (e.g. "one page", "emphasize ML", "shorten"), honor them.
+- If a target Job Description is provided, surface matching keywords in the summary, skills, and bullets — without fabricating experience.
+- For the contact line, only include LinkedIn/GitHub \\href links if a URL or handle is present; otherwise drop that segment.
+
+REQUIRED TEMPLATE SKELETON (fill it in, keep all preamble/macros intact):
+${JAKES_TEMPLATE_SKELETON}`,
 
     resume_section_edit: `You are an expert resume writer and ATS optimization specialist.
 The user will provide their current resume sections as JSON and a natural language instruction.
@@ -398,6 +448,7 @@ Apply ONLY the requested change — do not alter sections that were not asked to
 Return ONLY the complete updated sections JSON with EXACTLY the same structure as the input.
 Rules:
 - Preserve all "id" fields exactly as-is
+- Preserve the "links" field (linkedin/github/portfolio) and any "url" field on projects exactly as received
 - Use strong action verbs and quantified metrics where possible
 - Remove personal details (DOB, gender, marital status) if present
 - Keep bullets under 120 characters each
@@ -433,6 +484,8 @@ const FEATURE_MODEL_MAP: Record<AIFeature, { provider: string; model: string }> 
     resume_fix: { provider: "groq", model: MODELS.maverick },
     resume_edit: { provider: "gemini", model: MODELS.geminiFlash },      // AriaEdit JSON via Gemini Flash
     resume_section_edit: { provider: "gemini", model: MODELS.geminiFlash }, // Full sections JSON via Gemini Flash
+    resume_tailor: { provider: "gemini", model: MODELS.gemini },           // Comprehensive JD tailoring via Gemini Pro
+    resume_latex: { provider: "gemini", model: MODELS.gemini },            // Full .tex generation via Gemini Pro
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -641,7 +694,7 @@ async function callMistral(messages: any[], model: string, systemPrompt: string,
 // ═══════════════════════════════════════════════════════════════
 
 // Features that must return JSON — these get JSON mode enforced on all providers
-const JSON_FEATURES = new Set<AIFeature>(["resume_edit", "cover_letter", "interview_prediction"]);
+const JSON_FEATURES = new Set<AIFeature>(["resume_edit", "resume_tailor", "cover_letter", "interview_prediction"]);
 
 export async function getAIReply(messages: any[], feature: AIFeature = "chat") {
     const startTime = Date.now();

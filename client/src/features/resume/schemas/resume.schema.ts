@@ -28,6 +28,7 @@ export const ProjectEntrySchema = z.object({
   name: z.string().default(""),
   description: z.string().default(""),
   tech: z.array(z.string()).default([]),
+  url: z.string().optional(),
 });
 
 export const ParsedSectionsSchema = z.object({
@@ -40,6 +41,11 @@ export const ParsedSectionsSchema = z.object({
   education: z.array(EducationEntrySchema).default([]),
   skills: z.array(SkillGroupSchema).default([]),
   projects: z.array(ProjectEntrySchema).default([]),
+  links: z.object({
+    linkedin: z.string().optional(),
+    github: z.string().optional(),
+    portfolio: z.string().optional(),
+  }).optional(),
 });
 
 export const PatchOperationSchema = z.discriminatedUnion("op", [

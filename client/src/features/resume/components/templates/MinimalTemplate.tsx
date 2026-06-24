@@ -28,9 +28,20 @@ export function MinimalTemplate({ sections, id }: Props) {
             {sections.name}
           </div>
           <div style={{ display: "flex", gap: "20px", flexWrap: "wrap", fontSize: "9.5pt", color: "#555" }}>
-            {sections.email && <span>{sections.email}</span>}
             {sections.phone && <span>{sections.phone}</span>}
+            {sections.email && (
+              <a href={`mailto:${sections.email}`} style={{ color: "#555", textDecoration: "none" }}>{sections.email}</a>
+            )}
             {sections.location && <span>{sections.location}</span>}
+            {sections.links?.linkedin && (
+              <a href={sections.links.linkedin} target="_blank" rel="noopener noreferrer" style={{ color: "#555", textDecoration: "underline" }}>LinkedIn</a>
+            )}
+            {sections.links?.github && (
+              <a href={sections.links.github} target="_blank" rel="noopener noreferrer" style={{ color: "#555", textDecoration: "underline" }}>GitHub</a>
+            )}
+            {sections.links?.portfolio && (
+              <a href={sections.links.portfolio} target="_blank" rel="noopener noreferrer" style={{ color: "#555", textDecoration: "underline" }}>Portfolio</a>
+            )}
           </div>
         </div>
       )}
@@ -110,7 +121,11 @@ export function MinimalTemplate({ sections, id }: Props) {
         <MinSection title="Projects">
           {sections.projects.map((proj) => (
             <div key={proj.id} style={{ marginBottom: "12px" }}>
-              <span style={{ fontWeight: "600" }}>{proj.name}</span>
+              {proj.url ? (
+                <a href={proj.url} target="_blank" rel="noopener noreferrer" style={{ fontWeight: "600", color: "#1a1a1a", textDecoration: "underline" }}>{proj.name}</a>
+              ) : (
+                <span style={{ fontWeight: "600" }}>{proj.name}</span>
+              )}
               {proj.tech.length > 0 && (
                 <span style={{ color: "#888", fontSize: "9pt" }}> — {proj.tech.join(", ")}</span>
               )}

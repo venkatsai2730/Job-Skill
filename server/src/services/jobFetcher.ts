@@ -826,73 +826,31 @@ export async function searchJobs(filters: {
         const lowerLoc = loc;
 
         if (lowerLoc === "bengaluru" || lowerLoc === "bangalore") {
-            parts.push(`location.ilike.%bengaluru%`, `location.ilike.%bangalore%`);
+            parts.push(`location.ilike.%bengaluru%`, `location.ilike.%bangalore%`, `city.ilike.%bengaluru%`, `city.ilike.%bangalore%`);
         } else if (lowerLoc === "mumbai" || lowerLoc === "bombay") {
-            parts.push(`location.ilike.%mumbai%`, `location.ilike.%bombay%`);
+            parts.push(`location.ilike.%mumbai%`, `location.ilike.%bombay%`, `city.ilike.%mumbai%`, `city.ilike.%bombay%`);
         } else if (lowerLoc === "chennai" || lowerLoc === "madras") {
-            parts.push(`location.ilike.%chennai%`, `location.ilike.%madras%`);
+            parts.push(`location.ilike.%chennai%`, `location.ilike.%madras%`, `city.ilike.%chennai%`, `city.ilike.%madras%`);
         } else if (lowerLoc === "gurugram" || lowerLoc === "gurgaon" || lowerLoc.includes("ncr") || lowerLoc === "noida") {
-            parts.push(`location.ilike.%gurugram%`, `location.ilike.%gurgaon%`, `location.ilike.%noida%`, `location.ilike.%ncr%`);
+            parts.push(`location.ilike.%gurugram%`, `location.ilike.%gurgaon%`, `location.ilike.%noida%`, `location.ilike.%ncr%`, `city.ilike.%gurugram%`, `city.ilike.%gurgaon%`, `city.ilike.%noida%`);
         } else {
-            parts.push(`location.ilike.%${loc}%`);
+            parts.push(`location.ilike.%${loc}%`, `city.ilike.%${loc}%`);
         }
 
         // Also find nearest metro for tier-2/3 cities
         const userState = (filters.country || "").toLowerCase();
         const nearestMetro = INDIAN_STATE_TO_NEAREST_METRO[userState];
         if (nearestMetro && nearestMetro.toLowerCase() !== lowerLoc) {
-            parts.push(`location.ilike.%${nearestMetro}%`);
+            parts.push(`location.ilike.%${nearestMetro}%`, `city.ilike.%${nearestMetro.toLowerCase()}%`);
         }
 
-        parts.push(`location.ilike.%remote%`, `location.ilike.%work from home%`, `location.ilike.%wfh%`, `location.ilike.%anywhere%`);
+        parts.push(`location.ilike.%remote%`, `location.ilike.%work from home%`, `location.ilike.%wfh%`, `location.ilike.%anywhere%`, `city.ilike.%remote%`);
         if (country) parts.push(`location.ilike.%${country}%`);
         q = q.or(parts.join(","));
     }
 
     if (filters.skills && filters.skills.length > 0) {
         q = q.overlaps("skills", filters.skills);
-    }
-
-    // ── DB-Level Relevance Filter: Use user_skills to filter by title/description ──
-    // This ensures we only pull jobs that mention at least ONE of the user's core skills
-    // in the title or description, dramatically reducing irrelevant results.
-    // Only applies for "For You" feed (no explicit search query).
-    if (filters.user_skills && filters.user_skills.length > 0 && !filters.query) {
-        // Domain-specific skill prioritization
-        // A Data Scientist should filter by ML/Python skills, NOT by React/HTML
-        const DOMAIN_SKILLS: Record<string, string[]> = {
-            "data-science-ml": ["machine learning", "data science", "deep learning", "tensorflow", "pytorch", "xgboost", "sagemaker", "scikit-learn", "pandas", "numpy", "langchain", "natural language processing", "data scientist", "mlflow", "computer vision", "neural network", "anomaly detection", "time series", "feature engineering"],
-            "frontend": ["react", "angular", "vue", "javascript", "typescript", "nextjs", "frontend", "tailwind", "redux", "webpack", "vite"],
-            "backend": ["node", "express", "django", "flask", "fastapi", "spring", "golang", "rust", "microservices", "postgresql", "mongodb"],
-            "fullstack": ["react", "node", "typescript", "javascript", "fullstack", "full stack", "mongodb", "postgresql", "nextjs", "express"],
-            "devops": ["docker", "kubernetes", "terraform", "jenkins", "devops", "infrastructure", "ansible", "ci/cd pipeline"],
-            "data-engineering": ["apache spark", "airflow", "kafka", "data pipeline", "snowflake", "databricks", "data engineer", "hadoop", "dbt"],
-        };
-
-        // Broad domain title terms — used to fetch wide set of relevant jobs by title
-        const domainTitleTerms: Record<string, string[]> = {
-            "data-science-ml":  ["data scientist", "machine learning", "ml engineer", "ai engineer", "deep learning", "nlp", "computer vision", "llm", "data analyst"],
-            "data-analytics":   ["data analyst", "business intelligence", "bi analyst", "analytics engineer", "power bi", "tableau"],
-            "frontend":         ["frontend", "front end", "react developer", "ui developer", "web developer", "angular developer", "vue developer"],
-            "backend":          ["backend", "back end", "software engineer", "sde", "api developer", "java developer", "python developer", "node developer", "full stack"],
-            "mobile":           ["android developer", "ios developer", "mobile developer", "flutter developer", "react native"],
-            "devops":           ["devops", "cloud engineer", "sre", "infrastructure engineer", "platform engineer", "kubernetes"],
-            "data-engineering": ["data engineer", "etl developer", "data pipeline"],
-            // Freshers: broad set so they see all tech jobs
-            "generic-fresher":  ["software engineer", "developer", "engineer trainee", "intern", "fresher", "junior developer", "sde", "full stack"],
-        };
-
-        const userDom = filters.user_primary_domain || "";
-        const primaryTerms = domainTitleTerms[userDom] || [];
-
-        // Title-based filter: broad domain terms to cast a wide net at DB level.
-        // Skill-level relevance is handled in-memory by the relevance scorer after fetch.
-        // Note: PostgREST array-overlap syntax inside .or() is unreliable with multi-word
-        // skills (spaces break parsing), so we stick to safe ilike title terms only.
-        if (primaryTerms.length > 0) {
-            q = q.or(primaryTerms.map(t => `title.ilike.%${t}%`).join(","));
-        }
-        // If no domain terms — no filter; fetch all active jobs sorted by date
     }
 
     const { data, error } = await q;
@@ -1113,11 +1071,10 @@ export async function searchJobs(filters: {
             return { ...job, match_score: matchScore };
         });
 
-        // Filter out only completely irrelevant results (very low threshold to keep volume up)
+        // Filter out jobs with near-zero match scores — only when results are abundant
         const minMatchThreshold = 5;
         const relevantJobs = jobs.filter(job => (job.match_score || 0) >= minMatchThreshold);
-        // Only apply filter if we still have plenty of results
-        if (relevantJobs.length >= 50) {
+        if (relevantJobs.length >= 200) {
             jobs = relevantJobs;
         }
     }

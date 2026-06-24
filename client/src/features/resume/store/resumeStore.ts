@@ -24,6 +24,7 @@ export const EMPTY_SECTIONS: ParsedSections = {
   education: [],
   skills: [],
   projects: [],
+  links: undefined,
 };
 
 // ── State shape ────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ interface ResumeState {
   aiHistory: AIHistoryEntry[];
   template: ResumeTemplate;
   jdResult: JDMatchResult | null;
+  jobDescription: string;
 }
 
 // ── Actions ────────────────────────────────────────────────────────
@@ -63,6 +65,7 @@ interface ResumeActions {
   ) => void;
   failAIEdit: () => void;
   setJDResult: (result: JDMatchResult | null) => void;
+  setJobDescription: (jd: string) => void;
   reset: () => void;
 }
 
@@ -82,8 +85,9 @@ export const useResumeStore = create<ResumeStore>()(
       isAIEditing: false,
       aiStreamText: "",
       aiHistory: [],
-      template: "classic",
+      template: "professional",
       jdResult: null,
+      jobDescription: "",
 
       // ── Actions ─────────────────────────────────────────
       setSections: (sections, ats, versions) =>
@@ -185,6 +189,8 @@ export const useResumeStore = create<ResumeStore>()(
       failAIEdit: () => set({ isAIEditing: false, aiStreamText: "" }),
 
       setJDResult: (result) => set({ jdResult: result }),
+
+      setJobDescription: (jd) => set({ jobDescription: jd }),
 
       reset: () =>
         set({
