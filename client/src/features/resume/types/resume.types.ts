@@ -26,6 +26,7 @@ export interface ProjectEntry {
   name: string;
   description: string;
   tech: string[];
+  url?: string;
 }
 
 export interface ParsedSections {
@@ -38,6 +39,11 @@ export interface ParsedSections {
   education: EducationEntry[];
   skills: SkillGroup[];
   projects: ProjectEntry[];
+  links?: {
+    linkedin?: string;
+    github?: string;
+    portfolio?: string;
+  };
 }
 
 export interface ATSResult {
@@ -89,4 +95,4 @@ export interface AIHistoryEntry {
 
 export const MAX_HISTORY = 30;
 
-export type ResumeTemplate = "classic" | "modern" | "minimal";
+export type ResumeTemplate = "classic" | "modern" | "minimal" | "professional";

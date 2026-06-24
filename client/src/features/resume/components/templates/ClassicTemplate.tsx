@@ -30,9 +30,20 @@ export function ClassicTemplate({ sections, id }: Props) {
             </div>
           )}
           <div style={{ fontSize: "9.5pt", color: "#444", display: "flex", justifyContent: "center", gap: "14px", flexWrap: "wrap" }}>
-            {sections.email && <span>{sections.email}</span>}
             {sections.phone && <span>{sections.phone}</span>}
+            {sections.email && (
+              <a href={`mailto:${sections.email}`} style={{ color: "#444", textDecoration: "none" }}>{sections.email}</a>
+            )}
             {sections.location && <span>{sections.location}</span>}
+            {sections.links?.linkedin && (
+              <a href={sections.links.linkedin} target="_blank" rel="noopener noreferrer" style={{ color: "#444", textDecoration: "underline" }}>LinkedIn</a>
+            )}
+            {sections.links?.github && (
+              <a href={sections.links.github} target="_blank" rel="noopener noreferrer" style={{ color: "#444", textDecoration: "underline" }}>GitHub</a>
+            )}
+            {sections.links?.portfolio && (
+              <a href={sections.links.portfolio} target="_blank" rel="noopener noreferrer" style={{ color: "#444", textDecoration: "underline" }}>Portfolio</a>
+            )}
           </div>
         </div>
       )}
@@ -103,7 +114,9 @@ export function ClassicTemplate({ sections, id }: Props) {
           {sections.projects.map((proj) => (
             <div key={proj.id} style={{ marginBottom: "10px" }}>
               <div style={{ fontWeight: "bold", fontSize: "10.5pt" }}>
-                {proj.name}
+                {proj.url ? (
+                  <a href={proj.url} target="_blank" rel="noopener noreferrer" style={{ color: "#111", textDecoration: "underline" }}>{proj.name}</a>
+                ) : proj.name}
                 {proj.tech.length > 0 && (
                   <span style={{ fontWeight: "normal", fontStyle: "italic", fontSize: "9.5pt", color: "#555" }}>
                     {" "}— {proj.tech.join(", ")}

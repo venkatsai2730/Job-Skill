@@ -9,7 +9,7 @@ import {
 } from "../services/chatService.js";
 import { parseSections, upsertUserProfileFromResume } from "./resume.js";
 import { computeAdvancedATS } from "../lib/advanced-scorer.js";
-import { generateLatex } from "../lib/latex-generator.js";
+import { compileLatexToPdf } from "../lib/latex-compile.js";
 import { searchJobs } from "../services/jobFetcher.js";
 import { runAriaAgent, type AgentResponse } from "../agent/ariaAgent.js";
 import { getUserMemories } from "../agent/agentMemory.js";
@@ -310,9 +310,16 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
             }
             case "tailor": {
                 if (!resumeText) return res.status(400).json({ type: "error", message: "Upload a resume first." });
-                if (!jobDescription) return res.status(400).json({ type: "error", message: "Provide a JD: /tailor [paste JD]" });
-                const tailorResult = await getAIReply([{ role: "user", content: `${contextPrefix}Rewrite the resume bullets to closely match this job description.\n\nJob Description:\n${jobDescription}` }], "resume_fix");
-                return res.json({ type: "success", command: "tailor", message: "Resume tailored for the target JD.", data: { reply: tailorResult.reply } });
+                if (!jobDescription) return res.status(400).json({ type: "error", message: "Paste the job description in the JD Match panel, then click Tailor to JD again." });
+                const tailorResult = await getAIReply([{ role: "user", content: `${contextPrefix}\n\nTAILORING TARGET — Rewrite ALL sections to maximize shortlisting for this role:\n${jobDescription.substring(0, 3000)}` }], "resume_tailor");
+                // Parse AriaEdit from the tailor response
+                let ariaEdit: any = null;
+                try {
+                    const text = tailorResult.reply.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+                    const jsonMatch = text.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) ariaEdit = JSON.parse(jsonMatch[0]);
+                } catch { /* ignore parse errors */ }
+                return res.json({ type: "success", command: "tailor", message: "Resume tailored for the target role. Check the preview for all changes.", aria_edit: ariaEdit, data: { reply: "Resume tailored to match the job description. All sections updated.", aria_edit: ariaEdit } });
             }
             case "improve": {
                 if (!resumeText) return res.status(400).json({ type: "error", message: "Upload a resume first." });
@@ -400,9 +407,40 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
             }
             case "latex": {
                 if (!resumeText) return res.status(400).json({ type: "error", message: "Upload a resume first." });
-                const sectionsLatex = parseSections(resumeText);
-                const latexCode = generateLatex(sectionsLatex, payload.templateId || "it_1");
-                return res.json({ type: "success", command: "latex", message: "LaTeX resume compiled.", data: { latex: latexCode } });
+
+                // 1. Gemini writes a complete, compilable .tex from the resume data,
+                //    honoring optional natural-language instructions + target JD.
+                const instructions = body && !jobDescription ? body : "";
+                const latexPrompt = `${contextPrefix}Generate the LaTeX resume now.` +
+                    (instructions ? `\n\nINSTRUCTIONS: ${instructions}` : "") +
+                    (jobDescription ? `\n\nTARGET JOB DESCRIPTION (surface matching keywords):\n${jobDescription.substring(0, 3000)}` : "");
+                const latexResult = await getAIReply([{ role: "user", content: latexPrompt }], "resume_latex");
+
+                // Defensively strip stray markdown fences the model might add.
+                let latexCode = latexResult.reply
+                    .replace(/^\s*```(?:latex|tex)?\s*/i, "")
+                    .replace(/```\s*$/i, "")
+                    .trim();
+
+                // 2. Compile to a pixel-perfect PDF via the cloud LaTeX service.
+                try {
+                    const pdfBuffer = await compileLatexToPdf(latexCode);
+                    return res.json({
+                        type: "success",
+                        command: "latex",
+                        message: "Pixel-perfect PDF generated.",
+                        data: { latex: latexCode, pdfBase64: pdfBuffer.toString("base64") },
+                    });
+                } catch (compileErr: any) {
+                    // Compilation failed — still return the LaTeX so the user can use Overleaf.
+                    console.error("[latex] compile failed:", compileErr.message);
+                    return res.json({
+                        type: "success",
+                        command: "latex",
+                        message: "Generated the LaTeX, but automatic compilation failed. You can paste it into Overleaf.",
+                        data: { latex: latexCode, compileError: String(compileErr.message).slice(0, 400) },
+                    });
+                }
             }
             case "help": {
                 return res.json({ type: "success", command: "help", message: "Available commands", data: { reply: HELP_TEXT } });

@@ -46,6 +46,7 @@ interface ProjectEntry {
     name: string;
     description: string;
     tech: string[];
+    url?: string;
 }
 export interface ParsedSections {
     name: string;
@@ -57,8 +58,36 @@ export interface ParsedSections {
     education: EducationEntry[];
     skills: SkillGroup[];
     projects: ProjectEntry[];
+    links?: { linkedin?: string; github?: string; portfolio?: string; };
 }
 // Removed previous interfaces that were redefined with AdvancedATSResult.
+
+// ── Extract social/portfolio URLs from header text ──────────────
+function extractUrls(headerText: string): {
+    linkedin?: string; github?: string; portfolio?: string;
+} {
+    const linkedinMatch = headerText.match(
+        /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/([\w-]+)\/?/i
+    );
+    const linkedin = linkedinMatch
+        ? `https://linkedin.com/in/${linkedinMatch[1]}`
+        : undefined;
+
+    const githubMatch = headerText.match(
+        /(?:https?:\/\/)?(?:www\.)?github\.com\/([\w-]+)\/?/i
+    );
+    const github = githubMatch
+        ? `https://github.com/${githubMatch[1]}`
+        : undefined;
+
+    const portfolioMatch = headerText.match(
+        /https?:\/\/(?!(?:www\.)?(?:linkedin|github)\.com)([\w\-./?=&#]+)/i
+    );
+    const portfolio = portfolioMatch ? portfolioMatch[0] : undefined;
+
+    const hasLinks = linkedin || github || portfolio;
+    return hasLinks ? { linkedin, github, portfolio } : {};
+}
 
 // ── Extract contact info from header lines (before first section) ─
 function extractContactInfo(headerLines: string[]): {
@@ -72,8 +101,9 @@ function extractContactInfo(headerLines: string[]): {
     const phoneMatch = /(\+?[\d][\d\s\-.()/]{7,}\d)/.exec(fullText);
     const phone = phoneMatch ? phoneMatch[0].trim() : "";
 
+    const NAME_BLOCKLIST = /^(get\s+in\s+contact|curriculum\s+vitae|resume|cv|contact\s+me|contact\s+info|my\s+resume)$/i;
     const name = headerLines.find(
-        (l) => l.length > 1 && l.length < 60 && !/@/.test(l) && !/^\+?[\d\s\-.()/]{7,}$/.test(l)
+        (l) => l.length > 1 && l.length < 60 && !/@/.test(l) && !/^\+?[\d\s\-.()/]{7,}$/.test(l) && !NAME_BLOCKLIST.test(l.trim())
     ) ?? "";
 
     const locMatch = /\b([A-Z][a-z][\w ]*,\s*(?:[A-Z]{2}|[A-Z][a-z]+(?:\s[A-Z][a-z]+)*))\b/.exec(fullText);
@@ -88,6 +118,7 @@ const SECTION_PATTERNS: Record<string, RegExp> = {
     experience: /^(experience|work\s+experience|professional\s+experience|employment|work\s+history)/i,
     education: /^(education|academic|academics|qualifications)/i,
     skills: /^(skills|technical\s+skills|core\s+competencies|competencies|technologies|tech\s+stack)/i,
+    soft_skills: /^(soft\s*skills?|interpersonal\s*skills?|transferable\s*skills?|core\s+values?)/i,
     projects: /^(projects|personal\s+projects|key\s+projects|notable\s+projects|academic\s+projects)/i,
     certifications: /^(certifications?|certificates?|professional\s+certifications?|licenses?\s*(?:&|and)?\s*certifications?)/i,
     achievements: /^(achievements?|awards?|honors?|accomplishments?|awards?\s*(?:&|and)?\s*achievements?)/i,
@@ -179,7 +210,7 @@ function parseEducation(textLines: string[]): EducationEntry[] {
 
     // Try to detect degree-like patterns
     const degreeRe =
-        /\b(b\.?s\.?|b\.?a\.?|m\.?s\.?|m\.?a\.?|m\.?b\.?a\.?|ph\.?d\.?|bachelor|master|associate|diploma|b\.?tech|m\.?tech|b\.?e\.?|m\.?e\.?)\b/gi;
+        /\b(b\.?s\.?|b\.?a\.?|m\.?s\.?|m\.?a\.?|m\.?b\.?a\.?|ph\.?d\.?|bachelor|master|associate|diploma|b\.?tech|m\.?tech|b\.?e\.?|m\.?e\.?|graduation|graduate|degree)\b/gi;
     const gpaRe = /\b(?:gpa|cgpa|grade)[:\s]*(\d+\.?\d*)\b/i;
     const courseRe = /\b(?:courses?|coursework|relevant\s+courses?)[:\s]*(.*)/i;
 
@@ -195,13 +226,17 @@ function parseEducation(textLines: string[]): EducationEntry[] {
     }
 
     const dateMatch = fullText.match(DATE_RE);
-    const school = textLines.find(
+    // Reset regex lastIndex since degreeRe is global (used above with .test())
+    degreeRe.lastIndex = 0;
+    const rawSchool = textLines.find(
         (l) => !degreeRe.test(l) && !gpaRe.test(l) && !courseRe.test(l) && l.length > 3 && !DATE_RE.test(l)
     ) || "";
+    // Avoid "Graduation — Graduation" when school text echoes the degree text
+    const school = rawSchool.toLowerCase() === degree.toLowerCase() ? "" : rawSchool;
 
     entries.push({
         degree: degree || textLines[0] || "Degree",
-        school: school || "",
+        school: school,
         dates: dateMatch ? dateMatch[0] : "",
         gpa: gpaMatch ? gpaMatch[1] : "",
         courses: courseMatch
@@ -213,6 +248,9 @@ function parseEducation(textLines: string[]): EducationEntry[] {
 }
 
 // ── Parse skills ────────────────────────────────────────────────
+// Filters out education metadata and interests that bleed in from multi-column PDF layouts
+const SKILLS_JUNK_RE = /year\s+of\s+passing|class\s+x(ii)?|grade\s+[\d.]+%?|board\s+|medium\s+english|medium\s+hindi|languages?\s+known|special\s+interests?|other\s+interests?|^course$|^college$|^b\.?tech|^b\.?e\.|^m\.?tech|^graduation$/i;
+
 function parseSkills(textLines: string[]): SkillGroup[] {
     const groups: SkillGroup[] = [];
     let currentCategory = "General";
@@ -229,13 +267,13 @@ function parseSkills(textLines: string[]): SkillGroup[] {
             currentItems = catMatch[2]
                 .split(/[,;|•·]/)
                 .map((s) => s.trim())
-                .filter(Boolean);
+                .filter((s) => Boolean(s) && !SKILLS_JUNK_RE.test(s));
         } else {
             // Split by common separators
             const items = line
                 .split(/[,;|•·]/)
                 .map((s) => s.replace(/^[•\-–*▪◦◆]+\s*/, "").trim())
-                .filter((s) => s.length > 0 && s.length < 40);
+                .filter((s) => s.length > 0 && s.length < 40 && !SKILLS_JUNK_RE.test(s));
             currentItems.push(...items);
         }
     }
@@ -264,21 +302,61 @@ function parseProjects(textLines: string[]): ProjectEntry[] {
     // Common tech keywords to detect in project descriptions
     const TECH_KEYWORDS = /\b(react|angular|vue|next\.?js|node\.?js|express|django|flask|spring|fastapi|graphql|rest|mongodb|postgresql|mysql|redis|docker|kubernetes|aws|azure|gcp|python|javascript|typescript|java|golang|rust|kotlin|swift|flutter|tensorflow|pytorch|pandas|numpy|firebase|supabase|tailwind|html|css|sass|webpack|vite|git|linux|nginx|selenium|cypress|jest|socket\.?io|websocket|kafka|rabbitmq|elasticsearch|prisma|sequelize|mongoose|blockchain|solidity|figma|tableau|powerbi|opencv|scikit|bert|gpt|langchain|openai|streamlit|gradio|huggingface|transformers|nltk|spacy|matplotlib|seaborn|plotly|airflow|spark|hadoop|databricks|snowflake|dbt|terraform|ansible|jenkins|github\s*actions|gitlab\s*ci|circleci|vercel|netlify|heroku|render|railway|stripe|twilio|sendgrid|auth0|clerk|jwt|oauth|graphql|trpc|drizzle|zod|shadcn)\b/gi;
 
+    // Description/bullet lines usually open with a past-tense action verb. Project
+    // TITLES almost never do — used to reject wrapped description lines that happen
+    // to start with a capital (e.g. "Built a CNN-based classifier trained on").
+    const DESC_VERB = /^(built|developed|designed|created|implemented|engineered|used|applied|trained|achieved|optimized|integrated|deployed|led|reduced|improved|worked|leveraged|managed|conducted|performed|analyzed|architected|automated|delivered|spearheaded|orchestrated|collaborated|researched|wrote|programmed|coded|configured|maintained|tested|debugged|scaled|enabled|reaching|using)\b/i;
+
     for (const line of textLines) {
         const isBullet = /^[•\-–*▪◦◆➤❖►]/.test(line) || /^\d+[.)]\s/.test(line);
-        // Heuristic: short lines that aren't bullets are project names
-        if (!isBullet && line.length < 60 && line.length > 2) {
+        // A real project title starts with a capital/digit, does NOT read like a
+        // wrapped sentence fragment (no trailing sentence punctuation), and does NOT
+        // open with an action verb. This rejects description fragments such as
+        // "the FER-2013 dataset." or "Built a CNN-based classifier trained on".
+        const startsTitle = /^[A-Z0-9]/.test(line);
+        const endsSentence = /[.,:;]\)?["']?$/.test(line.trim());
+        const looksLikeName = !isBullet && startsTitle && !endsSentence
+            && !DESC_VERB.test(line) && line.length >= 3 && line.length < 70;
+
+        if (looksLikeName || (!current && !isBullet && line.length > 2)) {
             if (current) entries.push(current);
-            current = { name: line.trim(), description: "", tech: [] };
+            // Capture an inline URL (e.g. a GitHub repo link) and strip it from the name
+            const inlineUrlMatch = line.match(/https?:\/\/[\w\-./?=&#%]+/i)
+                || line.match(/(?:www\.)?github\.com\/[\w-]+\/[\w-]+/i);
+            let nameLine = line.replace(/https?:\/\/[\w\-./?=&#%]+/gi, "").trim();
+            // "Project Name | Python, React" — split title from an inline tech stack
+            let inlineTech: string[] = [];
+            const pipeIdx = nameLine.indexOf("|");
+            if (pipeIdx > 0) {
+                inlineTech = nameLine.slice(pipeIdx + 1).split(/[,;•]/).map((s) => s.trim()).filter(Boolean);
+                nameLine = nameLine.slice(0, pipeIdx).trim();
+            }
+            current = {
+                name: nameLine || line.trim(),
+                description: "",
+                tech: inlineTech,
+                ...(inlineUrlMatch ? { url: inlineUrlMatch[0].startsWith("http") ? inlineUrlMatch[0] : `https://${inlineUrlMatch[0]}` } : {}),
+            };
         } else if (current) {
             const clean = line.replace(/^[•\-–*▪◦◆➤❖►\d.)]+\s*/, "").trim();
-            // Try to detect tech stack lines (explicit "Tech:" prefix)
-            const techMatch = clean.match(/\b(?:tech|technologies|stack|built\s+with|using|tools)[:\s]*(.*)/i);
+            // Explicit "Tech:"/"Stack:"/"Tools:" line. Anchored at the start and a
+            // separator is required so prose words ("using", "techniques") are not
+            // mistaken for a tech-stack declaration.
+            const techMatch = clean.match(/^(?:tech(?:nologies)?|tech\s*stack|stack|tools|built\s+with)\s*[:\-–]\s*(.*)/i);
             if (techMatch) {
-                current.tech = techMatch[1].split(/[,;|•]/).map((s) => s.trim()).filter(Boolean);
+                current.tech = Array.from(new Set([
+                    ...current.tech,
+                    ...techMatch[1].split(/[,;|•]/).map((s) => s.trim()).filter(Boolean),
+                ]));
             } else if (clean) {
-                current.description += (current.description ? " " : "") + clean;
-                // Also extract tech keywords from description text
+                // Repair PDF line-break hyphenation: a description ending in "-" was
+                // split mid-word ("augmentation tech-" + "niques" → "...techniques").
+                if (/\w-$/.test(current.description)) {
+                    current.description = current.description.replace(/-$/, "") + clean;
+                } else {
+                    current.description += (current.description ? " " : "") + clean;
+                }
+                // Also extract known tech keywords from description text
                 const foundTech = clean.match(TECH_KEYWORDS);
                 if (foundTech) {
                     const newTech = foundTech.map(t => t.trim());
@@ -327,6 +405,11 @@ export function parseSections(rawText: string): ParsedSections {
         result.email = contact.email;
         result.phone = contact.phone;
         result.location = contact.location;
+        const headerText = headerLines.join(" ");
+        const urls = extractUrls(headerText);
+        if (urls.linkedin || urls.github || urls.portfolio) {
+            result.links = urls;
+        }
     }
 
     for (let i = 0; i < boundaries.length; i++) {
@@ -349,6 +432,9 @@ export function parseSections(rawText: string): ParsedSections {
                 break;
             case "projects":
                 result.projects = parseProjects(sectionLines);
+                break;
+            case "soft_skills":
+                // Recognized but not stored — prevents content from bleeding into projects
                 break;
             case "certifications":
                 // Certifications are recognized but not stored in ParsedSections
@@ -540,49 +626,6 @@ interface ParsedData {
 // ROUTES
 // ═══════════════════════════════════════════════════════════════
 
-// ── PATCH /api/resume/data — persist structured ResumeData (with UUIDs) ──
-router.patch("/data", authenticateToken, async (req: AuthRequest, res: Response) => {
-    try {
-        const userId = req.user!.userId;
-        const { resume_data } = req.body;
-        if (!resume_data || typeof resume_data !== "object") {
-            res.status(400).json({ error: "resume_data is required" });
-            return;
-        }
-
-        // Load current parsed_data so we can merge resume_data into it
-        const { data: row, error: fetchErr } = await supabaseAdmin
-            .from("resumes")
-            .select("id, parsed_data")
-            .eq("user_id", userId)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .single();
-
-        if (fetchErr || !row) {
-            res.status(404).json({ error: "No resume found. Upload a resume first." });
-            return;
-        }
-
-        const updatedParsedData = {
-            ...(row.parsed_data || {}),
-            resume_data, // embed structured data alongside legacy sections
-        };
-
-        const { error: updateErr } = await supabaseAdmin
-            .from("resumes")
-            .update({ parsed_data: updatedParsedData })
-            .eq("id", row.id);
-
-        if (updateErr) throw updateErr;
-
-        res.json({ success: true });
-    } catch (err: any) {
-        console.error("[Resume] PATCH /data failed:", err.message);
-        res.status(500).json({ error: "Failed to save resume data" });
-    }
-});
-
 // ── GET /api/resume — latest resume metadata ──────────────
 router.get("/", async (req: AuthRequest, res: Response) => {
     try {
@@ -627,7 +670,14 @@ router.get("/parsed", async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        res.json({ parsed: data.parsed_data });
+        // Clean up common parser artifacts from stored data
+        const parsed = data.parsed_data as any;
+        const STORED_NAME_BLOCKLIST = /^(get\s+in\s+contact|curriculum\s+vitae|resume|cv|contact\s+me|contact\s+info|my\s+resume)$/i;
+        if (parsed?.sections?.name && STORED_NAME_BLOCKLIST.test(parsed.sections.name.trim())) {
+            parsed.sections.name = "";
+        }
+
+        res.json({ parsed });
     } catch (err: any) {
         console.error("Get parsed resume error:", err);
         res.status(500).json({ error: "Internal server error" });
@@ -1460,67 +1510,83 @@ router.post("/rescore", (req: any, res: any) => {
     }
 });
 
-// ── POST /api/resume/ai-fix ──
-// Auto-applies AI fixes to specific ATS issues in the editor
-router.post("/ai-fix", async (req: AuthRequest, res: Response) => {
-    try {
-        const { currentText, fixType, issueDescription, editorMode } = req.body;
 
-        if (!currentText || !fixType) {
-            res.status(400).json({ error: "Missing required fields for AI fix" });
+// ── POST /api/resume/reparse — re-run parser on stored rawText & save ──
+router.post("/reparse", async (req: AuthRequest, res: Response) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from("resumes")
+            .select("id, parsed_data")
+            .eq("user_id", req.user!.userId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+        if (error || !data) {
+            res.status(404).json({ error: "No resume found" });
             return;
         }
 
-        // Apply the fix via AI
-        const { applyResumeFix } = await import("../services/chatService.js");
-        const { fixedText, fixDescription } = await applyResumeFix(
-            currentText,
-            fixType,
-            issueDescription,
-            editorMode || "text"
-        );
+        const existingParsed = data.parsed_data as any;
+        const rawText = existingParsed?.rawText;
+        if (!rawText || rawText.trim().length < 20) {
+            res.status(400).json({ error: "No stored raw text to reparse" });
+            return;
+        }
 
-        res.json({ fixedText, fixDescription });
+        const sections = parseSections(rawText);
+        const ats = computeAdvancedATS(sections, rawText, req.user!.userId, {});
+        const newParsed = { ...existingParsed, sections, ats };
+
+        await supabaseAdmin
+            .from("resumes")
+            .update({ parsed_data: newParsed })
+            .eq("id", data.id);
+
+        res.json({ parsed: newParsed });
     } catch (err: any) {
-        console.error("AI Fix Error:", err);
-        res.status(500).json({ error: err.message || "Failed to apply AI fix" });
+        console.error("reparse error:", err);
+        res.status(500).json({ error: "Failed to reparse" });
     }
 });
 
 // ── POST /api/resume/compile-latex ──
-import { execSync } from "child_process";
-import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
-import { randomUUID } from "crypto";
+import { compileLatexToPdf } from "../lib/latex-compile.js";
 
-router.post("/compile-latex", (req: any, res: any) => {
+router.post("/compile-latex", async (req: any, res: any) => {
     const { latexContent } = req.body;
     if (!latexContent) return res.status(400).json({ error: "latexContent is required" });
 
-    const workDir = join(tmpdir(), `latex-compile-${randomUUID()}`);
-    mkdirSync(workDir, { recursive: true });
-    const texPath = join(workDir, "resume.tex");
-    const pdfPath = join(workDir, "resume.pdf");
-
-    writeFileSync(texPath, latexContent, "utf-8");
-
     try {
-        const pdflatexCmd = `pdflatex -interaction=nonstopmode -halt-on-error -output-directory="${workDir}" "${texPath}"`;
-        execSync(pdflatexCmd, { timeout: 30000, stdio: "ignore" });
-        execSync(pdflatexCmd, { timeout: 30000, stdio: "ignore" }); // second pass
-        
-        if (!existsSync(pdfPath)) {
-            return res.status(500).json({ error: "PDF was not generated." });
-        }
-        
-        const pdfBuffer = readFileSync(pdfPath);
+        const pdfBuffer = await compileLatexToPdf(latexContent);
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="Resume.pdf"`);
         return res.send(pdfBuffer);
     } catch (err: any) {
-        console.error("pdflatex compile error:", err.message);
+        console.error("LaTeX compile error:", err.message);
         return res.status(500).json({ error: "LaTeX compilation failed. " + err.message });
+    }
+});
+
+// ── POST /api/resume/download/pdf-latex ──────────────────────────
+// Combines latex generation + compilation into a single endpoint.
+// Used by the frontend when AI edits exist, to produce a proper PDF
+// with embedded hyperlinks (instead of html2canvas raster export).
+router.post("/download/pdf-latex", async (req: AuthRequest, res: Response) => {
+    const { sections, templateId, userInfo } = req.body;
+    if (!sections) {
+        res.status(400).json({ error: "sections is required" });
+        return;
+    }
+    try {
+        const tex = generateLatex(sections as ParsedSections, templateId || "classic-academic", userInfo || {});
+        const pdfBuffer = await compileLatexToPdf(tex);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="Resume.pdf"`);
+        res.send(pdfBuffer);
+    } catch (err: any) {
+        console.error("pdf-latex error:", err.message);
+        res.status(500).json({ error: "PDF generation failed: " + err.message });
     }
 });
 

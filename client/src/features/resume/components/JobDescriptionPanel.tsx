@@ -5,7 +5,7 @@ import { useResumeStore } from "../store/resumeStore";
 import type { JDMatchResult } from "../schemas/resume.schema";
 
 export function JobDescriptionPanel() {
-  const { sections, setJDResult, jdResult } = useResumeStore();
+  const { sections, setJDResult, jdResult, setJobDescription } = useResumeStore();
   const [jd, setJd] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -52,7 +52,7 @@ export function JobDescriptionPanel() {
         <div className="space-y-3">
           <textarea
             value={jd}
-            onChange={(e) => { setJd(e.target.value); setError(""); }}
+            onChange={(e) => { setJd(e.target.value); setError(""); setJobDescription(e.target.value); }}
             placeholder="Paste job description here…"
             className="w-full h-28 text-xs bg-surface-2 border border-border/60 rounded-xl p-3 text-foreground placeholder:text-white-30 resize-none focus:outline-none focus:border-blue-electric transition-colors"
           />

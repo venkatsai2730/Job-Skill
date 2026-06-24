@@ -8,10 +8,22 @@ import { normalizeToResumeData, validateAriaEdit } from "../../types/resumePatch
 import type { ResumeData, AriaEdit } from "../../types/resumePatchTypes.js";
 import type { AgentTool, AgentContext } from "./index.js";
 
+function isLegacyParsedSections(rd: any): boolean {
+    // ParsedSections has skills as SkillGroup[] ({ category, items }) or experience with .dates
+    if (Array.isArray(rd.skills) && rd.skills.length > 0 && typeof rd.skills[0] === "object" && "items" in rd.skills[0]) return true;
+    if (Array.isArray(rd.experience) && rd.experience.length > 0 && "dates" in rd.experience[0]) return true;
+    return false;
+}
+
 function getResumeDataFromContext(ctx: AgentContext): ResumeData | null {
     const pd = ctx.resumeData;
     if (!pd) return null;
-    if (pd.resume_data) return pd.resume_data as ResumeData;
+    if (pd.resume_data) {
+        // resume_data from frontend is ParsedSections (legacy) — detect and normalize
+        return isLegacyParsedSections(pd.resume_data)
+            ? normalizeToResumeData(pd.resume_data)
+            : pd.resume_data as ResumeData;
+    }
     if (pd.sections) return normalizeToResumeData(pd.sections);
     if (pd.summary !== undefined || pd.experience !== undefined) return normalizeToResumeData(pd);
     return null;
@@ -20,32 +32,41 @@ function getResumeDataFromContext(ctx: AgentContext): ResumeData | null {
 // Build a compact, human-readable resume summary for the LLM
 // Uses NAMES not UUIDs — the LLM references entries by company/project name
 function buildResumeContext(resumeData: ResumeData, userRequest: string, jobDescription?: string): string {
-    const expLines = resumeData.experience.map((e, i) =>
+    const expLines = (resumeData.experience || []).map((e, i) =>
         `  Experience [${i}]: ${e.title} at ${e.company} (${e.start_date} – ${e.end_date})\n` +
-        e.bullets.map((b, bi) => `    Bullet ${bi}: "${b}"`).join("\n")
+        (e.bullets || []).map((b, bi) => `    Bullet ${bi}: "${b}"`).join("\n")
     ).join("\n");
 
-    const projLines = resumeData.projects.map((p, i) =>
-        `  Project [${i}]: ${p.name} (${p.tech_stack.join(", ")})\n` +
-        (p.bullets.length > 0
-            ? p.bullets.map((b, bi) => `    Bullet ${bi}: "${b}"`).join("\n")
+    const projLines = (resumeData.projects || []).map((p, i) =>
+        `  Project [${i}]: ${p.name}${(p as any).url ? ` (${(p as any).url})` : ""} (${(p.tech_stack || []).join(", ")})\n` +
+        ((p.bullets || []).length > 0
+            ? (p.bullets || []).map((b, bi) => `    Bullet ${bi}: "${b}"`).join("\n")
             : `    Description: "${p.description}"`)
     ).join("\n");
 
+    const skillsStr = Array.isArray(resumeData.skills)
+        ? resumeData.skills.filter((s: any) => typeof s === "string").join(", ")
+        : "";
+
+    const linksData = (resumeData as any).links;
+    const linksStr = linksData
+        ? Object.entries(linksData).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(", ")
+        : "";
+
     let msg = `CURRENT RESUME:
-Summary: "${resumeData.summary}"
+${linksStr ? `Links: [${linksStr}] — DO NOT MODIFY THESE\n` : ""}Summary: "${resumeData.summary}"
 
 Experience:
 ${expLines || "  (none)"}
 
-Skills: [${resumeData.skills.join(", ")}]
+Skills: [${skillsStr}]
 
 Projects:
 ${projLines || "  (none)"}
 
 USER REQUEST: "${userRequest}"`;
 
-    if (jobDescription) msg += `\n\nTarget Job Description:\n${jobDescription.substring(0, 1000)}`;
+    if (jobDescription) msg += `\n\nTAILORING TARGET — Match these keywords and requirements:\n${jobDescription.substring(0, 3000)}`;
     return msg;
 }
 
