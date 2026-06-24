@@ -212,10 +212,24 @@ router.get("/", async (req: AuthRequest, res: Response) => {
         let totalCount = result.total;
 
         // If DB results are too few, supplement with MCP live scraping (no API keys)
-        if (allJobs.length < 50 && (location || city || query)) {
-            const searchLocation = (location || city || "") as string;
+        const supplementThreshold = hasUser ? 100 : 50;
+        const supplementLocation = (location || city || preferred_location || "India") as string;
+        if (allJobs.length < supplementThreshold && (location || city || query || hasUser)) {
+            const searchLocation = supplementLocation;
             const searchQuery = (query || "") as string;
-            
+
+            // Domain-aware fallback queries so a DS user gets "data scientist" not "software engineer"
+            const DOMAIN_FALLBACK_QUERIES: Record<string, string[]> = {
+                "data-science-ml":    ["data scientist", "machine learning engineer", "ai engineer"],
+                "data-analytics":     ["data analyst", "business analyst", "analytics engineer"],
+                "frontend":           ["frontend developer", "react developer", "ui developer"],
+                "backend":            ["backend developer", "software engineer", "api developer"],
+                "mobile":             ["android developer", "ios developer", "flutter developer"],
+                "devops":             ["devops engineer", "cloud engineer", "sre"],
+                "generic-fresher":    ["fresher software engineer", "junior developer"],
+            };
+            const domainFallbacks = userPrimaryDomain ? (DOMAIN_FALLBACK_QUERIES[userPrimaryDomain] || []) : [];
+
             // For fresher searches, use targeted queries to get more relevant results
             const isFresherSearch = parsedExpMax !== undefined && parsedExpMax <= 2;
             const queries = isFresherSearch
@@ -225,10 +239,14 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                     `fresher ${searchQuery || "developer"}`,
                     `intern ${searchQuery || "software"}`,
                   ]
-                : [searchQuery || "software engineer"];
+                : searchQuery
+                    ? [searchQuery]
+                    : domainFallbacks.length > 0
+                        ? domainFallbacks
+                        : ["software engineer"];
 
             const existingUrls = new Set(allJobs.map((j: any) => j.job_url));
-            const targetCount = hasUser ? 100 : 20;
+            const targetCount = hasUser ? 200 : 40;
             
             for (const q of queries) {
                 if (allJobs.length >= targetCount) break;

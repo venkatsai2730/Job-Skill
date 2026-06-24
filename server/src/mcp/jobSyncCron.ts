@@ -99,6 +99,73 @@ const JOB_QUERIES: JobQuery[] = [
     { term: "Developer", location: "United Kingdom", seniority: "mid" },
     { term: "Software Engineer", location: "Canada", seniority: "mid" },
     { term: "Developer", location: "Germany", seniority: "mid" },
+
+    // ── Senior Level (India) ─────────────────────────────────
+    { term: "Senior Software Engineer", location: "India", seniority: "senior" },
+    { term: "Senior Software Engineer", location: "Bangalore", seniority: "senior" },
+    { term: "Senior Data Scientist", location: "India", seniority: "senior" },
+    { term: "Senior Machine Learning Engineer", location: "India", seniority: "senior" },
+    { term: "Senior React Developer", location: "India", seniority: "senior" },
+    { term: "Senior Backend Engineer", location: "India", seniority: "senior" },
+    { term: "Senior Full Stack Developer", location: "India", seniority: "senior" },
+    { term: "Senior DevOps Engineer", location: "India", seniority: "senior" },
+    { term: "Senior Android Developer", location: "India", seniority: "senior" },
+    { term: "Senior iOS Developer", location: "India", seniority: "senior" },
+    { term: "Senior Data Engineer", location: "India", seniority: "senior" },
+    { term: "Lead Software Engineer", location: "India", seniority: "senior" },
+    { term: "Staff Engineer", location: "India", seniority: "senior" },
+    { term: "Principal Engineer", location: "India", seniority: "senior" },
+
+    // ── Specialized ML / AI (India + Remote) ─────────────────
+    { term: "NLP Engineer", location: "India", seniority: "mid" },
+    { term: "Computer Vision Engineer", location: "India", seniority: "mid" },
+    { term: "LLM Engineer", location: "India", seniority: "mid" },
+    { term: "AI Research Engineer", location: "India", seniority: "mid" },
+    { term: "Generative AI Engineer", location: "India", seniority: "mid" },
+    { term: "MLOps Engineer", location: "India", seniority: "mid" },
+    { term: "NLP Engineer", location: "Remote", seniority: "mid" },
+    { term: "LLM Engineer", location: "Remote", seniority: "mid" },
+    { term: "Generative AI Engineer", location: "Remote", seniority: "mid" },
+    { term: "AI Engineer", location: "Remote", seniority: "mid" },
+
+    // ── Analytics / Data (India) ─────────────────────────────
+    { term: "Data Science Engineer", location: "India", seniority: "mid" },
+    { term: "Analytics Engineer", location: "India", seniority: "mid" },
+    { term: "BI Developer", location: "India", seniority: "mid" },
+    { term: "Power BI Developer", location: "India", seniority: "mid" },
+    { term: "Tableau Developer", location: "India", seniority: "mid" },
+    { term: "Big Data Engineer", location: "India", seniority: "mid" },
+
+    // ── More Domain Coverage (India) ─────────────────────────
+    { term: "Blockchain Developer", location: "India", seniority: "mid" },
+    { term: "Embedded Systems Engineer", location: "India", seniority: "mid" },
+    { term: "Security Engineer", location: "India", seniority: "mid" },
+    { term: "Site Reliability Engineer", location: "India", seniority: "mid" },
+    { term: "MEAN Stack Developer", location: "India", seniority: "entry" },
+    { term: "MERN Stack Developer", location: "India", seniority: "entry" },
+    { term: "TypeScript Developer", location: "India", seniority: "entry" },
+    { term: "Go Developer", location: "India", seniority: "mid" },
+    { term: "Rust Developer", location: "India", seniority: "mid" },
+    { term: "Scala Developer", location: "India", seniority: "mid" },
+
+    // ── Additional Metro Cities (India) ──────────────────────
+    { term: "Software Engineer", location: "Kolkata", seniority: "mid" },
+    { term: "Software Engineer", location: "Ahmedabad", seniority: "mid" },
+    { term: "Software Engineer", location: "Jaipur", seniority: "mid" },
+    { term: "Developer", location: "Noida", seniority: "entry" },
+    { term: "Developer", location: "Gurugram", seniority: "entry" },
+    { term: "Developer", location: "Mumbai", seniority: "entry" },
+
+    // ── More Global / Remote ─────────────────────────────────
+    { term: "Software Engineer", location: "Australia", seniority: "mid" },
+    { term: "Software Engineer", location: "Singapore", seniority: "mid" },
+    { term: "Software Engineer", location: "Netherlands", seniority: "mid" },
+    { term: "Software Engineer", location: "UAE", seniority: "mid" },
+    { term: "Machine Learning Engineer", location: "Remote", seniority: "mid" },
+    { term: "Full Stack Developer", location: "Remote", seniority: "mid" },
+    { term: "Backend Developer", location: "Remote", seniority: "entry" },
+    { term: "Frontend Developer", location: "Remote", seniority: "entry" },
+    { term: "Data Engineer", location: "Remote", seniority: "mid" },
 ];
 
 // ── Regex-based skill extraction ─────────────────────────────
@@ -258,16 +325,16 @@ export async function syncJobsViaMCP(): Promise<{ total: number; errors: number 
         }
     }
 
-    // Soft-delete jobs older than 7 days (MCP jobs refresh frequently)
+    // Soft-delete jobs older than 30 days (keeps pool large and relevant)
     if (!migrationMissing) {
         try {
-            const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
+            const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
             await supabaseAdmin
                 .from("job_listings")
                 .update({ is_active: false })
                 .lt("posted_at", cutoff)
                 .eq("is_active", true);
-            console.log(`[MCP-Sync] Expired jobs older than 7 days`);
+            console.log(`[MCP-Sync] Expired jobs older than 30 days`);
         } catch (err: any) {
             if (err.message?.includes("does not exist")) {
                 migrationMissing = true;
@@ -281,13 +348,39 @@ export async function syncJobsViaMCP(): Promise<{ total: number; errors: number 
     return { total: totalUpserted, errors: totalErrors };
 }
 
+// ── Reactivate jobs that were over-aggressively expired ──────
+// Repairs jobs soft-deleted by the old 7-day rule. Safe to run repeatedly.
+export async function reactivateRecentJobs(): Promise<void> {
+    if (migrationMissing) return;
+    try {
+        const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+        await supabaseAdmin
+            .from("job_listings")
+            .update({ is_active: true })
+            .gte("posted_at", cutoff)
+            .eq("is_active", false);
+        console.log(`[MCP-Sync] Re-activated recently expired jobs (< 30 days old)`);
+    } catch (err: any) {
+        if (err.message?.includes("does not exist")) {
+            migrationMissing = true;
+        } else {
+            console.warn("[MCP-Sync] Re-activation failed:", err.message);
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // CRON SCHEDULER — runs every 2 hours (primary engine)
 // ═══════════════════════════════════════════════════════════════
 const MCP_SYNC_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
 
 export function startMCPJobCron() {
-    // Initial sync after 15s delay
+    // Immediately repair jobs over-expired by old 7-day rule
+    reactivateRecentJobs().catch(err =>
+        console.warn("[MCP-Cron] Re-activation failed:", err.message)
+    );
+
+    // Initial full sync after 15s delay
     setTimeout(() => {
         syncJobsViaMCP().catch(err =>
             console.warn("[MCP-Cron] Initial sync failed:", err.message)

@@ -11,10 +11,18 @@ export function generateLatex(sections: ParsedSections, templateId: string = "cl
     let tex = templateObj.code;
 
     // 1. Personal Info
-    tex = tex.replace(/\{\{NAME\}\}/g, escapeLatex(userInfo.name || "YOUR NAME"));
-    tex = tex.replace(/\{\{PHONE\}\}/g, escapeLatex(userInfo.phone || "(123) 456-7890"));
-    tex = tex.replace(/\{\{EMAIL\}\}/g, escapeLatex(userInfo.email || "email@example.com"));
-    tex = tex.replace(/\{\{LINKEDIN\}\}/g, escapeLatex(userInfo.linkedin || "linkedin.com/in/username"));
+    tex = tex.replace(/\{\{NAME\}\}/g, escapeLatex(userInfo.name || (sections as any).name || "YOUR NAME"));
+    tex = tex.replace(/\{\{PHONE\}\}/g, escapeLatex(userInfo.phone || (sections as any).phone || "(123) 456-7890"));
+    tex = tex.replace(/\{\{EMAIL\}\}/g, escapeLatex(userInfo.email || (sections as any).email || "email@example.com"));
+
+    // Inject URLs from sections.links if available, fall back to userInfo
+    const sLinks = (sections as any).links || {};
+    const linkedinUrl = sLinks.linkedin || userInfo.linkedin || "";
+    const githubUrl   = sLinks.github   || userInfo.github   || "";
+    const portfolioUrl = sLinks.portfolio || userInfo.portfolio || "";
+    tex = tex.replace(/\{\{LINKEDIN\}\}/g, escapeLatexUrl(linkedinUrl));
+    tex = tex.replace(/\{\{GITHUB\}\}/g,   escapeLatexUrl(githubUrl));
+    tex = tex.replace(/\{\{PORTFOLIO\}\}/g, escapeLatexUrl(portfolioUrl));
 
     // 2. Summary
     tex = tex.replace(/\{\{SUMMARY\}\}/g, escapeLatex(sections.summary || ""));
@@ -56,7 +64,8 @@ export function generateLatex(sections: ParsedSections, templateId: string = "cl
 
     // 6. Projects
     const projTex = sections.projects.map((proj: any) => {
-        let block = `\\noindent\n\\textbf{${escapeLatex(proj.name)}} \\hfill ${proj.dates ? escapeLatex(proj.dates) : ""}\\\\`;
+        const urlPart = proj.url ? ` \\href{${escapeLatexUrl(proj.url)}}{\\underline{Link}}` : "";
+        let block = `\\noindent\n\\textbf{${escapeLatex(proj.name)}}${urlPart} \\hfill ${proj.dates ? escapeLatex(proj.dates) : ""}\\\\`;
         if (proj.description) {
             block += `\n\\vspace{-2pt}\n\\begin{itemize}\n\\setlength{\\itemsep}{1pt}\n\\setlength{\\parskip}{0pt}\n`;
             block += `    \\item ${escapeLatex(proj.description)}\n`;
@@ -69,6 +78,12 @@ export function generateLatex(sections: ParsedSections, templateId: string = "cl
     tex = tex.replace(/\{\{PROJECTS\}\}/g, projTex);
 
     return tex;
+}
+
+// URL-safe escaper for use inside \href{URL}{...} — only escapes chars that break LaTeX URL parsing
+function escapeLatexUrl(url: string): string {
+    if (!url) return "";
+    return url.replace(/%/g, "\\%").replace(/#/g, "\\#");
 }
 
 // Helper to prevent LaTeX compilation errors from special characters
