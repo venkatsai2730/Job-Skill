@@ -25,6 +25,10 @@ export function seedIds(sections: ParsedSections): ParsedSections {
       ...p,
       id: p.id || crypto.randomUUID(),
     })),
+    certifications: (sections.certifications ?? []).map((c) => ({
+      ...c,
+      id: c.id || crypto.randomUUID(),
+    })),
   };
 }
 

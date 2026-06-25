@@ -16,6 +16,7 @@ const EMPTY_SECTIONS: ParsedSections = {
   education: [],
   skills: [],
   projects: [],
+  certifications: [],
 };
 
 const INITIAL: ResumeEditorState = {

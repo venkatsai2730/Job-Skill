@@ -29,6 +29,11 @@ export interface ProjectEntry {
   url?: string;
 }
 
+export interface CertificationEntry {
+  id: string;
+  text: string;
+}
+
 export interface ParsedSections {
   name: string;
   email: string;
@@ -39,10 +44,12 @@ export interface ParsedSections {
   education: EducationEntry[];
   skills: SkillGroup[];
   projects: ProjectEntry[];
+  certifications: CertificationEntry[];
   links?: {
     linkedin?: string;
     github?: string;
     portfolio?: string;
+    medium?: string;
   };
 }
 

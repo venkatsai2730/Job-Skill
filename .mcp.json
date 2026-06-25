@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "aria": {
+      "command": "node",
+      "args": ["tools/aria-mcp/src/index.mjs"],
+      "env": {
+        "ARIA_API_URL": "${ARIA_API_URL:-http://localhost:3001}",
+        "ARIA_AUTH_TOKEN": "${ARIA_AUTH_TOKEN:-}"
+      }
+    }
+  }
+}

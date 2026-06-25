@@ -1,4 +1,8 @@
 import "dotenv/config";
+// Validate env as an import side-effect — must run before the route/config
+// imports below construct clients from these vars (ESM evaluates imported
+// modules in source order). Keep this import directly after dotenv.
+import "./config/validateEnv.js";
 import express from "express";
 import cors from "cors";
 import path from "path";

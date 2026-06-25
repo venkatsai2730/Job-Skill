@@ -31,6 +31,11 @@ export const ProjectEntrySchema = z.object({
   url: z.string().optional(),
 });
 
+export const CertificationEntrySchema = z.object({
+  id: z.string().default(""),
+  text: z.string().default(""),
+});
+
 export const ParsedSectionsSchema = z.object({
   name: z.string().default(""),
   email: z.string().default(""),
@@ -41,10 +46,12 @@ export const ParsedSectionsSchema = z.object({
   education: z.array(EducationEntrySchema).default([]),
   skills: z.array(SkillGroupSchema).default([]),
   projects: z.array(ProjectEntrySchema).default([]),
+  certifications: z.array(CertificationEntrySchema).default([]),
   links: z.object({
     linkedin: z.string().optional(),
     github: z.string().optional(),
     portfolio: z.string().optional(),
+    medium: z.string().optional(),
   }).optional(),
 });
 

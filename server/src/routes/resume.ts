@@ -16,7 +16,7 @@ import { generateLatex } from "../lib/latex-generator.js";
 import { enrichMissingSkills } from "../lib/learning-resources.js";
 import { inferSemanticSkills, applyResumeFix, getAIReply } from "../services/chatService.js";
 import { logActivity } from "../services/activityService.js";
-import { denormalizeToSections } from "../types/resumePatchTypes.js";
+import { denormalizeToSections, type ResumeData } from "../types/resumePatchTypes.js";
 
 const router = Router();
 router.use(authenticateToken);
@@ -48,6 +48,9 @@ interface ProjectEntry {
     tech: string[];
     url?: string;
 }
+interface CertificationEntry {
+    text: string;
+}
 export interface ParsedSections {
     name: string;
     email: string;
@@ -58,13 +61,14 @@ export interface ParsedSections {
     education: EducationEntry[];
     skills: SkillGroup[];
     projects: ProjectEntry[];
-    links?: { linkedin?: string; github?: string; portfolio?: string; };
+    certifications: CertificationEntry[];
+    links?: { linkedin?: string; github?: string; portfolio?: string; medium?: string; };
 }
 // Removed previous interfaces that were redefined with AdvancedATSResult.
 
 // ── Extract social/portfolio URLs from header text ──────────────
 function extractUrls(headerText: string): {
-    linkedin?: string; github?: string; portfolio?: string;
+    linkedin?: string; github?: string; portfolio?: string; medium?: string;
 } {
     const linkedinMatch = headerText.match(
         /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/in\/([\w-]+)\/?/i
@@ -80,13 +84,21 @@ function extractUrls(headerText: string): {
         ? `https://github.com/${githubMatch[1]}`
         : undefined;
 
+    // Medium handle (medium.com/@handle or handle.medium.com)
+    const mediumMatch = headerText.match(
+        /(?:https?:\/\/)?(?:www\.)?medium\.com\/(@?[\w.-]+)\/?/i
+    ) || headerText.match(/(?:https?:\/\/)?([\w-]+)\.medium\.com\/?/i);
+    const medium = mediumMatch
+        ? (mediumMatch[0].startsWith("http") ? mediumMatch[0] : `https://${mediumMatch[0]}`)
+        : undefined;
+
     const portfolioMatch = headerText.match(
-        /https?:\/\/(?!(?:www\.)?(?:linkedin|github)\.com)([\w\-./?=&#]+)/i
+        /https?:\/\/(?!(?:www\.)?(?:linkedin|github|medium)\.com)([\w\-./?=&#]+)/i
     );
     const portfolio = portfolioMatch ? portfolioMatch[0] : undefined;
 
-    const hasLinks = linkedin || github || portfolio;
-    return hasLinks ? { linkedin, github, portfolio } : {};
+    const hasLinks = linkedin || github || portfolio || medium;
+    return hasLinks ? { linkedin, github, portfolio, medium } : {};
 }
 
 // ── Extract contact info from header lines (before first section) ─
@@ -395,6 +407,7 @@ export function parseSections(rawText: string): ParsedSections {
         education: [],
         skills: [],
         projects: [],
+        certifications: [],
     };
 
     // Extract name/email/phone/location from text before the first section heading
@@ -437,13 +450,15 @@ export function parseSections(rawText: string): ParsedSections {
                 // Recognized but not stored — prevents content from bleeding into projects
                 break;
             case "certifications":
-                // Certifications are recognized but not stored in ParsedSections
-                // This prevents them from bleeding into skills/projects
+            case "achievements": {
+                // Store certifications & achievements as bullet entries (target template
+                // renders a combined "Certifications & Achievements" section).
+                const entries = sectionLines
+                    .map((l) => l.replace(/^[\s•*\-–—]+/, "").trim())
+                    .filter((l) => l.length > 2);
+                for (const text of entries) result.certifications.push({ text });
                 break;
-            case "achievements":
-                // Achievements are recognized but extracted from rawText by the scorer
-                // This prevents them from bleeding into other sections
-                break;
+            }
         }
     }
 
@@ -458,6 +473,75 @@ export function parseSections(rawText: string): ParsedSections {
     }
 
     return result;
+}
+
+// ── Serialize structured sections back into resume-like plain text ──
+// Used after an AI edit so the ATS scorer (which reads keywords, contact info,
+// bullet density and word count from rawText) reflects the CURRENT sections
+// instead of the stale uploaded text. Section headers match SECTION_PATTERNS
+// so the scorer's regex extraction lines up with the structured content.
+export function serializeSectionsToText(sections: ParsedSections): string {
+    const out: string[] = [];
+
+    if (sections.name) out.push(sections.name);
+    const contactBits = [sections.location, sections.phone, sections.email].filter(Boolean);
+    if (contactBits.length) out.push(contactBits.join(" | "));
+    const links = (sections.links || {}) as Record<string, string | undefined>;
+    const linkBits = [links.linkedin, links.github, links.medium, links.portfolio].filter(Boolean);
+    if (linkBits.length) out.push(linkBits.join(" | "));
+    out.push("");
+
+    if (sections.summary) {
+        out.push("PROFESSIONAL SUMMARY", sections.summary, "");
+    }
+
+    if (sections.skills?.length) {
+        out.push("TECHNICAL SKILLS");
+        for (const g of sections.skills) {
+            const items = (g.items || []).join(", ");
+            out.push(g.category && g.category !== "General" ? `${g.category}: ${items}` : items);
+        }
+        out.push("");
+    }
+
+    if (sections.experience?.length) {
+        out.push("PROFESSIONAL EXPERIENCE");
+        for (const e of sections.experience) {
+            out.push([[e.title, e.company].filter(Boolean).join(" | "), e.dates].filter(Boolean).join("  "));
+            for (const b of e.bullets || []) out.push(`• ${b}`);
+        }
+        out.push("");
+    }
+
+    if (sections.projects?.length) {
+        out.push("PROJECTS");
+        for (const p of sections.projects) {
+            out.push([p.name, (p.tech || []).join(", ")].filter(Boolean).join(" | "));
+            if (p.description) out.push(`• ${p.description}`);
+            for (const b of ((p as any).bullets || [])) out.push(`• ${b}`);
+        }
+        out.push("");
+    }
+
+    if (sections.education?.length) {
+        out.push("EDUCATION");
+        for (const ed of sections.education) {
+            out.push([ed.degree, ed.school].filter(Boolean).join(" | "));
+            const meta = [ed.dates, ed.gpa ? `GPA: ${ed.gpa}` : ""].filter(Boolean).join("  ");
+            if (meta) out.push(meta);
+            if (ed.courses?.length) out.push(`Relevant coursework: ${ed.courses.join(", ")}`);
+        }
+        out.push("");
+    }
+
+    const certs = (sections as any).certifications as Array<{ text?: string } | string> | undefined;
+    if (certs?.length) {
+        out.push("CERTIFICATIONS & ACHIEVEMENTS");
+        for (const c of certs) out.push(`• ${typeof c === "string" ? c : (c.text || "")}`.trimEnd());
+        out.push("");
+    }
+
+    return out.join("\n");
 }
 
 // ── Profile Extraction & Sync Helpers ──────────────────────────
@@ -620,6 +704,8 @@ interface ParsedData {
     ats: AdvancedATSResult;
     rawText?: string;
     isLatex?: boolean;
+    /** Normalized, UUID-based resume model (set by Aria edits); optional. */
+    resume_data?: ResumeData;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -796,7 +882,9 @@ router.post("/upload", async (req: AuthRequest, res: Response) => {
             // Merge heuristic skills with AI semantic skills and deduplicate
             ats.inferredSkills = Array.from(new Set([...ats.inferredSkills, ...semanticSkills]));
             
-            parsedData = { sections, ats, rawText: rawText.substring(0, 5000) }; // cap stored raw text
+            // Store the full extracted text (capped generously) so later rescores after
+            // edits are computed on the same amount of text as the original score.
+            parsedData = { sections, ats, rawText: rawText.substring(0, 20000) };
         } catch (parseErr) {
             console.error("PDF parse warning (non-fatal):", parseErr);
             // Continue even if parsing fails — file is still stored
@@ -1198,10 +1286,13 @@ router.post("/ai-edit", async (req: AuthRequest, res: Response) => {
         let newAts: AdvancedATSResult | undefined;
         if (row?.parsed_data) {
             const existing = row.parsed_data as ParsedData;
-            newAts = computeAdvancedATS(updatedSections, existing.rawText ?? "");
+            // Score the EDITED sections against text regenerated from those same
+            // sections — not the stale uploaded rawText — so improvements register.
+            const regeneratedText = serializeSectionsToText(updatedSections);
+            newAts = computeAdvancedATS(updatedSections, regeneratedText);
             await supabaseAdmin
                 .from("resumes")
-                .update({ parsed_data: { ...existing, sections: updatedSections, ats: newAts } })
+                .update({ parsed_data: { ...existing, sections: updatedSections, ats: newAts, rawText: regeneratedText } })
                 .eq("user_id", req.user!.userId);
         }
 
@@ -1232,8 +1323,12 @@ router.put("/sections", async (req: AuthRequest, res: Response) => {
         if (!row) { res.status(404).json({ error: "No resume found" }); return; }
 
         const existing = row.parsed_data ?? {};
-        const updatedAts = computeAdvancedATS(sections as ParsedSections, existing.rawText ?? "");
-        const newParsedData = { ...existing, sections, ats: updatedAts };
+        // Re-derive rawText from the edited sections so the scorer reflects the
+        // current content (keywords, contact, bullet density) rather than the
+        // stale uploaded text.
+        const regeneratedText = serializeSectionsToText(sections as ParsedSections);
+        const updatedAts = computeAdvancedATS(sections as ParsedSections, regeneratedText);
+        const newParsedData = { ...existing, sections, ats: updatedAts, rawText: regeneratedText };
 
         await supabaseAdmin
             .from("resumes")
@@ -1416,7 +1511,7 @@ router.post("/simulate-ats", async (req: AuthRequest, res: Response) => {
             console.error("[Simulate ATS] parseSections utterly failed, falling back to empty:", parseFail);
             // If the parser completely bombs out on weird text, pass an empty structure
             // This ensures the ATS simulators still run and correctly dock points for missing headers!
-            sections = { name: "", email: "", phone: "", location: "", summary: "", experience: [], education: [], skills: [], projects: [] };
+            sections = { name: "", email: "", phone: "", location: "", summary: "", experience: [], education: [], skills: [], projects: [], certifications: [] };
         }
 
         const greenhouse = simulateGreenhouse(sections, resumeText, jobDescription);

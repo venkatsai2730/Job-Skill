@@ -13,6 +13,7 @@ const makeSections = (summary = "Initial"): ParsedSections => ({
   education: [],
   skills: [],
   projects: [],
+  certifications: [],
 });
 
 describe("useResumeEditor", () => {

@@ -289,6 +289,39 @@ export function validateAriaEdit(raw: any): AriaEdit | null {
   return { action: "ARIA_EDIT", changes, description: raw.description || "Resume updated." };
 }
 
+// Resolve which entry a change targets without silently defaulting to index 0.
+// Priority: exact → prefix → substring (either direction) → valid in-range
+// index → single-entry section. Returns -1 when nothing confident matches.
+function resolveEntryIndexServer(
+  candidatesPerEntry: string[][],
+  entryName?: string,
+  entryIndex?: number
+): number {
+  const needle = (entryName || "").toLowerCase().trim();
+  const norm = (s: string) => (s || "").toLowerCase().trim();
+
+  if (needle) {
+    let idx = candidatesPerEntry.findIndex(cs => cs.some(c => norm(c) === needle));
+    if (idx === -1) idx = candidatesPerEntry.findIndex(cs => cs.some(c => {
+      const n = norm(c); return n !== "" && (n.startsWith(needle) || needle.startsWith(n));
+    }));
+    if (idx === -1) idx = candidatesPerEntry.findIndex(cs => cs.some(c => {
+      const n = norm(c); return n !== "" && (n.includes(needle) || needle.includes(n));
+    }));
+    if (idx !== -1) return idx;
+  }
+
+  if (
+    typeof entryIndex === "number" && Number.isInteger(entryIndex) &&
+    entryIndex >= 0 && entryIndex < candidatesPerEntry.length
+  ) {
+    return entryIndex;
+  }
+
+  if (candidatesPerEntry.length === 1) return 0;
+  return -1;
+}
+
 export function applyAriaEditServer(data: ResumeData, edit: AriaEdit): ResumeData {
   const next: ResumeData = JSON.parse(JSON.stringify(data));
 
@@ -303,28 +336,25 @@ export function applyAriaEditServer(data: ResumeData, edit: AriaEdit): ResumeDat
         break;
 
       case "experience": {
-        let idx = -1;
-        if (change.entry_name) {
-          idx = next.experience.findIndex(e =>
-            e.company.toLowerCase().includes(change.entry_name!.toLowerCase()) ||
-            e.title.toLowerCase().includes(change.entry_name!.toLowerCase())
-          );
-        }
-        if (idx === -1) idx = change.entry_index ?? 0;
+        if (!change.new_bullets) break;
+        const idx = resolveEntryIndexServer(
+          next.experience.map(e => [e.company, e.title]),
+          change.entry_name,
+          change.entry_index
+        );
         if (idx >= 0 && idx < next.experience.length) {
-          if (change.new_bullets) next.experience[idx].bullets = change.new_bullets;
+          next.experience[idx].bullets = change.new_bullets;
         }
         break;
       }
 
       case "projects": {
-        let idx = -1;
-        if (change.entry_name) {
-          idx = next.projects.findIndex(p =>
-            p.name.toLowerCase().includes(change.entry_name!.toLowerCase())
-          );
-        }
-        if (idx === -1) idx = change.entry_index ?? 0;
+        if (!change.new_bullets && !change.new_description) break;
+        const idx = resolveEntryIndexServer(
+          next.projects.map(p => [p.name]),
+          change.entry_name,
+          change.entry_index
+        );
         if (idx >= 0 && idx < next.projects.length) {
           if (change.new_bullets) next.projects[idx].bullets = change.new_bullets;
           if (change.new_description) next.projects[idx].description = change.new_description;

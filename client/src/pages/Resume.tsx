@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload, Download, FileText, GraduationCap, Code2,
   FolderOpen, Trash2, Loader2, Eye, Edit3, Check,
-  AlertTriangle, BookOpen, Palette, Sparkles, Share2,
+  AlertTriangle, BookOpen, Palette, Sparkles, Share2, Award,
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,9 +23,11 @@ import { ExperienceEditor } from "@/features/resume/components/SectionEditors/Ex
 import { EducationEditor } from "@/features/resume/components/SectionEditors/EducationEditor";
 import { SkillsEditor } from "@/features/resume/components/SectionEditors/SkillsEditor";
 import { ProjectsEditor } from "@/features/resume/components/SectionEditors/ProjectsEditor";
+import { CertificationsEditor } from "@/features/resume/components/SectionEditors/CertificationsEditor";
 import type { ParsedData, ResumeTemplate } from "@/features/resume/types/resume.types";
 import type { ResumeAction } from "@/features/resume/types/patch.types";
 import type { AriaEdit, ResumePatch } from "@/lib/resumeTypes";
+import { resolveEntryIndex, type AriaEditResult } from "@/features/resume/utils/matchEntry";
 
 const PDF_PREVIEW_ID = "resume-pdf-capture";
 
@@ -294,60 +296,77 @@ const Resume = () => {
   }, [submitAIEditRaw]);
 
   // ── Apply AriaEdit from chat toggle directly to store sections ──
-  const handleAriaEdit = useCallback((edit: AriaEdit) => {
+  // Returns a result so the caller can surface accurate feedback instead of
+  // a blanket "updated" toast. Changes that can't be matched to a specific
+  // entry are reported as `unmatched` rather than silently hitting entry 0.
+  const handleAriaEdit = useCallback((edit: AriaEdit): AriaEditResult => {
     const s = store.sections;
     const next = { ...s, experience: [...s.experience], skills: [...s.skills], projects: [...s.projects] };
+
+    let applied = 0;
+    const unmatched: string[] = [];
 
     for (const change of edit.changes) {
       switch (change.section) {
         case "summary":
-          if (change.new_summary !== undefined) next.summary = change.new_summary;
+          if (change.new_summary !== undefined) { next.summary = change.new_summary; applied++; }
           break;
         case "skills":
           if (change.new_skills) {
             next.skills = next.skills.length > 0
               ? next.skills.map((g, i) => i === 0 ? { ...g, items: change.new_skills! } : g)
-              : [{ category: "Skills", items: change.new_skills }];
+              : [{ id: crypto.randomUUID(), category: "Skills", items: change.new_skills }];
+            applied++;
           }
           break;
         case "experience": {
-          let idx = change.entry_name
-            ? s.experience.findIndex(e =>
-                (e.company || "").toLowerCase().includes(change.entry_name!.toLowerCase()) ||
-                (e.title || "").toLowerCase().includes(change.entry_name!.toLowerCase()))
-            : -1;
-          if (idx === -1) idx = change.entry_index ?? 0;
-          if (idx >= 0 && idx < next.experience.length && change.new_bullets) {
+          if (!change.new_bullets) break;
+          const { index, matched } = resolveEntryIndex(
+            next.experience.map(e => [e.company, e.title]),
+            change.entry_name,
+            change.entry_index
+          );
+          if (matched) {
             next.experience = next.experience.map((e, i) =>
-              i === idx ? { ...e, bullets: change.new_bullets! } : e
+              i === index ? { ...e, bullets: change.new_bullets! } : e
             );
+            applied++;
+          } else {
+            unmatched.push(`experience "${change.entry_name ?? "?"}"`);
           }
           break;
         }
         case "projects": {
-          let idx = change.entry_name
-            ? s.projects.findIndex(p =>
-                (p.name || "").toLowerCase().includes(change.entry_name!.toLowerCase()))
-            : -1;
-          if (idx === -1) idx = change.entry_index ?? 0;
-          if (idx === -1 && next.projects.length > 0) idx = 0;
-          if (idx >= 0 && idx < next.projects.length) {
+          if (!change.new_bullets && !change.new_description) break;
+          const { index, matched } = resolveEntryIndex(
+            next.projects.map(p => [p.name]),
+            change.entry_name,
+            change.entry_index
+          );
+          if (matched) {
             next.projects = next.projects.map((p, i) =>
-              i === idx ? {
+              i === index ? {
                 ...p,
                 ...(change.new_bullets    && { bullets: change.new_bullets }),
                 ...(change.new_description && { description: change.new_description }),
               } : p
             );
+            applied++;
+          } else {
+            unmatched.push(`project "${change.entry_name ?? "?"}"`);
           }
           break;
         }
       }
     }
 
-    store.setSections(next, store.ats ?? undefined);
-    setHasAIEdits(true);
-    setViewMode("preview");
+    if (applied > 0) {
+      store.setSections(next, store.ats ?? undefined);
+      setHasAIEdits(true);
+      setViewMode("preview");
+    }
+
+    return { applied, unmatched };
   }, [store]);
 
   // ── Legacy ResumePatch — proxy through the reliable ai-edit endpoint ──
@@ -548,6 +567,10 @@ const Resume = () => {
                   <div id="section-projects">
                     <SectionHeader icon={<FolderOpen className="w-5 h-5 text-blue-electric" />} title="Projects" />
                     <ProjectsEditor projects={store.sections.projects} dispatch={dispatch} />
+                  </div>
+                  <div id="section-certifications">
+                    <SectionHeader icon={<Award className="w-5 h-5 text-blue-electric" />} title="Certifications & Achievements" />
+                    <CertificationsEditor certifications={store.sections.certifications} dispatch={dispatch} />
                   </div>
                 </div>
               </motion.div>
