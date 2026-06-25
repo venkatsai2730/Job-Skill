@@ -11,10 +11,35 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
+import { API_URL } from "../lib/config";
 import { toast } from "sonner";
 import { DiffCard } from "./DiffCard";
 import type { ResumePatch, AriaEdit } from "@/lib/resumeTypes";
 import { useResumeStore } from "@/features/resume/store/resumeStore";
+import type { AriaEditResult } from "@/features/resume/utils/matchEntry";
+
+// Surface accurate feedback after applying an AriaEdit: success only when
+// something actually changed; a warning that names entries the AI referenced
+// but we couldn't match (so the user knows nothing was silently mis-applied).
+function reportAriaEditResult(result: AriaEditResult | void) {
+    if (!result) {
+        // Caller didn't return a result (older signature) — assume applied.
+        toast.success("✦ Resume updated — check the preview", { duration: 3000 });
+        return;
+    }
+    if (result.applied > 0) {
+        toast.success("✦ Resume updated — check the preview", { duration: 3000 });
+    }
+    if (result.unmatched.length > 0) {
+        toast.warning(
+            `Couldn't match ${result.unmatched.join(", ")} to an entry — left unchanged.`,
+            { duration: 5000 }
+        );
+    }
+    if (result.applied === 0 && result.unmatched.length === 0) {
+        toast.info("No changes were applied.", { duration: 3000 });
+    }
+}
 
 // ── ErrorBoundary: prevents a single bad DiffCard from crashing the page ─────
 class DiffCardErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -70,7 +95,7 @@ interface ResumeChatbotProps {
     hasParsedResume: boolean;
     jobDescription: string;
     resumeData?: any | null;
-    onAriaEdit?: (edit: AriaEdit) => void;   // auto-applied immediately
+    onAriaEdit?: (edit: AriaEdit) => AriaEditResult | void;   // auto-applied immediately
     onResumePatch?: (patch: ResumePatch) => void;
     onAcceptPatch?: (patch: ResumePatch) => void;
     onUndoPatch?: () => void;
@@ -460,8 +485,6 @@ export function ResumeChatbot({ hasParsedResume, jobDescription: jobDescProp, re
         try {
             const explicitCommand = autoCmd ? autoCmd.replace("/", "") : undefined;
             const token = localStorage.getItem("auth_token");
-            const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
-
             // Try SSE streaming first
             const sseResponse = await fetch(`${API_URL}/api/chatbot/resume-chatbot`, {
                 method: "POST",
@@ -526,6 +549,8 @@ export function ResumeChatbot({ hasParsedResume, jobDescription: jobDescProp, re
                                 } else if (event.resume_patch?.action === "PATCH_RESUME") {
                                     sseResumePatch = event.resume_patch;
                                 }
+                            } else if (event.type === "error") {
+                                finalMessage = `⚠️ ${event.message || "The assistant hit an error. Please try again."}`;
                             } else if (event.type === "done") {
                                 break;
                             }
@@ -535,8 +560,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription: jobDescProp, re
 
                 // Auto-apply AriaEdit (new, simple), or notify parent of legacy patch
                 if (sseAriaEdit && onAriaEdit) {
-                    onAriaEdit(sseAriaEdit);
-                    toast.success("✦ Resume updated — check the preview", { duration: 3000 });
+                    reportAriaEditResult(onAriaEdit(sseAriaEdit));
                 } else if (sseResumePatch && onResumePatch) {
                     onResumePatch(sseResumePatch);
                     toast.success("✦ Resume patch applied", { duration: 3000 });
@@ -569,8 +593,7 @@ export function ResumeChatbot({ hasParsedResume, jobDescription: jobDescProp, re
                     !jsonAriaEdit && (botData?.resume_patch?.action === "PATCH_RESUME" ? botData.resume_patch : null) || null;
 
                 if (jsonAriaEdit && onAriaEdit) {
-                    onAriaEdit(jsonAriaEdit);
-                    toast.success("✦ Resume updated — check the preview", { duration: 3000 });
+                    reportAriaEditResult(onAriaEdit(jsonAriaEdit));
                 } else if (jsonResumePatch && onResumePatch) {
                     onResumePatch(jsonResumePatch);
                     toast.success("✦ Resume patch applied", { duration: 3000 });

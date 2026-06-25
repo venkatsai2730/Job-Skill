@@ -235,15 +235,22 @@ export function planTools(
 export function reflectOnStep(
     step: { toolOutput: any },
     _ctx: AgentContext,
-    _intent: ClassifiedIntent
+    intent: ClassifiedIntent
 ): { isComplete: boolean; shouldRetry: boolean; revisedArgs?: any } {
     const output = step.toolOutput;
 
-    // Check for errors
+    // A tool error doesn't complete the plan and isn't auto-retried here.
     if (output?.error) {
         return { isComplete: false, shouldRetry: false };
     }
 
-    // The step produced useful output
+    // Single-tool intents (e.g. resume_edit, score_inquiry) are fully
+    // satisfied once their one tool succeeds — stop looping. Multi-tool
+    // intents must run every planned tool so the synthesis step can combine
+    // all outputs, so they keep going.
+    if ((intent.requiresTools?.length ?? 0) <= 1) {
+        return { isComplete: true, shouldRetry: false };
+    }
+
     return { isComplete: false, shouldRetry: false };
 }

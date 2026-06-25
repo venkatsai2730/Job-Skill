@@ -14,10 +14,10 @@
 // Sum MUST equal 1.0.
 
 export const RELEVANCE_WEIGHTS = {
-    domain:   0.35,
-    skills:   0.30,
-    title:    0.15,
-    location: 0.10,
+    domain:   0.32,
+    skills:   0.26,
+    title:    0.12,
+    location: 0.20,   // raised from 0.10 — location is a strong user intent signal
     recency:  0.10,
 } as const;
 

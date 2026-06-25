@@ -24,6 +24,7 @@ export const EMPTY_SECTIONS: ParsedSections = {
   education: [],
   skills: [],
   projects: [],
+  certifications: [],
   links: undefined,
 };
 

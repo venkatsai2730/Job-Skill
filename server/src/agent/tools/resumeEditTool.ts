@@ -71,7 +71,7 @@ USER REQUEST: "${userRequest}"`;
 }
 
 // Try every top-level { ... } block in the response for a valid AriaEdit
-function extractAriaEdit(raw: string): AriaEdit | null {
+export function extractAriaEdit(raw: string): AriaEdit | null {
     const text = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
     let depth = 0, start = -1;
     for (let i = 0; i < text.length; i++) {

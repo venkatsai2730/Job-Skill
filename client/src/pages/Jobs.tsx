@@ -399,7 +399,7 @@ export default function Jobs() {
 
   const [page, setPage] = useState(1);
   const [totalJobs, setTotalJobs] = useState(0);
-  const [primaryPage, setPrimaryPage] = useState(1);
+  // primaryPage is declared above (with PRIMARY_PAGE_SIZE); duplicate removed.
   const [crossPage, setCrossPage] = useState(1);
   const JOBS_PER_PAGE = 20;
   const [search, setSearch] = useState("");
@@ -531,6 +531,24 @@ export default function Jobs() {
   };
 
   const handleApplyFilters = () => { fetchFeedJobs(true, 1); };
+
+  // Quick-set the location filter and immediately refetch (used by the Remote/India chips).
+  const quickLocation = (loc: string) => {
+    setLocation(loc);
+    fetchFeedJobs(true, 1, undefined, undefined, undefined, { location: loc });
+  };
+  const clearAllFilters = () => {
+    setSearch(""); setLocation(""); setExperience(""); setSkills("");
+    fetchFeedJobs(true, 1, undefined, undefined, undefined, { query: "", location: "", experience: "", skills: "", category: "" });
+  };
+  const clearOneFilter = (which: "search" | "location" | "experience" | "skills") => {
+    const next = { query: search, location, experience, skills };
+    if (which === "search") { setSearch(""); next.query = ""; }
+    if (which === "location") { setLocation(""); next.location = ""; }
+    if (which === "experience") { setExperience(""); next.experience = ""; }
+    if (which === "skills") { setSkills(""); next.skills = ""; }
+    fetchFeedJobs(true, 1, undefined, undefined, undefined, next);
+  };
   const handlePageChange = (newPage: number) => {
     const perPage = getUserId() ? 50 : 40;
     const totalPages = Math.ceil(totalJobs / perPage);
@@ -729,13 +747,63 @@ export default function Jobs() {
             <button onClick={handleApplyFilters} className="w-full lg:w-auto bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-md shadow-blue-500/20 active:scale-95 flex items-center justify-center">Search Jobs</button>
           </div>
 
+          {/* Quick location toggles + active-filter chips */}
+          <div className="flex flex-wrap items-center gap-2 mb-6">
+            <span className="text-[12px] font-semibold text-gray-400 mr-1">Quick:</span>
+            {["Remote", "India", "Hyderabad", "Bengaluru"].map((loc) => (
+              <button key={loc} onClick={() => quickLocation(loc)}
+                className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${location.toLowerCase() === loc.toLowerCase() ? "bg-blue-500 text-white border-blue-500" : "bg-white text-gray-600 border-border hover:border-blue-400 hover:text-blue-500"}`}>
+                {loc}
+              </button>
+            ))}
+            {/* Active filter chips */}
+            {([["search", search], ["location", location], ["experience", experience && `≤ ${experience} yrs`], ["skills", skills]] as const)
+              .filter(([, v]) => Boolean(v))
+              .map(([key, val]) => (
+                <span key={key} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">
+                  {val}
+                  <button onClick={() => clearOneFilter(key as "search" | "location" | "experience" | "skills")} title={`Clear ${key}`} className="hover:text-blue-800">×</button>
+                </span>
+              ))}
+            {(search || location || experience || skills) && (
+              <button onClick={clearAllFilters} className="text-xs text-gray-500 hover:text-blue-500 hover:underline ml-1">Clear all</button>
+            )}
+          </div>
+
           {loadingFeed ? (
-            <div className="flex items-center justify-center py-20"><div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full" /></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="bg-white border border-border rounded-2xl p-5 animate-pulse">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-12 h-12 rounded-xl bg-gray-200" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-3.5 bg-gray-200 rounded w-3/4" />
+                      <div className="h-3 bg-gray-100 rounded w-1/2" />
+                    </div>
+                  </div>
+                  <div className="space-y-2 mb-4">
+                    <div className="h-3 bg-gray-100 rounded w-2/3" />
+                    <div className="h-3 bg-gray-100 rounded w-1/3" />
+                  </div>
+                  <div className="flex gap-2"><div className="h-6 bg-gray-100 rounded-lg w-16" /><div className="h-6 bg-gray-100 rounded-lg w-16" /></div>
+                </div>
+              ))}
+            </div>
           ) : (primaryJobs.length === 0 && crossDomainJobs.length === 0 && feedJobs.length === 0) ? (
             <div className="text-center py-20 bg-white border border-border rounded-2xl">
-              <h3 className="text-lg font-medium text-gray-800">No jobs match your filters</h3>
-              <p className="text-gray-600 mt-2">Try adjusting your search criteria broadly to find more roles.</p>
-              <button onClick={() => { setSearch(""); setLocation(""); setExperience(""); setSkills(""); fetchFeedJobs(true, 1, undefined, undefined, undefined, { query: "", location: "", experience: "", skills: "", category: "" }); }} className="mt-4 text-blue-500 hover:underline text-sm font-medium">Clear Filters</button>
+              <MapPin className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <h3 className="text-lg font-semibold text-gray-800">
+                {location ? `No jobs found in "${location}"` : "No jobs match your filters"}
+              </h3>
+              <p className="text-gray-600 mt-2 max-w-md mx-auto">
+                {location
+                  ? "We couldn't find live roles for that location yet. Try a nearby metro, switch to Remote, or clear the location."
+                  : "Try broadening your search — remove a skill or experience cap to see more roles."}
+              </p>
+              <div className="flex items-center justify-center gap-2 mt-4">
+                {location && <button onClick={() => quickLocation("Remote")} className="text-sm font-medium px-4 py-2 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50">Show Remote</button>}
+                <button onClick={clearAllFilters} className="text-sm font-medium px-4 py-2 rounded-lg bg-blue-500 text-white hover:bg-blue-600">Clear Filters</button>
+              </div>
             </div>
           ) : hasDomainData ? (
             <>

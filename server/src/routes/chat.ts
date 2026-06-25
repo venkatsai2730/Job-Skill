@@ -108,7 +108,7 @@ function formatJobCard(j: any, index: number): string {
 // ═══════════════════════════════════════════════════════════════
 // POST /api/chat — Main AI chat (supports feature routing)
 // ═══════════════════════════════════════════════════════════════
-router.post("/", chatLimiter, async (req: Request, res: Response) => {
+router.post("/", authenticateToken, chatLimiter, async (req: Request, res: Response) => {
     const { messages, feature, conversationId } = req.body;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -556,7 +556,7 @@ router.patch("/conversations/:id", authenticateToken, async (req: AuthRequest, r
 // ═══════════════════════════════════════════════════════════════
 
 // POST /api/chat/cover-letter
-router.post("/cover-letter", chatLimiter, async (req: Request, res: Response) => {
+router.post("/cover-letter", authenticateToken, chatLimiter, async (req: Request, res: Response) => {
     const { resumeText, jobDescription, companyName, tone } = req.body;
     if (!resumeText || !jobDescription) {
         res.status(400).json({ error: "resumeText and jobDescription are required." });
@@ -571,7 +571,7 @@ router.post("/cover-letter", chatLimiter, async (req: Request, res: Response) =>
 });
 
 // POST /api/chat/job-match
-router.post("/job-match", chatLimiter, async (req: Request, res: Response) => {
+router.post("/job-match", authenticateToken, chatLimiter, async (req: Request, res: Response) => {
     const { resumeText, jobDescription } = req.body;
     if (!resumeText || !jobDescription) {
         res.status(400).json({ error: "resumeText and jobDescription are required." });
@@ -586,7 +586,7 @@ router.post("/job-match", chatLimiter, async (req: Request, res: Response) => {
 });
 
 // POST /api/chat/screening
-router.post("/screening", chatLimiter, async (req: Request, res: Response) => {
+router.post("/screening", authenticateToken, chatLimiter, async (req: Request, res: Response) => {
     const { userProfile, questions } = req.body;
     if (!questions || !Array.isArray(questions)) {
         res.status(400).json({ error: "questions array is required." });
@@ -601,7 +601,7 @@ router.post("/screening", chatLimiter, async (req: Request, res: Response) => {
 });
 
 // POST /api/chat/score-resume
-router.post("/score-resume", chatLimiter, async (req: Request, res: Response) => {
+router.post("/score-resume", authenticateToken, chatLimiter, async (req: Request, res: Response) => {
     const { resumeText } = req.body;
     if (!resumeText) {
         res.status(400).json({ error: "resumeText is required." });
@@ -616,7 +616,7 @@ router.post("/score-resume", chatLimiter, async (req: Request, res: Response) =>
 });
 
 // POST /api/chat/code-gen
-router.post("/code-gen", chatLimiter, async (req: Request, res: Response) => {
+router.post("/code-gen", authenticateToken, chatLimiter, async (req: Request, res: Response) => {
     const { prompt, language } = req.body;
     if (!prompt) {
         res.status(400).json({ error: "prompt is required." });

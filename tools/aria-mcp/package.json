@@ -1,0 +1,20 @@
+{
+  "name": "aria-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server that lets Claude subagents touch the JobSkill AI (Aria) app via its HTTP API.",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "healthcheck": "node healthcheck.mjs",
+    "audit": "node headless-audit.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "^0.70.0"
+  }
+}

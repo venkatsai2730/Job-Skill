@@ -13,6 +13,7 @@ import { compileLatexToPdf } from "../lib/latex-compile.js";
 import { searchJobs } from "../services/jobFetcher.js";
 import { runAriaAgent, type AgentResponse } from "../agent/ariaAgent.js";
 import { getUserMemories } from "../agent/agentMemory.js";
+import { extractAriaEdit } from "../agent/tools/resumeEditTool.js";
 
 const router = Router();
 
@@ -111,6 +112,12 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
         const { message, command: explicitCommand, payload = {}, useAgent = true, currentResumeData } = req.body;
         const userId = req.user!.userId;
 
+        // Tracks whether we've already flushed SSE headers/bytes. If the agent
+        // throws AFTER streaming started, we must close the stream cleanly
+        // rather than fall through to the legacy handler (which would call
+        // res.json() on an open stream and hang the client).
+        let sseStarted = false;
+
         // ═══════════════════════════════════════════════════════
         // v2.0: AGENTIC PATH (default)
         // Streams response via SSE for thinking/message/tools_used
@@ -161,6 +168,7 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                     res.setHeader("Connection", "keep-alive");
                     res.setHeader("X-Accel-Buffering", "no");
                     res.flushHeaders();
+                    sseStarted = true;
 
                     // Send thinking event
                     res.write(`data: ${JSON.stringify({ type: "thinking", message: "Analyzing your request..." })}\n\n`);
@@ -216,8 +224,24 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                     },
                 });
             } catch (agentErr: any) {
-                console.error("[Chatbot] Agent error, falling back to legacy handler:", agentErr.message);
-                // Fall through to legacy handler
+                console.error("[Chatbot] Agent error:", agentErr.message);
+
+                // If we already started streaming, we cannot fall through to the
+                // legacy handler (it would res.json() over an open stream). Close
+                // the SSE stream with an error event so the client stops waiting.
+                if (sseStarted) {
+                    if (!res.writableEnded) {
+                        res.write(`data: ${JSON.stringify({
+                            type: "error",
+                            message: "The assistant hit an error processing that. Please try again.",
+                        })}\n\n`);
+                        res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+                        res.end();
+                    }
+                    return;
+                }
+                // Nothing sent yet — safe to fall through to the legacy handler.
+                console.error("[Chatbot] Falling back to legacy handler.");
             }
         }
 
@@ -312,13 +336,12 @@ router.post("/resume-chatbot", authenticateToken, async (req: AuthRequest, res: 
                 if (!resumeText) return res.status(400).json({ type: "error", message: "Upload a resume first." });
                 if (!jobDescription) return res.status(400).json({ type: "error", message: "Paste the job description in the JD Match panel, then click Tailor to JD again." });
                 const tailorResult = await getAIReply([{ role: "user", content: `${contextPrefix}\n\nTAILORING TARGET — Rewrite ALL sections to maximize shortlisting for this role:\n${jobDescription.substring(0, 3000)}` }], "resume_tailor");
-                // Parse AriaEdit from the tailor response
-                let ariaEdit: any = null;
-                try {
-                    const text = tailorResult.reply.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-                    const jsonMatch = text.match(/\{[\s\S]*\}/);
-                    if (jsonMatch) ariaEdit = JSON.parse(jsonMatch[0]);
-                } catch { /* ignore parse errors */ }
+                // Parse AriaEdit using the same robust extractor + validator as the
+                // agentic edit_resume tool (bracket-depth scan, schema validation).
+                const ariaEdit = extractAriaEdit(tailorResult.reply);
+                if (!ariaEdit) {
+                    return res.json({ type: "error", command: "tailor", message: "Couldn't generate structured edits for tailoring. Please try again." });
+                }
                 return res.json({ type: "success", command: "tailor", message: "Resume tailored for the target role. Check the preview for all changes.", aria_edit: ariaEdit, data: { reply: "Resume tailored to match the job description. All sections updated.", aria_edit: ariaEdit } });
             }
             case "improve": {
@@ -516,7 +539,7 @@ router.post("/analyze-resume", authenticateToken, async (req: AuthRequest, res: 
             const parsedData = {
                 sections,
                 ats: { ...ats, inferredSkills: allInferredSkills },
-                rawText: resumeText.substring(0, 5000),
+                rawText: resumeText.substring(0, 20000),
             };
             await supabaseAdmin
                 .from("resumes")

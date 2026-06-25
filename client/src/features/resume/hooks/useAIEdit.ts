@@ -4,7 +4,7 @@ import type { ATSResult, ParsedSections } from "../types/resume.types";
 import { ParsedSectionsSchema } from "../schemas/resume.schema";
 import { sanitisePrompt } from "../utils/seedIds";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+import { API_URL } from "../../../lib/config";
 
 function getToken(): string {
   return localStorage.getItem("auth_token") ?? "";

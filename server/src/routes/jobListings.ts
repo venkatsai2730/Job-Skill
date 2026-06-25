@@ -59,6 +59,11 @@ router.get("/", async (req: AuthRequest, res: Response) => {
 
         const { query, location, skills, experience_max, limit, page, preferred_location, city, country, user_id, category } = req.query;
 
+        // An EXPLICIT location is one the user typed into the filter box (as opposed to
+        // the geo-detected city/country). When present we treat it as a HARD constraint:
+        // keep the DB location filter on, drop non-matching jobs, and pull live jobs for it.
+        const explicitLocation = typeof location === "string" && location.trim() ? location.trim() : "";
+
         const parsedLimit = limit ? parseInt(limit as string) : (hasUser ? 300 : 40);
         // For domain-aware split we need a much larger raw pool; pagination happens after split
         const dbFetchLimit = (hasUser && !category) ? Math.max(parsedLimit, 1000) : parsedLimit;
@@ -202,7 +207,10 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             skills: skills ? (skills as string).split(",") : undefined,
             experience_max: parsedExpMax ?? userExperienceYears,
             limit: dbFetchLimit,
-            bypassLocationFilter: !!userDomain,  // domain-aware users: location scored in-memory
+            // Domain-aware users normally score location in-memory, BUT when the user
+            // explicitly typed a location we keep the hard DB filter so the pool is
+            // actually constrained to that city/country (+ remote).
+            bypassLocationFilter: !!userDomain && !explicitLocation,
             page: parsedPage,
             preferred_location: preferred_location as string,
             city: city as string,
@@ -221,7 +229,20 @@ router.get("/", async (req: AuthRequest, res: Response) => {
         // If DB results are too few, supplement with MCP live scraping (no API keys)
         const supplementThreshold = hasUser ? 100 : 50;
         const supplementLocation = (location || city || preferred_location || "India") as string;
-        if (allJobs.length < supplementThreshold && (location || city || query || hasUser)) {
+
+        // When the user explicitly set a location, count how many fetched jobs actually
+        // match it (city/country/remote). If that pool is thin, force a live search for
+        // that location so India/Hyderabad jobs get pulled even when the DB has plenty
+        // of (US) jobs overall.
+        const explicitCountry = (country || preferred_location || "") as string;
+        const locMatchCount = explicitLocation
+            ? allJobs.filter((j: any) =>
+                computeLocationMatch(j.location || "", explicitLocation.toLowerCase(), explicitCountry.toLowerCase()) >= 0.5
+              ).length
+            : Infinity;
+        const needLocationSupplement = !!explicitLocation && locMatchCount < (hasUser ? 60 : 30);
+
+        if ((allJobs.length < supplementThreshold || needLocationSupplement) && (location || city || query || hasUser)) {
             const searchLocation = supplementLocation;
             const searchQuery = (query || "") as string;
 
@@ -377,6 +398,12 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                 );
                 const titleSim = computeTitleSimilarity(userCurrentRole, job.title || "");
                 const locationMatch = computeLocationMatch(job.location || "", userCity, userCountry);
+
+                // HARD location filter: when the user explicitly typed a location, drop
+                // jobs that don't match it (keeps in-city + same-country + remote, removes
+                // e.g. US-only roles). This is the fix for "Hyderabad shows only US jobs".
+                if (explicitLocation && locationMatch < 0.5) continue;
+
                 const recency = computeRecencyScore(job.posted_at || "");
 
                 const signals: RelevanceSignals = {
