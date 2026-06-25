@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api } from "../lib/api";
 import { toast } from "sonner";
 import { DiffCard } from "./DiffCard";
 import type { ResumePatch, AriaEdit } from "@/lib/resumeTypes";
