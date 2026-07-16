@@ -12,9 +12,9 @@ import { Router, Response } from "express";
 import { searchJobs, extractExperience, detectCategory } from "../services/jobFetcher.js";
 import { mcpLiveSearch } from "../mcp/mcpClient.js";
 import { syncJobsViaMCP } from "../mcp/jobSyncCron.js";
-import { rankJobsForUser, getUserSkillsForMatching } from "../services/jobRankingService.js";
+import { rankJobsForUserWithSkills } from "../services/jobRankingService.js";
 import { supabaseAdmin } from "../config/supabase.js";
-import { authenticateToken, AuthRequest } from "../middleware/auth.js";
+import { optionalAuthToken, AuthRequest } from "../middleware/auth.js";
 
 // ── New domain-aware imports ─────────────────────────────────
 import {
@@ -36,6 +36,7 @@ const router = Router();
 // Memory Cache to speed up job queries
 const routeCache = new Map<string, { timestamp: number; data: any }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_ENTRIES = 200; // bound the cache so it can't grow unboundedly
 
 // ── Infer user domain from title + skills ────────────────────
 function inferUserDomain(title: string, skills: string[]): JobDomain {
@@ -43,12 +44,12 @@ function inferUserDomain(title: string, skills: string[]): JobDomain {
 }
 
 // GET /api/job-listings — search/browse jobs (DB + optional live JSearch merge)
-router.get("/", async (req: AuthRequest, res: Response) => {
+router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
     try {
         const cacheKey = req.originalUrl;
         // Only use cache for unauthenticated/anonymous requests
         // Authenticated users get fresh personalized results every time
-        const hasUser = !!(req.query.user_id);
+        const hasUser = !!(req.user?.userId);
         if (!hasUser) {
             const cached = routeCache.get(cacheKey);
             if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -57,7 +58,8 @@ router.get("/", async (req: AuthRequest, res: Response) => {
             }
         }
 
-        const { query, location, skills, experience_max, limit, page, preferred_location, city, country, user_id, category } = req.query;
+        const { query, location, skills, experience_max, limit, page, preferred_location, city, country, category } = req.query;
+        const user_id = req.user?.userId;
 
         // An EXPLICIT location is one the user typed into the filter box (as opposed to
         // the geo-detected city/country). When present we treat it as a HARD constraint:
@@ -84,7 +86,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                 const { data: profile } = await supabaseAdmin
                     .from("user_profiles")
                     .select("skills, experience_years, seniority_level")
-                    .eq("user_id", user_id as string)
+                    .eq("user_id", user_id)
                     .single();
 
                 if (profile) {
@@ -102,7 +104,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                 const { data: resume } = await supabaseAdmin
                     .from("resumes")
                     .select("parsed_data")
-                    .eq("user_id", user_id as string)
+                    .eq("user_id", user_id)
                     .order("created_at", { ascending: false })
                     .limit(1)
                     .single();
@@ -142,23 +144,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                     // ── Domain Detection (from same resume fetch) ──
                     userCurrentRole = pd?.sections?.experience?.[0]?.title || "";
                     const summary = pd?.sections?.summary || "";
-                    const roleAndSummary = `${userCurrentRole} ${summary}`.toLowerCase();
-                    
-                    if (/\b(data\s*scien|machine\s*learn|ml\s*engineer|ai\s*engineer|deep\s*learn|nlp|data\s*analyst|analytics)/i.test(roleAndSummary)) {
-                        userPrimaryDomain = "data-science-ml";
-                    } else if (/\b(frontend|front.?end|react|angular|vue|ui\s*developer|web\s*developer)/i.test(roleAndSummary)) {
-                        userPrimaryDomain = "frontend";
-                    } else if (/\b(backend|back.?end|server|api\s*developer|node|java\s*developer|python\s*developer)/i.test(roleAndSummary)) {
-                        userPrimaryDomain = "backend";
-                    } else if (/\b(full.?stack|fullstack)/i.test(roleAndSummary)) {
-                        userPrimaryDomain = "backend";
-                    } else if (/\b(devops|sre|cloud\s*engineer|infrastructure|platform\s*engineer)/i.test(roleAndSummary)) {
-                        userPrimaryDomain = "devops";
-                    } else if (/\b(data\s*engineer|etl|pipeline|spark|airflow|warehouse)/i.test(roleAndSummary)) {
-                        userPrimaryDomain = "data-analytics";
-                    } else if (/\b(android|ios|mobile|flutter|react\s*native|swift|kotlin)/i.test(roleAndSummary)) {
-                        userPrimaryDomain = "mobile";
-                    }
+                    userPrimaryDomain = classifyJobDomain(userCurrentRole, summary, userSkills) as string;
                 }
             } catch { /* no resume */ }
         }
@@ -196,7 +182,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
 
         // Debug: Log what skills are being used for matching
         if (user_id && userSkills.length > 0) {
-            console.log(`[JobListings] User ${(user_id as string).substring(0, 8)}... matching with ${userSkills.length} skills: ${userSkills.slice(0, 15).join(", ")}${userSkills.length > 15 ? '...' : ''}`);
+            console.log(`[JobListings] User ${user_id.substring(0, 8)}... matching with ${userSkills.length} skills: ${userSkills.slice(0, 15).join(", ")}${userSkills.length > 15 ? '...' : ''}`);
             console.log(`[JobListings] Domain: ${userDomain || 'unknown'}, Role: ${userCurrentRole || 'unknown'}, Experience: ${userExperienceYears || 'unknown'} yrs`);
         }
 
@@ -333,11 +319,17 @@ router.get("/", async (req: AuthRequest, res: Response) => {
 
         // v2.0: Smart ranking by resume match when user is identified
         let rankedJobs = allJobs;
-        let userSkillsForResponse: string[] = [];
+        // Use already-loaded userSkills to avoid a second DB fetch
+        const userSkillsForResponse: string[] = userSkills;
         if (user_id && allJobs.length > 0) {
             try {
-                rankedJobs = await rankJobsForUser(user_id as string, allJobs, allJobs.length);
-                userSkillsForResponse = await getUserSkillsForMatching(user_id as string);
+                rankedJobs = await rankJobsForUserWithSkills(
+                    user_id,
+                    allJobs,
+                    userSkills,
+                    userExperienceYears ?? 0,
+                    allJobs.length,
+                );
             } catch (rankErr: any) {
                 console.warn("[JobListings] Ranking failed, returning unranked:", rankErr.message);
             }
@@ -399,10 +391,18 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                 const titleSim = computeTitleSimilarity(userCurrentRole, job.title || "");
                 const locationMatch = computeLocationMatch(job.location || "", userCity, userCountry);
 
-                // HARD location filter: when the user explicitly typed a location, drop
-                // jobs that don't match it (keeps in-city + same-country + remote, removes
-                // e.g. US-only roles). This is the fix for "Hyderabad shows only US jobs".
-                if (explicitLocation && locationMatch < 0.5) continue;
+                // HARD location filter: when the user explicitly typed a location, keep only
+                // jobs in that location or remote jobs. Same-country-only matches (e.g. a
+                // Bengaluru job when the user asked for Hyderabad) score 0.6 from
+                // computeLocationMatch but are NOT what the user asked for, so drop them.
+                // (A plain `locationMatch < X` threshold can't express this because remote =
+                // 0.5 scores below same-country = 0.6.)
+                if (explicitLocation) {
+                    const jobLoc = (job.location || "").toLowerCase();
+                    const isRemote = /remote|work from home|wfh|anywhere/.test(jobLoc);
+                    const isCityMatch = locationMatch >= 1.0;
+                    if (!isCityMatch && !isRemote) continue;
+                }
 
                 const recency = computeRecencyScore(job.posted_at || "");
 
@@ -440,6 +440,9 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                     shortlisting_chance: shortlist.chance,
                     shortlisting_band: shortlist.band,
                     shortlisting_reason: shortlist.reason,
+                    // Alias so frontend components reading either field work consistently
+                    selection_chance: shortlist.chance,
+                    selection_reason: shortlist.reason,
                     domain_match: domainMatch,
                 };
 
@@ -450,14 +453,23 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                 }
             }
 
-            // Sort both pools by relevance score (descending)
-            scoredPrimary.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
-            scoredCross.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
+            // Ordering WITHIN each pool uses the harder-penalized match_score
+            // (PhD / seniority / tier-1 penalties from rankJobsForUser), with the
+            // relevance_score as a tiebreak. The primary/cross SPLIT itself is still
+            // decided by domainMatch above.
+            const byScore = (a: any, b: any) =>
+                (b.match_score || 0) - (a.match_score || 0) ||
+                (b.relevance_score || 0) - (a.relevance_score || 0);
+            scoredPrimary.sort(byScore);
+            scoredCross.sort(byScore);
 
-            // Apply a very loose relevance floor just to drop truly irrelevant noise
-            const minFloor = 0.10;
-            let primaryFiltered = scoredPrimary.filter(j => (j.relevance_score || 0) >= minFloor);
-            // If floor cuts too much, include everything
+            // Apply the configured relevance floor; relax it (then drop it) when the
+            // primary pool would otherwise be too thin. Uses the tunable thresholds
+            // from relevanceScorer instead of a magic number.
+            let primaryFiltered = scoredPrimary.filter(j => (j.relevance_score || 0) >= MIN_PRIMARY_RELEVANCE);
+            if (primaryFiltered.length < MIN_PRIMARY_JOBS) {
+                primaryFiltered = scoredPrimary.filter(j => (j.relevance_score || 0) >= RELAXED_PRIMARY_RELEVANCE);
+            }
             if (primaryFiltered.length < MIN_PRIMARY_JOBS) {
                 primaryFiltered = scoredPrimary;
             }
@@ -472,6 +484,7 @@ router.get("/", async (req: AuthRequest, res: Response) => {
                 meta: {
                     user_domain: userDomain,
                     user_domain_label: JOB_DOMAIN_LABELS[userDomain] || userDomain,
+                    relevance_threshold: MIN_PRIMARY_RELEVANCE,
                     total_primary: Math.min(primaryFiltered.length, MAX_PRIMARY),
                     total_cross: Math.min(scoredCross.length, MAX_CROSS),
                     total_primary_available: primaryFiltered.length,
@@ -505,6 +518,12 @@ router.get("/", async (req: AuthRequest, res: Response) => {
         // Only cache anonymous (non-personalized) responses
         if (!user_id) {
             routeCache.set(cacheKey, { timestamp: Date.now(), data: responseData });
+            // Evict oldest entries once we exceed the cap (Map preserves insertion order)
+            while (routeCache.size > MAX_CACHE_ENTRIES) {
+                const oldestKey = routeCache.keys().next().value;
+                if (oldestKey === undefined) break;
+                routeCache.delete(oldestKey);
+            }
         }
         res.json(responseData);
     } catch (err: any) {

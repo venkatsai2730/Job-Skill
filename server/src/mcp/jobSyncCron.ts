@@ -13,6 +13,7 @@ import { callMCPTool } from "./mcpClient.js";
 import { supabaseAdmin } from "../config/supabase.js";
 import { detectCategory, extractExperience } from "../services/jobFetcher.js";
 import { classifySeniorityFromTitle } from "../services/jobClassifier.js";
+import { classifyJobDomain } from "../services/jobDomainClassifier.js";
 
 // ── Job Query Definitions ────────────────────────────────────
 interface JobQuery {
@@ -196,10 +197,19 @@ function sleep(ms: number): Promise<void> {
 // ── Track migration status ────────────────────────────────────
 let migrationMissing = false;
 
+// ── Concurrency guard — prevents overlapping sync runs ────────
+let syncRunning = false;
+
 // ═══════════════════════════════════════════════════════════════
 // MAIN SYNC FUNCTION
 // ═══════════════════════════════════════════════════════════════
 export async function syncJobsViaMCP(): Promise<{ total: number; errors: number }> {
+    if (syncRunning) {
+        console.log("[MCP-Sync] Previous sync still running — skipping.");
+        return { total: 0, errors: 0 };
+    }
+    syncRunning = true;
+    try {
     console.log(`[MCP-Sync] Starting job sync (${JOB_QUERIES.length} queries)...`);
     let totalUpserted = 0;
     let totalErrors = 0;
@@ -260,6 +270,7 @@ export async function syncJobsViaMCP(): Promise<{ total: number; errors: number 
                             skills,
                             experience_min: experience.min ?? classification.experience_min,
                             experience_max: experience.max ?? classification.experience_max,
+                            job_domain: classifyJobDomain(title, description, skills),
                         };
 
                         if (!migrationMissing) {
@@ -346,6 +357,9 @@ export async function syncJobsViaMCP(): Promise<{ total: number; errors: number 
 
     console.log(`[MCP-Sync] ✅ Complete. Fetched: ${totalFetched}, Stored: ${totalUpserted}, Errors: ${totalErrors}`);
     return { total: totalUpserted, errors: totalErrors };
+    } finally {
+        syncRunning = false;
+    }
 }
 
 // ── Reactivate jobs that were over-aggressively expired ──────

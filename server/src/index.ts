@@ -33,9 +33,21 @@ const serveStatic = fs.existsSync(clientDist);
 app.disable("x-powered-by");
 
 // Middleware
+const ALLOWED_ORIGINS = [
+    process.env.CLIENT_URL,
+    "http://localhost:5173",
+    "http://localhost:3000",
+].filter(Boolean) as string[];
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:5173",
-  credentials: true,
+    origin: (origin, callback) => {
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error(`CORS: origin ${origin} not allowed`));
+        }
+    },
+    credentials: true,
 }));
 app.use(express.json({ limit: "15mb" }));
 

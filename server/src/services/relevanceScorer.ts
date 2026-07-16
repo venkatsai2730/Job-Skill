@@ -106,6 +106,21 @@ export function computeSkillOverlap(
     const userNormSet = new Set(userNorm);
     const descNorm = normalize(jobDescription);
 
+    // ── Fallback: job has no skills[] (common for scraped/live jobs) ──
+    // Without this, the loop below never runs and every skill-less job scores 0,
+    // sinking otherwise-relevant fresh jobs. Instead scan the description for the
+    // USER's skills and score against a soft denominator.
+    if (jobSkills.length === 0) {
+        const matchedFromDesc = userSkills.filter((_s, i) => {
+            const n = userNorm[i];
+            return n.length >= 3 && descNorm.includes(n);
+        });
+        // Treat matching ~6 of the user's skills in the description as a full overlap.
+        const denom = Math.max(3, Math.min(userSkills.length, 6));
+        const ratio = Math.min(1, matchedFromDesc.length / denom);
+        return { ratio, matchedSkills: matchedFromDesc, skillGap: [] };
+    }
+
     const matchedSkills: string[] = [];
     const skillGap: string[] = [];
 
@@ -123,8 +138,8 @@ export function computeSkillOverlap(
         }
     }
 
-    // Ratio is matched / total job skills (or user skills if job has none)
-    const denominator = jobSkills.length > 0 ? jobSkills.length : userSkills.length;
+    // Ratio is matched / total job skills
+    const denominator = jobSkills.length;
     const ratio = denominator > 0 ? matchedSkills.length / denominator : 0;
 
     return { ratio: Math.min(1.0, ratio), matchedSkills, skillGap };
