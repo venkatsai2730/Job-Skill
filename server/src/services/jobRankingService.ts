@@ -7,6 +7,7 @@ import { supabaseAdmin } from "../config/supabase.js";
 import { USE_HYBRID_JOB_RANKING } from "../config/featureFlags.js";
 import { retrieveSimilarJobs } from "../rag/retrieve.js";
 import { scoreTrackAlignment } from "./recommendationEngine.js";
+import { computeTitleSimilarity } from "./relevanceScorer.js";
 
 // ── Types ─────────────────────────────────────────────────────
 export interface JobListing {
@@ -154,26 +155,6 @@ function computeSelectionChance(
     return { chance, reason: reasons.join(", ") };
 }
 
-// ── Compute title similarity (tokenized Jaccard) ──────────────
-function computeTitleSimilarity(userTitle: string, jobTitle: string): number {
-    if (!userTitle || !jobTitle) return 50; // neutral if unknown
-
-    const tokenize = (s: string) =>
-        new Set(s.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(w => w.length > 1));
-
-    const userTokens = tokenize(userTitle);
-    const jobTokens = tokenize(jobTitle);
-
-    if (userTokens.size === 0 || jobTokens.size === 0) return 50;
-
-    let intersection = 0;
-    for (const token of userTokens) {
-        if (jobTokens.has(token)) intersection++;
-    }
-
-    const union = new Set([...userTokens, ...jobTokens]).size;
-    return Math.round((intersection / union) * 100);
-}
 
 // ── Seniority level order ─────────────────────────────────────
 const SENIORITY_ORDER = ["intern", "entry", "mid", "senior", "lead"];
@@ -316,7 +297,7 @@ export async function rankJobsForUser(
             : (totalMatchedCount > 0 ? Math.min(100, totalMatchedCount * 12) : 5); // If no job skills listed, use desc matches; if nothing matches, score very low (5 not 50)
 
         // ── Signal 2: Title Match ──────────────────────────────
-        const titleMatch = computeTitleSimilarity(userTitle, job.title);
+        const titleMatch = computeTitleSimilarity(userTitle, job.title) * 100;
 
         // ── Signal 3: Seniority Fit ────────────────────────────
         const userLevel = userATSScore < 40 ? "intern"
@@ -583,7 +564,7 @@ export async function rankJobsForUserWithSkills(
             : 50;
 
         // ── Signal 2: Title Match ──────────────────────────────
-        const titleMatch = computeTitleSimilarity(userTitle, job.title);
+        const titleMatch = computeTitleSimilarity(userTitle, job.title) * 100;
 
         // ── Signal 3: Seniority Fit ────────────────────────────
         const userLevel = preloadedExpYears <= 1 ? "intern"

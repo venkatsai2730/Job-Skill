@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 
 // ═══════════════════════════════════════════════════════════════
 // TYPES
@@ -162,8 +163,8 @@ function MatchScoreBadge({ score }: { score?: number }) {
 }
 
 function SelectionChanceBadge({ chance, reason }: { chance?: number; reason?: string }) {
-  if (!chance || chance <= 0) return null;
   const [showTip, setShowTip] = useState(false);
+  if (!chance || chance <= 0) return null;
   let emoji: string, label: string, cls: string, bgCls: string;
   if (chance >= 60) {
     emoji = "🔥"; label = "High Chance"; cls = "text-emerald-400"; bgCls = "bg-emerald-500/15 border-emerald-500/20";
@@ -220,8 +221,8 @@ function DomainPill({ job, userDomain, userDomainLabel }: { job: JobListing; use
 
 // ── Shortlisting Band Badge ──
 function ShortlistBadge({ band, chance, reason }: { band?: string; chance?: number; reason?: string }) {
-  if (!band || !chance || chance <= 0) return null;
   const [showTip, setShowTip] = useState(false);
+  if (!band || !chance || chance <= 0) return null;
   const config: Record<string, { emoji: string; cls: string; bgCls: string }> = {
     "High": { emoji: "🔥", cls: "text-emerald-400", bgCls: "bg-emerald-500/15 border-emerald-500/20" },
     "Medium": { emoji: "✨", cls: "text-blue-400", bgCls: "bg-blue-500/15 border-blue-500/20" },
@@ -325,6 +326,9 @@ export function JobCard({ job, userSkills, onSave, onMatch, userDomain, userDoma
       {/* Badges row */}
       <div className="flex items-center gap-1.5 flex-wrap mb-3">
         <SeniorityBadge level={job.seniority_level} />
+        <MatchScoreBadge score={job.match_score} />
+        <SelectionChanceBadge chance={job.selection_chance} reason={job.selection_reason} />
+        <DomainPill job={job} userDomain={userDomain} userDomainLabel={userDomainLabel} />
         <ActivityBadge postedAt={job.posted_at} />
       </div>
 
@@ -378,6 +382,7 @@ export function JobCard({ job, userSkills, onSave, onMatch, userDomain, userDoma
 
 export default function Jobs() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("feed");
 
   // ── Domain-aware state ──
@@ -412,16 +417,6 @@ export default function Jobs() {
   const [geoLocation, setGeoLocation] = useState<GeoLocation | null>(null);
   const [geoStatus, setGeoStatus] = useState<"detecting" | "detected" | "denied" | "idle">("idle");
   const geoDetectedRef = useRef(false);
-
-  // Get user ID from localStorage
-  const getUserId = () => {
-    try {
-      const token = localStorage.getItem("auth_token");
-      if (!token) return null;
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      return payload.userId || payload.sub || null;
-    } catch { return null; }
-  };
 
   useEffect(() => {
     setGeoStatus("detecting");
@@ -474,7 +469,7 @@ export default function Jobs() {
     setLoadingFeed(true);
     if (reset) { setPage(1); setPrimaryPage(1); setCrossPage(1); }
     try {
-      const defaultLimit = overrides?.category ? "60" : (getUserId() ? "300" : "40");
+      const defaultLimit = overrides?.category ? "60" : (user?.id ? "300" : "40");
       const params = new URLSearchParams({ page: currentPage.toString(), limit: overrides?.limit || defaultLimit });
       const q = overrides?.query ?? search;
       const loc = overrides?.location ?? location;
@@ -494,9 +489,7 @@ export default function Jobs() {
       if (resolvedCity) params.append("city", resolvedCity);
       if (resolvedCountry) params.append("country", resolvedCountry);
 
-      // Pass user_id for resume matching
-      const userId = getUserId();
-      if (userId) params.append("user_id", userId);
+      // No longer appending user_id — server reads identity from the Authorization header (JWT)
 
       const res = await api.get<ApiResponse>(`/api/job-listings?${params.toString()}`);
 
@@ -550,7 +543,7 @@ export default function Jobs() {
     fetchFeedJobs(true, 1, undefined, undefined, undefined, next);
   };
   const handlePageChange = (newPage: number) => {
-    const perPage = getUserId() ? 50 : 40;
+    const perPage = user?.id ? 50 : 40;
     const totalPages = Math.ceil(totalJobs / perPage);
     if (newPage < 1 || newPage > totalPages) return;
     fetchFeedJobs(false, newPage);
@@ -948,12 +941,12 @@ export default function Jobs() {
               </div>
 
               {/* Pagination */}
-              {Math.ceil(totalJobs / (getUserId() ? 50 : 40)) > 1 && (
+              {Math.ceil(totalJobs / (user?.id ? 50 : 40)) > 1 && (
                 <div className="flex justify-center items-center gap-3 mt-12 mb-6">
                   <button onClick={() => handlePageChange(page - 1)} disabled={page === 1} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Previous</button>
                   <div className="flex items-center gap-1.5 px-2">
-                    {Array.from({ length: Math.min(5, Math.ceil(totalJobs / (getUserId() ? 50 : 40))) }, (_, i) => {
-                      const perPage = getUserId() ? 50 : 40;
+                    {Array.from({ length: Math.min(5, Math.ceil(totalJobs / (user?.id ? 50 : 40))) }, (_, i) => {
+                      const perPage = user?.id ? 50 : 40;
                       const totalPages = Math.ceil(totalJobs / perPage);
                       let pageNum: number;
                       if (totalPages <= 5) pageNum = i + 1;
@@ -968,7 +961,7 @@ export default function Jobs() {
                       );
                     })}
                   </div>
-                  <button onClick={() => handlePageChange(page + 1)} disabled={page === Math.ceil(totalJobs / (getUserId() ? 50 : 40))} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Next</button>
+                  <button onClick={() => handlePageChange(page + 1)} disabled={page === Math.ceil(totalJobs / (user?.id ? 50 : 40))} className="flex items-center gap-1 bg-gray-50 border border-border hover:bg-gray-100 transition-colors px-4 py-2 rounded-lg text-sm font-semibold text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed outline-none">Next</button>
                 </div>
               )}
             </>
@@ -1030,7 +1023,7 @@ export default function Jobs() {
                         </div>
                       ))}
                       {colJobs.length === 0 && (
-                        <div className="border border-dashed border-border rounded-2xl p-6 text-center text-gray-400 text-[13px] font-medium flex items-center justify-center min-h-[120px]">Drop jobs here</div>
+                        <div className="border border-dashed border-border rounded-2xl p-6 text-center text-gray-400 text-[13px] font-medium flex items-center justify-center min-h-[120px]">No jobs in this column yet</div>
                       )}
                     </div>
                   </div>

@@ -39,7 +39,7 @@ export const JOB_DOMAIN_LABELS: Record<JobDomain, string> = {
 // Used by candidate generation to decide what goes into the
 // primary pool alongside an exact domain match.
 const RELATED_DOMAINS: Record<JobDomain, JobDomain[]> = {
-    "data-science-ml": ["data-analytics", "backend", "data-analytics"],
+    "data-science-ml": ["data-analytics", "backend"],
     "data-analytics": ["data-science-ml", "backend"],
     "frontend": ["mobile", "backend"],
     "backend": ["devops", "frontend", "data-analytics"],
