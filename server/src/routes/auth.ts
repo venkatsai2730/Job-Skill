@@ -133,7 +133,14 @@ router.post("/google", async (req: Request, res: Response) => {
 // POST /api/auth/logout
 router.post("/logout", async (req: Request, res: Response) => {
     try {
-        await supabaseAdmin.auth.signOut();
+        const authHeader = req.headers.authorization;
+        const token = authHeader?.split(" ")[1];
+        if (token) {
+            try {
+                const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+                await supabaseAdmin.auth.admin.signOut(decoded.userId);
+            } catch { /* invalid token — still respond success */ }
+        }
         res.json({ message: "Signed out successfully" });
     } catch (error: any) {
         console.error("Logout error:", error);

@@ -1,7 +1,17 @@
 import { Router, Response } from "express";
+import rateLimit from "express-rate-limit";
 import { supabaseAdmin } from "../config/supabase.js";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
 import { PDFParse } from "pdf-parse";
+
+const aiResumeLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many AI requests. Please wait a moment." },
+    keyGenerator: (req: any) => req.user?.userId || req.ip,
+});
 import Groq from "groq-sdk";
 import {
     Document,
@@ -664,7 +674,7 @@ export async function upsertUserProfileFromResume(userId: string, parsedData: an
         const targetRoles = currentRole ? [currentRole] : [];
 
         // 7. Preferred locations
-        const preferredLocations = sections.experience?.[0]?.company ? [sections.experience?.[0]?.company] : [];
+        const preferredLocations = sections.location ? [sections.location] : [];
 
         // Perform the upsert into user_profiles
         const profileData = {
@@ -961,8 +971,8 @@ router.post("/upload-latex", async (req: AuthRequest, res: Response) => {
         const parsedData = { 
             sections, 
             ats, 
-            rawText: rawText.substring(0, 5000),
-            isLatex: true 
+            rawText: rawText.substring(0, 20000),
+            isLatex: true
         };
 
         res.json({ parsed: parsedData });
@@ -973,7 +983,7 @@ router.post("/upload-latex", async (req: AuthRequest, res: Response) => {
 });
 
 // ── POST /api/resume/score-with-job ── Score existing resume vs JD ──
-router.post("/score-with-job", async (req: AuthRequest, res: Response) => {
+router.post("/score-with-job", aiResumeLimiter, async (req: AuthRequest, res: Response) => {
     try {
         const { jobDescription, rawText } = req.body;
         
@@ -1009,8 +1019,17 @@ router.post("/score-with-job", async (req: AuthRequest, res: Response) => {
         // Parse the AI response (expecting our strict JSON schema)
         let gapAnalysis;
         try {
-            const jsonStr = aiResponse.reply.match(/\{[\s\S]*\}/)?.[0] || aiResponse.reply;
-            gapAnalysis = JSON.parse(jsonStr);
+            const cleaned = aiResponse.reply
+                .replace(/```json\s*/gi, "")
+                .replace(/```\s*/g, "")
+                .trim();
+            try {
+                gapAnalysis = JSON.parse(cleaned);
+            } catch {
+                const match = cleaned.match(/\{[\s\S]*\}/);
+                if (!match) throw new Error("no JSON object found");
+                gapAnalysis = JSON.parse(match[0]);
+            }
         } catch (e) {
             console.error("Failed to parse Gemini JD match response:", aiResponse.reply);
             res.status(500).json({ error: "Failed to parse AI response. Please try again." });
@@ -1230,7 +1249,7 @@ router.get("/download/docx", async (req: AuthRequest, res: Response) => {
 });
 
 // ── POST /api/resume/ai-edit — HugPDF-style: Gemini Flash edits sections → preview updates ──
-router.post("/ai-edit", async (req: AuthRequest, res: Response) => {
+router.post("/ai-edit", aiResumeLimiter, async (req: AuthRequest, res: Response) => {
     const { prompt, sections } = req.body;
 
     if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
@@ -1278,8 +1297,9 @@ router.post("/ai-edit", async (req: AuthRequest, res: Response) => {
         // Recompute ATS and persist
         const { data: row } = await supabaseAdmin
             .from("resumes")
-            .select("parsed_data")
+            .select("id, parsed_data")
             .eq("user_id", req.user!.userId)
+            .order("created_at", { ascending: false })
             .limit(1)
             .single();
 
@@ -1293,7 +1313,7 @@ router.post("/ai-edit", async (req: AuthRequest, res: Response) => {
             await supabaseAdmin
                 .from("resumes")
                 .update({ parsed_data: { ...existing, sections: updatedSections, ats: newAts, rawText: regeneratedText } })
-                .eq("user_id", req.user!.userId);
+                .eq("id", row.id);
         }
 
         send({ type: "result", sections: updatedSections, ats: newAts, summary: `Applied: "${safePrompt}"` });
@@ -1315,8 +1335,9 @@ router.put("/sections", async (req: AuthRequest, res: Response) => {
 
         const { data: row } = await supabaseAdmin
             .from("resumes")
-            .select("parsed_data")
+            .select("id, parsed_data")
             .eq("user_id", req.user!.userId)
+            .order("created_at", { ascending: false })
             .limit(1)
             .single();
 
@@ -1333,7 +1354,7 @@ router.put("/sections", async (req: AuthRequest, res: Response) => {
         await supabaseAdmin
             .from("resumes")
             .update({ parsed_data: newParsedData })
-            .eq("user_id", req.user!.userId);
+            .eq("id", row.id);
 
         res.json({ sections, ats: updatedAts });
     } catch (err: any) {
@@ -1443,8 +1464,9 @@ router.delete("/", async (req: AuthRequest, res: Response) => {
     try {
         const { data: existing, error: fetchError } = await supabaseAdmin
             .from("resumes")
-            .select("storage_path")
+            .select("id, storage_path")
             .eq("user_id", req.user!.userId)
+            .order("created_at", { ascending: false })
             .limit(1)
             .single();
 
@@ -1458,7 +1480,7 @@ router.delete("/", async (req: AuthRequest, res: Response) => {
         const { error: dbError } = await supabaseAdmin
             .from("resumes")
             .delete()
-            .eq("user_id", req.user!.userId);
+            .eq("id", existing.id);
 
         if (dbError) {
             res.status(400).json({ error: dbError.message });
@@ -1529,7 +1551,7 @@ router.post("/simulate-ats", async (req: AuthRequest, res: Response) => {
 });
 
 // ── POST /api/resume/create-new ──
-router.post("/create-new", async (req: any, res: any) => {
+router.post("/create-new", aiResumeLimiter, async (req: any, res: any) => {
     try {
         const { templateType, userData } = req.body;
         
@@ -1648,7 +1670,7 @@ router.post("/reparse", async (req: AuthRequest, res: Response) => {
 // ── POST /api/resume/compile-latex ──
 import { compileLatexToPdf } from "../lib/latex-compile.js";
 
-router.post("/compile-latex", async (req: any, res: any) => {
+router.post("/compile-latex", aiResumeLimiter, async (req: any, res: any) => {
     const { latexContent } = req.body;
     if (!latexContent) return res.status(400).json({ error: "latexContent is required" });
 

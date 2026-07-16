@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
 import { api } from "@/lib/api";
 
 interface User {
@@ -61,7 +61,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(newUser);
   };
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     try {
       await api.post("/api/auth/logout");
     } catch (e) {
@@ -70,7 +70,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem("auth_token");
     setToken(null);
     setUser(null);
-  };
+  }, []);
 
   useEffect(() => {
     const handleAuthError = () => {
@@ -78,7 +78,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
     window.addEventListener("auth_error", handleAuthError);
     return () => window.removeEventListener("auth_error", handleAuthError);
-  }, []);
+  }, [signOut]);
 
   return (
     <AuthContext.Provider value={{ user, token, loading, signOut, setAuth }}>
