@@ -1,4 +1,4 @@
-# JobSkill AI (Aria)
+# JobSkill AI 
 
 An AI-powered job-search and career-prep platform. Aria finds and ranks jobs against your
 résumé, scores and rewrites your résumé for ATS, and helps with cover letters, LinkedIn
