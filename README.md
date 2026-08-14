@@ -88,6 +88,7 @@ cp server/.env.example server/.env
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | optional | Google OAuth sign-in |
 | `CLIENT_URL` | optional | Extra allowed CORS origin |
 | `PORT` | optional | Server port (default `3001`) |
+| `TRUST_PROXY` | optional | Set to `1` when running behind a reverse proxy outside `NODE_ENV=production`, so rate limiters key on the real client IP |
 
 **Client** (`client/.env`):
 

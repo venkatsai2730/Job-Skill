@@ -6,8 +6,21 @@ import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync, readdir
 import { join } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
+import rateLimit from "express-rate-limit";
+import { authenticateToken } from "../middleware/auth.js";
 
 const router = Router();
+
+// /compile forks pdflatex twice with a 30s timeout each, so an unauthenticated
+// caller could pin CPU with a handful of requests. Require a token and cap the
+// rate per user.
+const compileLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    limit: 15,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message: { error: "Too many PDF compilations. Please wait a few minutes." },
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  GET /api/templates — All template metadata for frontend display
@@ -114,7 +127,7 @@ router.post("/select", (req: Request, res: Response) => {
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/templates/compile — Fill template + compile via pdflatex
 // ═══════════════════════════════════════════════════════════════
-router.post("/compile", (req: Request, res: Response) => {
+router.post("/compile", authenticateToken, compileLimiter, (req: Request, res: Response) => {
     const workDir = join(tmpdir(), `latex-compile-${randomUUID()}`);
     
     try {
@@ -147,7 +160,10 @@ router.post("/compile", (req: Request, res: Response) => {
         // ── Compile with pdflatex ──────────────────────────────
         try {
             // Run pdflatex twice for proper cross-references
-            const pdflatexCmd = `pdflatex -interaction=nonstopmode -halt-on-error -output-directory="${workDir}" "${texPath}"`;
+            // -no-shell-escape: defence in depth. generateLatex() escapes all
+            // user-supplied text, but if any \write18 ever slipped through the
+            // escaping, TeX must not be able to spawn a shell.
+            const pdflatexCmd = `pdflatex -no-shell-escape -interaction=nonstopmode -halt-on-error -output-directory="${workDir}" "${texPath}"`;
             execSync(pdflatexCmd, { timeout: 30000, stdio: "pipe" });
             // Second pass for references
             execSync(pdflatexCmd, { timeout: 30000, stdio: "pipe" });

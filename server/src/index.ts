@@ -5,6 +5,8 @@ import "dotenv/config";
 import "./config/validateEnv.js";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
@@ -20,6 +22,13 @@ import geocodeRoutes from "./routes/geocode.js";
 import chatbotRoutes from "./routes/chatbot.js";
 import activityRoutes from "./routes/activity.js";
 import resumeDataRoutes from "./routes/resumeData.js";
+import applicationsRoutes from "./routes/applications.js";
+import coverLetterRoutes from "./routes/cover-letter.js";
+import interviewRoutes from "./routes/interview.js";
+import templatesRoutes from "./routes/templates.js";
+import usersRoutes from "./routes/users.js";
+import resumeRewriteRoutes from "./routes/resume-rewrite.js";
+import jobInteractionsRoutes from "./routes/jobInteractions.js";
 import { fetchAtsJobs, autoExpireJobs, verifyTopJobs } from "./services/jobFetcher.js";
 import { startMCPJobCron } from "./mcp/jobSyncCron.js";
 
@@ -30,7 +39,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(__dirname, "../../client/dist");
 const serveStatic = fs.existsSync(clientDist);
 
+// Behind a reverse proxy (Vercel / container ingress) req.ip is the proxy's
+// address unless we trust the first X-Forwarded-For hop. The rate limiters
+// key on req.ip, so without this every client shares one bucket.
+if (process.env.NODE_ENV === "production" || process.env.TRUST_PROXY === "1") {
+    app.set("trust proxy", 1);
+}
+
 app.disable("x-powered-by");
+
+// Security headers. CSP is disabled because the SPA we serve from client/dist
+// ships inline styles/scripts from the Vite build; the rest of helmet's
+// defaults (HSTS, nosniff, frameguard, referrer-policy) all apply.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 
 // Middleware
 const ALLOWED_ORIGINS = [
@@ -49,9 +70,30 @@ app.use(cors({
     },
     credentials: true,
 }));
-app.use(express.json({ limit: "15mb" }));
+// Body limits are scoped, not global. Only the résumé routes accept a large
+// payload (base64 PDF / raw LaTeX upload); every other route gets 1mb so a
+// single request can't pin memory. body-parser is a no-op on a request whose
+// body is already parsed, so the 1mb parser below is skipped for these.
+app.use("/api/resume", express.json({ limit: "15mb" }));
+app.use("/api/templates", express.json({ limit: "15mb" }));
+app.use(express.json({ limit: "1mb" }));
+
+// Credential endpoints are the brute-force surface: throttle by IP. Login and
+// signup are counted together so rotating between them doesn't reset the
+// budget. Read-only auth routes (/me, /logout) are excluded.
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message: { error: "Too many attempts. Please try again in a few minutes." },
+});
 
 // Routes
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/signup", authLimiter);
+app.use("/api/auth/forgot-password", authLimiter);
+app.use("/api/auth/change-password", authLimiter);
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/resume", resumeRoutes);
@@ -64,11 +106,25 @@ app.use("/api/geocode", geocodeRoutes);
 app.use("/api/chatbot", chatbotRoutes);
 app.use("/api/activity", activityRoutes);
 app.use("/api/resume/data", resumeDataRoutes);
-
+app.use("/api/resume-rewrite", resumeRewriteRoutes);
+app.use("/api/applications", applicationsRoutes);
+app.use("/api/cover-letter", coverLetterRoutes);
+app.use("/api/interview", interviewRoutes);
+app.use("/api/templates", templatesRoutes);
+app.use("/api/users", usersRoutes);
+app.use("/api/job-interactions", jobInteractionsRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Unmatched API routes must 404 as JSON. This has to sit ahead of the SPA
+// catch-all below — otherwise an unmounted /api path falls through to
+// index.html and the client gets HTML 200 where it expected JSON, which shows
+// up as an opaque parse error instead of a 404.
+app.use("/api", (req, res) => {
+    res.status(404).json({ error: `No such API route: ${req.method} /api${req.path}` });
 });
 
 // Serve React frontend from client/dist if built
@@ -130,6 +186,22 @@ startATSBoardCron();   // SECONDARY: ATS boards (15m cycle, free APIs)
 // Global Error Handling Middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error("🔥 Unhandled Express Error:", err);
+
+    // Client-side failures raised by middleware (body-parser's 413 on an
+    // oversized payload, its 400 on malformed JSON, the CORS rejection) carry
+    // their own status. Reporting those as 500 hides a caller's mistake behind
+    // a server fault, so pass 4xx through with a safe message.
+    const status = Number(err?.status ?? err?.statusCode);
+    if (status >= 400 && status < 500) {
+        const message = status === 413
+            ? "Payload too large"
+            : status === 400
+                ? "Malformed request body"
+                : "Bad request";
+        res.status(status).json({ error: message });
+        return;
+    }
+
     res.status(500).json({ error: "Internal Server Error" });
 });
 // Start server (Bind to 0.0.0.0 for production/container compatibility)

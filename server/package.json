@@ -26,6 +26,7 @@
         "express-rate-limit": "^8.3.1",
         "fast-xml-parser": "^5.5.5",
         "groq-sdk": "^1.2.1",
+        "helmet": "^8.3.0",
         "jsonwebtoken": "^9.0.2",
         "multer": "^2.1.0",
         "pdf-parse": "^2.4.5"
@@ -41,6 +42,6 @@
         "@types/pdf-parse": "^1.1.5",
         "tsx": "^4.19.4",
         "typescript": "^5.8.3",
-        "vitest": "^4.1.7"
+        "vitest": "^4.1.10"
     }
 }

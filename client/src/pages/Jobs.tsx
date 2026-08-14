@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { Star, MapPin, DollarSign, Clock, Bot, ExternalLink, Filter, ChevronDown, BookmarkPlus, Search, Briefcase, Navigation, Info, Shield, AlertTriangle, ChevronRight, ToggleLeft, ToggleRight } from "lucide-react";
+import { Star, MapPin, DollarSign, Clock, Bot, ExternalLink, Filter, ChevronDown, BookmarkPlus, Search, Briefcase, Navigation, Info, Shield, AlertTriangle, ChevronRight, ToggleLeft, ToggleRight, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
+import { logImpressions, logJobEvent } from "@/lib/jobTelemetry";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -294,11 +295,12 @@ export const formatTimeAgo = (dateStr: string) => {
 // JOB CARD COMPONENT
 // ═══════════════════════════════════════════════════════════════
 
-export function JobCard({ job, userSkills, onSave, onMatch, userDomain, userDomainLabel }: {
+export function JobCard({ job, userSkills, onSave, onMatch, onDismiss, userDomain, userDomainLabel }: {
   job: JobListing;
   userSkills: string[];
   onSave: (j: JobListing) => void;
   onMatch: (j: JobListing) => void;
+  onDismiss?: (j: JobListing) => void;
   userDomain?: string;
   userDomainLabel?: string;
 }) {
@@ -367,7 +369,18 @@ export function JobCard({ job, userSkills, onSave, onMatch, userDomain, userDoma
             className="text-gray-600 hover:text-purple-400 transition-colors flex items-center justify-center p-2 rounded-lg hover:bg-purple-400/10 outline-none" title="Match Score via AI">
             <Bot className="w-4.5 h-4.5" />
           </button>
-          <a href={job.job_url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-blue-500 font-bold text-[13px] hover:text-white group/link outline-none transition-colors px-4 py-2 bg-blue-500/10 hover:bg-blue-500 rounded-lg">
+          {onDismiss && (
+            <button onClick={() => onDismiss(job)}
+              className="text-gray-600 hover:text-red-500 transition-colors flex items-center justify-center p-2 rounded-lg hover:bg-red-500/10 outline-none"
+              title="Not for me — hide this job" aria-label="Not for me">
+              <X className="w-4.5 h-4.5" />
+            </button>
+          )}
+          {/* "apply" here means the user followed the link out, not a confirmed
+              application. Don't rename without migrating stored rows. */}
+          <a href={job.job_url} target="_blank" rel="noreferrer"
+            onClick={() => logJobEvent("apply", job.id, { score: job.relevance_score })}
+            className="flex items-center gap-1.5 text-blue-500 font-bold text-[13px] hover:text-white group/link outline-none transition-colors px-4 py-2 bg-blue-500/10 hover:bg-blue-500 rounded-lg">
             Apply Now <ExternalLink className="w-3.5 h-3.5 flex-none" />
           </a>
         </div>
@@ -395,8 +408,45 @@ export default function Jobs() {
   const [primaryPage, setPrimaryPage] = useState(1);
   const PRIMARY_PAGE_SIZE = 40;
 
+  // ── Telemetry / dismissal ──
+  // Dismissal is session-local: it hides the card and records the signal.
+  // Persisting it across sessions is deliberately out of scope here.
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+
+  const dismissJob = (job: JobListing) => {
+    logJobEvent("dismiss", job.id, { score: job.relevance_score });
+    setDismissedIds(prev => new Set(prev).add(job.id));
+  };
+
+  // Log one impression per job whenever a result set changes. Keyed on the
+  // joined id list so a re-render with identical results doesn't double-count.
+  const primaryKey = primaryJobs.map(j => j.id).join(",");
+  useEffect(() => {
+    if (primaryJobs.length > 0) logImpressions(primaryJobs, "primary");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [primaryKey]);
+
+  const crossKey = crossDomainJobs.map(j => j.id).join(",");
+  useEffect(() => {
+    if (crossDomainJobs.length > 0) logImpressions(crossDomainJobs, "cross_domain");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crossKey]);
+
+  // NOTE: the legacy/anonymous feedJobs impression effect lives just below the
+  // feedJobs declaration — it cannot be here, as that const is declared later.
+
   // ── Legacy state (anonymous / backward compat) ──
   const [feedJobs, setFeedJobs] = useState<JobListing[]>([]);
+
+  const feedKey = feedJobs.map(j => j.id).join(",");
+  useEffect(() => {
+    // Anonymous/legacy response path — only fires when the domain-aware pools
+    // are empty, so impressions are never counted twice.
+    if (feedJobs.length > 0 && primaryJobs.length === 0 && crossDomainJobs.length === 0) {
+      logImpressions(feedJobs, "primary");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedKey]);
 
   const [trackedJobs, setTrackedJobs] = useState<TrackedJob[]>([]);
   const [loadingFeed, setLoadingFeed] = useState(true);
@@ -576,6 +626,7 @@ export default function Jobs() {
   };
 
   const saveToTracked = async (job: JobListing) => {
+    logJobEvent("save", job.id, { score: job.relevance_score });
     try {
       await api.post("/api/jobs", {
         company: job.company, role: job.title, location: job.location || "Remote",
@@ -828,8 +879,8 @@ export default function Jobs() {
                     {primaryJobs.length > 0 ? (
                       <>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                          {primarySlice.map((job) => (
-                            <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} userDomain={userDomain || undefined} userDomainLabel={userDomainLabel || undefined} />
+                          {primarySlice.filter(j => !dismissedIds.has(j.id)).map((job) => (
+                            <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} onDismiss={dismissJob} userDomain={userDomain || undefined} userDomainLabel={userDomainLabel || undefined} />
                           ))}
                         </div>
                         {totalPrimaryPages > 1 && (
@@ -896,8 +947,8 @@ export default function Jobs() {
                       )}
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                      {crossSlice.map((job) => (
-                        <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} userDomain={userDomain || undefined} userDomainLabel={userDomainLabel || undefined} />
+                      {crossSlice.filter(j => !dismissedIds.has(j.id)).map((job) => (
+                        <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} onDismiss={dismissJob} userDomain={userDomain || undefined} userDomainLabel={userDomainLabel || undefined} />
                       ))}
                     </div>
                     {totalCrossPages > 1 && (
@@ -935,8 +986,8 @@ export default function Jobs() {
               {/* LEGACY VIEW (anonymous / no domain data)           */}
               {/* ═══════════════════════════════════════════════════ */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {feedJobs.map((job) => (
-                  <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} />
+                {feedJobs.filter(j => !dismissedIds.has(j.id)).map((job) => (
+                  <JobCard key={job.id} job={job} userSkills={userSkills} onSave={saveToTracked} onMatch={onMatchJob} onDismiss={dismissJob} />
                 ))}
               </div>
 

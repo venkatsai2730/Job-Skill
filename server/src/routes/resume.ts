@@ -1,5 +1,5 @@
 import { Router, Response } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { supabaseAdmin } from "../config/supabase.js";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
 import { PDFParse } from "pdf-parse";
@@ -10,7 +10,10 @@ const aiResumeLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Too many AI requests. Please wait a moment." },
-    keyGenerator: (req: any) => req.user?.userId || req.ip,
+    // Falling back to a raw req.ip lets an IPv6 client sidestep the limit by
+    // rotating addresses within its /64. ipKeyGenerator normalises the prefix,
+    // so the fallback buckets per subnet rather than per address.
+    keyGenerator: (req: any) => req.user?.userId || ipKeyGenerator(req.ip ?? ""),
 });
 import Groq from "groq-sdk";
 import {
