@@ -157,7 +157,7 @@ function computeSelectionChance(
 
 
 // ── Seniority level order ─────────────────────────────────────
-const SENIORITY_ORDER = ["intern", "entry", "mid", "senior", "lead"];
+const SENIORITY_ORDER = ["intern", "entry", "mid", "senior", "lead", "staff", "principal"];
 
 function seniorityIndex(level: string): number {
     const idx = SENIORITY_ORDER.indexOf(level.toLowerCase());
@@ -300,9 +300,12 @@ export async function rankJobsForUser(
         const titleMatch = computeTitleSimilarity(userTitle, job.title) * 100;
 
         // ── Signal 3: Seniority Fit ────────────────────────────
-        const userLevel = userATSScore < 40 ? "intern"
-            : userATSScore < 65 ? "entry"
-                : userATSScore < 80 ? "mid"
+        // Derive the candidate's level from *experience years*, not the ATS
+        // resume-quality score (a well-formatted fresher résumé must not read
+        // as "senior"). Mirrors rankJobsForUserWithSkills.
+        const userLevel = userExpYears <= 1 ? "intern"
+            : userExpYears <= 3 ? "entry"
+                : userExpYears <= 6 ? "mid"
                     : "senior";
         const jobSeniority = job.seniority_level || job.seniority || "entry";
         const levelDiff = Math.abs(seniorityIndex(jobSeniority) - seniorityIndex(userLevel));
@@ -383,7 +386,10 @@ export async function rankJobsForUser(
         }
 
         // 2. Master's requirement check
-        const isMastersJob = /\b(ms|m\.s|masters)\b/i.test(jobTitleLower);
+        // Bare "ms" is excluded — it collides with Microsoft product titles
+        // ("MS SQL", "MS Dynamics", "MS Fabric"). Require an actual degree token.
+        // "master'?s" (not bare "master") avoids "Scrum Master" / "Master Data".
+        const isMastersJob = /\b(m\.s\.?|master'?s|m\.?tech)\b/i.test(jobTitleLower);
         if (!isPhdJob && isMastersJob && userDegree === "bachelors" && !jobTitleLower.includes("bs")) {
             finalMatchScore = Math.max(5, finalMatchScore - 40);
             forcedSelectionChance = Math.min(forcedSelectionChance || 100, 10);
@@ -423,6 +429,15 @@ export async function rankJobsForUser(
         
         finalMatchScore = Math.max(5, Math.min(100, finalMatchScore + alignmentResult.scoreModifier));
 
+        // 6. Down-rank big-name / tier-1 employers for junior candidates so
+        // reachable startup / SME roles surface first. Big names still appear —
+        // just not at the top — since they rarely call back a <2yr candidate.
+        const isBigCompanyRank = BIG_COMPANIES.has(companyLower) ||
+            [...BIG_COMPANIES].some(bc => companyLower.includes(bc));
+        if ((isBigCompanyRank || isTier1Company) && userExpYears < 2) {
+            finalMatchScore = Math.max(5, finalMatchScore - 12);
+        }
+
         // Compute selection chance
         const { chance, reason } = computeSelectionChance(
             finalMatchScore, seniorityFit, job.company, hoursOld,
@@ -430,8 +445,8 @@ export async function rankJobsForUser(
         );
 
         const selectionChance = forcedSelectionChance !== null ? forcedSelectionChance : chance;
-        const selectionReason = forcedSelectionReason !== null 
-            ? forcedSelectionReason 
+        const selectionReason = forcedSelectionReason !== null
+            ? forcedSelectionReason
             : `${alignmentResult.trackReason}, ${reason}`;
 
         return {
@@ -557,11 +572,14 @@ export async function rankJobsForUserWithSkills(
             !matchedFromArray.includes(s) && (descNorm.includes(s) || titleNorm.includes(s))
         );
 
-        // Weight array match higher than description mention
+        // Weight array match higher than description mention.
+        // Overlap = fraction of the JOB's required skills the user has (not a
+        // fraction of the user's own skill list — that unfairly deflates
+        // broad-skilled candidates). Mirrors rankJobsForUser / computeSkillOverlap.
         const totalMatched = matchedFromArray.length + Math.floor(matchedFromDesc.length * 0.5);
-        const skillOverlap = userSkills.length > 0
-            ? Math.min(100, (totalMatched / userSkills.length) * 100)
-            : 50;
+        const skillOverlap = jobSkills.length > 0
+            ? Math.min(100, (totalMatched / jobSkills.length) * 100)
+            : (totalMatched > 0 ? Math.min(100, totalMatched * 12) : 5);
 
         // ── Signal 2: Title Match ──────────────────────────────
         const titleMatch = computeTitleSimilarity(userTitle, job.title) * 100;
@@ -618,7 +636,10 @@ export async function rankJobsForUserWithSkills(
         }
 
         // 2. Master's requirement check
-        const isMastersJob = /\b(ms|m\.s|masters)\b/i.test(jobTitleLower);
+        // Bare "ms" is excluded — it collides with Microsoft product titles
+        // ("MS SQL", "MS Dynamics", "MS Fabric"). Require an actual degree token.
+        // "master'?s" (not bare "master") avoids "Scrum Master" / "Master Data".
+        const isMastersJob = /\b(m\.s\.?|master'?s|m\.?tech)\b/i.test(jobTitleLower);
         if (!isPhdJob && isMastersJob && userDegree === "bachelors" && !jobTitleLower.includes("bs")) {
             finalMatchScore = Math.max(5, finalMatchScore - 40);
             forcedSelectionChance = Math.min(forcedSelectionChance || 100, 10);
@@ -658,6 +679,15 @@ export async function rankJobsForUserWithSkills(
         
         finalMatchScore = Math.max(5, Math.min(100, finalMatchScore + alignmentResult.scoreModifier));
 
+        // 6. Down-rank big-name / tier-1 employers for junior candidates so
+        // reachable startup / SME roles surface first. Big names still appear —
+        // just not at the top — since they rarely call back a <2yr candidate.
+        const isBigCompanyRank = BIG_COMPANIES.has(companyLower) ||
+            [...BIG_COMPANIES].some(bc => companyLower.includes(bc));
+        if ((isBigCompanyRank || isTier1Company) && preloadedExpYears < 2) {
+            finalMatchScore = Math.max(5, finalMatchScore - 12);
+        }
+
         // Compute selection chance
         const { chance, reason } = computeSelectionChance(
             finalMatchScore, seniorityFit, job.company, hoursOld,
@@ -665,8 +695,8 @@ export async function rankJobsForUserWithSkills(
         );
 
         const selectionChance = forcedSelectionChance !== null ? forcedSelectionChance : chance;
-        const selectionReason = forcedSelectionReason !== null 
-            ? forcedSelectionReason 
+        const selectionReason = forcedSelectionReason !== null
+            ? forcedSelectionReason
             : `${alignmentResult.trackReason}, ${reason}`;
 
         return {

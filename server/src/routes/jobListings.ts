@@ -30,6 +30,7 @@ import {
 import {
     estimateShortlistingChance, type UserProfile, type ScoredJob,
 } from "../services/shortlistingChance.js";
+import { isJobInUserRegion, isPureRemote } from "../services/locationRelevance.js";
 
 const router = Router();
 
@@ -67,8 +68,10 @@ router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
         const explicitLocation = typeof location === "string" && location.trim() ? location.trim() : "";
 
         const parsedLimit = limit ? parseInt(limit as string) : (hasUser ? 300 : 40);
-        // For domain-aware split we need a much larger raw pool; pagination happens after split
-        const dbFetchLimit = (hasUser && !category) ? Math.max(parsedLimit, 1000) : parsedLimit;
+        // For domain-aware split we need the FULL in-region pool, not just the
+        // most-recent ~1000 global jobs (which left only ~100 India rows and
+        // starved the feed). searchJobs pages through the DB up to this many.
+        const dbFetchLimit = (hasUser && !category) ? 8000 : parsedLimit;
         const parsedPage = page ? parseInt(page as string) : 1;
         const parsedExpMax = experience_max !== undefined && experience_max !== "" 
             ? parseInt(experience_max as string) 
@@ -221,12 +224,22 @@ router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
         // that location so India/Hyderabad jobs get pulled even when the DB has plenty
         // of (US) jobs overall.
         const explicitCountry = (country || preferred_location || "") as string;
-        const locMatchCount = explicitLocation
+        // Location target = the typed location OR (falling back to) the user's
+        // country from geo/profile. We constrain the feed to this even when the
+        // user hasn't typed anything, so results stay in-country (+ remote)
+        // instead of showing global jobs.
+        const locationTarget = explicitLocation || explicitCountry.trim();
+        // Count how many fetched jobs actually match the target location. For a
+        // typed city we use the city-level score; for the geo-country case we use
+        // the region matcher (so "Remote - US" is NOT miscounted as an India job).
+        const locMatchCount = locationTarget
             ? allJobs.filter((j: any) =>
-                computeLocationMatch(j.location || "", explicitLocation.toLowerCase(), explicitCountry.toLowerCase()) >= 0.5
+                explicitLocation
+                    ? computeLocationMatch(j.location || "", explicitLocation.toLowerCase(), explicitCountry.toLowerCase()) >= 0.5
+                    : isJobInUserRegion(j.location || "", (city as string) || "", explicitCountry)
               ).length
             : Infinity;
-        const needLocationSupplement = !!explicitLocation && locMatchCount < (hasUser ? 60 : 30);
+        const needLocationSupplement = !!locationTarget && locMatchCount < (hasUser ? 60 : 30);
 
         if ((allJobs.length < supplementThreshold || needLocationSupplement) && (location || city || query || hasUser)) {
             const searchLocation = supplementLocation;
@@ -263,7 +276,9 @@ router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
             const targetCount = hasUser ? 200 : 40;
             
             for (const q of queries) {
-                if (allJobs.length >= targetCount) break;
+                // When we still need location-specific jobs, keep pulling even if the
+                // overall pool is already large — it may be full of out-of-country jobs.
+                if (!needLocationSupplement && allJobs.length >= targetCount) break;
                 const liveJobs = await mcpLiveSearch(q, searchLocation, 50);
 
                 if (liveJobs.length > 0) {
@@ -359,6 +374,20 @@ router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
                 if (!title) return false;               // drop blank-title rows
                 return !OBVIOUS_NON_TECH.test(title);   // keep everything that isn't clearly non-tech
             });
+
+            // ── Location gate ──────────────────────────────────────────
+            // When the user hasn't typed an explicit location, constrain the feed
+            // to their country (+ remote) rather than showing global jobs. This is
+            // the catch-all that also removes live-scraped foreign jobs (Arbeitnow /
+            // LinkedIn) which bypass the DB location filter. Falls back to the
+            // unfiltered set if nothing matches so the feed is never empty.
+            // (Typed locations are narrowed to city level per-job below.)
+            if (!explicitLocation && userCountry) {
+                const inRegion = domainInputJobs.filter((j: any) =>
+                    isJobInUserRegion(j.location || "", userCity, userCountry)
+                );
+                if (inRegion.length > 0) domainInputJobs = inRegion;
+            }
             const userExp = userExperienceYears || 0;
             const userSeniorityStr = userSeniority || (userExp <= 1 ? "intern" : userExp <= 3 ? "entry" : userExp <= 6 ? "mid" : "senior");
 
@@ -370,11 +399,19 @@ router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
                 domain: userDomain,
             };
 
+            // Roles clearly above a junior candidate's level. For <2yr users these
+            // are hidden — a fresher won't get a callback, so they're just noise.
+            const SENIOR_TITLE_RE = /\b(senior|sr\.?|lead|staff|principal|architect|manager|director|vp|head|expert)\b/i;
+            const hideSenior = userExp < 2;
+
             // Score and classify each job
             const scoredPrimary: any[] = [];
             const scoredCross: any[] = [];
 
             for (const job of domainInputJobs) {
+                // Hide senior/staff/principal roles for junior candidates.
+                if (hideSenior && SENIOR_TITLE_RE.test(job.title || "")) continue;
+
                 // Classify job domain (use stored value or compute on-the-fly)
                 const jobDomain: JobDomain = (
                     job.job_domain && JOB_DOMAIN_VALUES.includes(job.job_domain)
@@ -398,10 +435,15 @@ router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
                 // (A plain `locationMatch < X` threshold can't express this because remote =
                 // 0.5 scores below same-country = 0.6.)
                 if (explicitLocation) {
-                    const jobLoc = (job.location || "").toLowerCase();
-                    const isRemote = /remote|work from home|wfh|anywhere/.test(jobLoc);
                     const isCityMatch = locationMatch >= 1.0;
-                    if (!isCityMatch && !isRemote) continue;
+                    // Accept remote roles ONLY when they are location-agnostic
+                    // ("Remote", "Fully Remote / Worldwide"). A place-tagged remote
+                    // role ("Remote, Canada", "Remote - USA", "Remote, Bangalore")
+                    // is tied to a DIFFERENT location than the one the user typed,
+                    // so it must be dropped — the naive /remote/ test kept them all,
+                    // flooding a "Hyderabad" search with foreign jobs.
+                    const isAgnosticRemote = isPureRemote(job.location || "");
+                    if (!isCityMatch && !isAgnosticRemote) continue;
                 }
 
                 const recency = computeRecencyScore(job.posted_at || "");
@@ -453,11 +495,14 @@ router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
                 }
             }
 
-            // Ordering WITHIN each pool uses the harder-penalized match_score
-            // (PhD / seniority / tier-1 penalties from rankJobsForUser), with the
-            // relevance_score as a tiebreak. The primary/cross SPLIT itself is still
-            // decided by domainMatch above.
+            // Ordering WITHIN each pool: exact-domain matches (e.g. DS/ML for a
+            // Data Scientist) float ABOVE related-domain roles (backend/analytics),
+            // then the harder-penalized match_score (PhD / seniority / tier-1
+            // penalties), then relevance_score as a final tiebreak. The
+            // primary/cross SPLIT itself is still decided by domainMatch above.
+            const isExactDomain = (j: any) => (j.job_domain === userDomain ? 1 : 0);
             const byScore = (a: any, b: any) =>
+                isExactDomain(b) - isExactDomain(a) ||
                 (b.match_score || 0) - (a.match_score || 0) ||
                 (b.relevance_score || 0) - (a.relevance_score || 0);
             scoredPrimary.sort(byScore);
@@ -474,9 +519,10 @@ router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
                 primaryFiltered = scoredPrimary;
             }
 
-            // Cap each pool so the API response stays reasonable
-            const MAX_PRIMARY = 200;
-            const MAX_CROSS   = 100;
+            // Cap each pool so the API response stays reasonable. Raised so the
+            // feed can surface the full in-region pool (hundreds of jobs).
+            const MAX_PRIMARY = 600;
+            const MAX_CROSS   = 300;
 
             const responseData = {
                 primary_jobs: primaryFiltered.slice(0, MAX_PRIMARY),

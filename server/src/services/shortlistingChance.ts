@@ -57,7 +57,7 @@ const TIER1_COMPANIES = new Set([
 ]);
 
 // ── Seniority ordering ───────────────────────────────────────
-const SENIORITY_ORDER = ["intern", "entry", "mid", "senior", "lead"];
+const SENIORITY_ORDER = ["intern", "entry", "mid", "senior", "lead", "staff", "principal"];
 
 function seniorityIndex(level: string): number {
     const idx = SENIORITY_ORDER.indexOf((level || "entry").toLowerCase());

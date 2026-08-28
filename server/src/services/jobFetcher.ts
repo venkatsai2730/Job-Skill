@@ -786,9 +786,16 @@ export async function searchJobs(filters: {
     user_primary_domain?: string;
     bypassLocationFilter?: boolean; // set true for domain-aware users; location handled in-memory
 }) {
-    const limit = Math.min(filters.limit || 40, 500);
+    // Return-slice cap. Raised so domain-aware feeds can surface the full
+    // in-region pool (hundreds of jobs) rather than the first 500.
+    const limit = Math.min(filters.limit || 40, 2000);
     const page = filters.page || 1;
     const effectiveLocation = filters.location || filters.city || "";
+
+    // Build the query-text filter clause once so it can be re-applied per page.
+    const queryOr = filters.query
+        ? `title.ilike.%${filters.query}%,company.ilike.%${filters.query}%,description.ilike.%${filters.query}%`
+        : null;
 
     let q = supabaseAdmin
         .from("job_listings")
@@ -800,14 +807,15 @@ export async function searchJobs(filters: {
         q = q.eq("is_active", true);  // ALWAYS filter active only (if col exists)
     }
 
-    if (filters.query) {
-        q = q.or(`title.ilike.%${filters.query}%,company.ilike.%${filters.query}%,description.ilike.%${filters.query}%`);
+    if (queryOr) {
+        q = q.or(queryOr);
     }
 
     // For domain-aware logged-in users, skip the hard DB location filter.
     // Location ranking is handled in-memory by computeLocationMatch() in the relevance scorer,
     // so nearby jobs still appear first. Without this bypass, city detection (e.g. "Hyderabad")
     // would restrict the raw DB pool to only ~30 jobs tagged with that city, starving domain-split.
+    let locationOr: string | null = null;
     if (effectiveLocation && !filters.bypassLocationFilter) {
         let loc = effectiveLocation.trim().toLowerCase();
         
@@ -846,14 +854,38 @@ export async function searchJobs(filters: {
 
         parts.push(`location.ilike.%remote%`, `location.ilike.%work from home%`, `location.ilike.%wfh%`, `location.ilike.%anywhere%`, `city.ilike.%remote%`);
         if (country) parts.push(`location.ilike.%${country}%`);
-        q = q.or(parts.join(","));
+        locationOr = parts.join(",");
+        q = q.or(locationOr);
     }
 
     if (filters.skills && filters.skills.length > 0) {
         q = q.overlaps("skills", filters.skills);
     }
 
-    const { data, error } = await q;
+    // ── Paginated fetch ──────────────────────────────────────────────
+    // PostgREST caps a single response at ~1000 rows. A domain-aware feed
+    // needs the FULL in-region pool (hundreds of India jobs spread across
+    // thousands of rows), so we page through in 1000-row chunks up to a cap.
+    // Re-apply the same filter clauses on a fresh builder per page.
+    const applyFilters = (qq: any) => {
+        if (!migrationMissing) qq = qq.eq("is_active", true);
+        if (queryOr) qq = qq.or(queryOr);
+        if (locationOr) qq = qq.or(locationOr);
+        if (filters.skills && filters.skills.length > 0) qq = qq.overlaps("skills", filters.skills);
+        return qq;
+    };
+    const PAGE = 1000;
+    const maxFetch = Math.min(Math.max(filters.limit || 40, 1000), 8000);
+    let data: any[] = [];
+    let error: any = null;
+    for (let start = 0; start < maxFetch; start += PAGE) {
+        const res = await applyFilters(
+            supabaseAdmin.from("job_listings").select("*").order("posted_at", { ascending: false })
+        ).range(start, start + PAGE - 1);
+        if (res.error) { error = res.error; break; }
+        data = data.concat(res.data || []);
+        if (!res.data || res.data.length < PAGE) break;
+    }
     
     let jobs: any[] = [];
 

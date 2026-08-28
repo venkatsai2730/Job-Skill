@@ -325,13 +325,12 @@ export function JobCard({ job, userSkills, onSave, onMatch, onDismiss, userDomai
         </div>
       </div>
 
-      {/* Badges row */}
+      {/* Badges row — match %, selection-chance, domain-match and "Active"
+          badges intentionally removed: they were noisy and could mislead
+          (e.g. a "92% High Chance" tag on a role a fresher won't hear back on,
+          and "Active" only meant "posted within 7 days", not a live check). */}
       <div className="flex items-center gap-1.5 flex-wrap mb-3">
         <SeniorityBadge level={job.seniority_level} />
-        <MatchScoreBadge score={job.match_score} />
-        <SelectionChanceBadge chance={job.selection_chance} reason={job.selection_reason} />
-        <DomainPill job={job} userDomain={userDomain} userDomainLabel={userDomainLabel} />
-        <ActivityBadge postedAt={job.posted_at} />
       </div>
 
       <div className="flex flex-col gap-2 mb-5 flex-1">
