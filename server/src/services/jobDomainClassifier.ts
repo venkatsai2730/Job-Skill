@@ -177,6 +177,57 @@ function normalize(s: string): string {
     return s.toLowerCase().replace(/[.\-/]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// ── Skills/text-based domain scoring (NO title gate) ─────────
+// Scores each domain by keyword hits in skills (weight 3), title (2),
+// description (1). Returns the best domain + score. Shared by the main
+// classifier's Step 2 and by classifyDomainBySkills().
+function bestDomainByKeywords(
+    titleNorm: string,
+    skillsText: string,
+    descNorm: string,
+): { domain: JobDomain | null; score: number } {
+    const domainScores: Record<string, number> = {};
+    for (const [domain, keywords] of Object.entries(DOMAIN_SKILL_KEYWORDS)) {
+        if (domain === "generic-fresher") continue;
+        let score = 0;
+        for (const kw of keywords) {
+            const kwNorm = normalize(kw);
+            if (skillsText.includes(kwNorm)) score += 3;
+            else if (titleNorm.includes(kwNorm)) score += 2;
+            else if (descNorm.includes(kwNorm)) score += 1;
+        }
+        domainScores[domain] = score;
+    }
+    let bestDomain: JobDomain | null = null;
+    let bestScore = 0;
+    for (const [domain, score] of Object.entries(domainScores)) {
+        if (score > bestScore) {
+            bestScore = score;
+            bestDomain = domain as JobDomain;
+        }
+    }
+    return { domain: bestDomain, score: bestScore };
+}
+
+/**
+ * Classifies a domain from SKILLS alone (no title/tech-title gate).
+ *
+ * Use this for classifying a USER's own domain, where the title may be
+ * missing, empty, or garbage (e.g. a mis-parsed resume role like "default.")
+ * but the skills array is rich. classifyJobDomain() short-circuits to
+ * "generic-fresher" whenever the title isn't a recognized tech title, which
+ * throws away a strong skills signal — this function does not.
+ *
+ * @returns a JobDomain when the skills clearly indicate one, else null.
+ */
+export function classifyDomainBySkills(skills: string[] = []): JobDomain | null {
+    if (!skills.length) return null;
+    const { domain, score } = bestDomainByKeywords("", normalize(skills.join(" ")), "");
+    // Require ≥2 strong skill matches (2×3) so a single incidental keyword
+    // (e.g. one "sql") doesn't lock in a domain.
+    return domain && score >= 6 ? domain : null;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // MAIN CLASSIFIER
 // ═══════════════════════════════════════════════════════════════
@@ -222,39 +273,8 @@ export function classifyJobDomain(
     }
 
     // ── Step 2: Skills-based classification ──────────────────
-    // Count how many domain-specific keywords appear in the skills array
-    const domainScores: Record<string, number> = {};
-
-    for (const [domain, keywords] of Object.entries(DOMAIN_SKILL_KEYWORDS)) {
-        if (domain === "generic-fresher") continue;
-        let score = 0;
-        for (const kw of keywords) {
-            const kwNorm = normalize(kw);
-            // Check in skills array first (higher weight)
-            if (skillsText.includes(kwNorm)) {
-                score += 3;
-            }
-            // Check in title (medium weight)
-            else if (titleNorm.includes(kwNorm)) {
-                score += 2;
-            }
-            // Check in description (lower weight)
-            else if (descNorm.includes(kwNorm)) {
-                score += 1;
-            }
-        }
-        domainScores[domain] = score;
-    }
-
-    // Find the domain with the highest score
-    let bestDomain: JobDomain | null = null;
-    let bestScore = 0;
-    for (const [domain, score] of Object.entries(domainScores)) {
-        if (score > bestScore) {
-            bestScore = score;
-            bestDomain = domain as JobDomain;
-        }
-    }
+    // Count how many domain-specific keywords appear in skills/title/description.
+    const { domain: bestDomain, score: bestScore } = bestDomainByKeywords(titleNorm, skillsText, descNorm);
 
     // Only accept if the score is meaningful (at least 3 points = 1 skill match)
     if (bestDomain && bestScore >= 3) {

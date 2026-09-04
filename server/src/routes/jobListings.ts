@@ -18,7 +18,7 @@ import { optionalAuthToken, AuthRequest } from "../middleware/auth.js";
 
 // ── New domain-aware imports ─────────────────────────────────
 import {
-    classifyJobDomain, isDomainMatch, getRelatedDomains,
+    classifyJobDomain, classifyDomainBySkills, isDomainMatch, getRelatedDomains,
     JOB_DOMAIN_LABELS, type JobDomain, JOB_DOMAIN_VALUES, isTechTitle,
 } from "../services/jobDomainClassifier.js";
 import {
@@ -177,6 +177,19 @@ router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
         } else if (user_id && userSkills.length > 0) {
             // Use the domain classifier on the user's own profile
             userDomain = inferUserDomain(userCurrentRole, userSkills);
+        }
+        // Skills-first upgrade: classifyJobDomain()/inferUserDomain() short-circuit
+        // to "generic-fresher" whenever the user's title is missing or non-tech
+        // (e.g. a mis-parsed resume role like "default."), discarding a strong
+        // skills signal. When that happens, fall back to a title-gate-free,
+        // skills-only classification so a Data-Science/Backend candidate isn't
+        // dumped into the generic fresher pool. Never downgrades a real domain.
+        if (user_id && (userDomain === null || userDomain === "generic-fresher") && userSkills.length > 0) {
+            const bySkills = classifyDomainBySkills(userSkills);
+            if (bySkills) {
+                userDomain = bySkills;
+                userPrimaryDomain = bySkills;
+            }
         }
         // Logged-in users with no detectable domain still get domain-split routing
         if (user_id && userDomain === null) {
@@ -530,6 +543,8 @@ router.get("/", optionalAuthToken, async (req: AuthRequest, res: Response) => {
                 meta: {
                     user_domain: userDomain,
                     user_domain_label: JOB_DOMAIN_LABELS[userDomain] || userDomain,
+                    user_experience_years: userExp,
+                    user_seniority: userSeniorityStr,
                     relevance_threshold: MIN_PRIMARY_RELEVANCE,
                     total_primary: Math.min(primaryFiltered.length, MAX_PRIMARY),
                     total_cross: Math.min(scoredCross.length, MAX_CROSS),

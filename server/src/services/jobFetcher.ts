@@ -792,9 +792,21 @@ export async function searchJobs(filters: {
     const page = filters.page || 1;
     const effectiveLocation = filters.location || filters.city || "";
 
+    // Build a single PostgREST .or() ilike condition safely. Commas and
+    // parentheses are logic-tree separators in .or(), so an unescaped value like
+    // "hyderabad, india" or "New York (Remote)" crashes the parser
+    // ("failed to parse logic tree"). Wrapping the value in double quotes makes
+    // PostgREST treat it as a literal; embedded quotes are stripped.
+    const orIlike = (col: string, val: string): string =>
+        `${col}.ilike."%${String(val).replace(/"/g, "").trim()}%"`;
+
     // Build the query-text filter clause once so it can be re-applied per page.
     const queryOr = filters.query
-        ? `title.ilike.%${filters.query}%,company.ilike.%${filters.query}%,description.ilike.%${filters.query}%`
+        ? [
+            orIlike("title", filters.query),
+            orIlike("company", filters.query),
+            orIlike("description", filters.query),
+          ].join(",")
         : null;
 
     let q = supabaseAdmin
@@ -817,8 +829,14 @@ export async function searchJobs(filters: {
     // would restrict the raw DB pool to only ~30 jobs tagged with that city, starving domain-split.
     let locationOr: string | null = null;
     if (effectiveLocation && !filters.bypassLocationFilter) {
-        let loc = effectiveLocation.trim().toLowerCase();
-        
+        // A combined "city, country" (e.g. "hyderabad, india") is reduced to its
+        // primary token for the DB ilike: "%hyderabad%" matches real rows like
+        // "Hyderabad, Telangana, India", whereas "%hyderabad, india%" matches
+        // almost nothing. The comma is also a reserved .or() separator. Country
+        // is captured from the tail (or filters.country) and added separately.
+        const segments = effectiveLocation.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+        let loc = segments[0] || "";
+
         // Fix common misspellings
         const spellCorrections: Record<string, string> = {
             "hyderbad": "hyderabad",
@@ -829,33 +847,34 @@ export async function searchJobs(filters: {
         };
         if (spellCorrections[loc]) loc = spellCorrections[loc];
 
-        const country = (filters.country || "").trim();
+        // Country: explicit filter wins; otherwise the tail of "city, …, country".
+        const country = ((filters.country || "").trim() || (segments.length > 1 ? segments[segments.length - 1] : "")).trim();
         let parts: string[] = [];
         const lowerLoc = loc;
 
         if (lowerLoc === "bengaluru" || lowerLoc === "bangalore") {
-            parts.push(`location.ilike.%bengaluru%`, `location.ilike.%bangalore%`, `city.ilike.%bengaluru%`, `city.ilike.%bangalore%`);
+            parts.push(orIlike("location", "bengaluru"), orIlike("location", "bangalore"), orIlike("city", "bengaluru"), orIlike("city", "bangalore"));
         } else if (lowerLoc === "mumbai" || lowerLoc === "bombay") {
-            parts.push(`location.ilike.%mumbai%`, `location.ilike.%bombay%`, `city.ilike.%mumbai%`, `city.ilike.%bombay%`);
+            parts.push(orIlike("location", "mumbai"), orIlike("location", "bombay"), orIlike("city", "mumbai"), orIlike("city", "bombay"));
         } else if (lowerLoc === "chennai" || lowerLoc === "madras") {
-            parts.push(`location.ilike.%chennai%`, `location.ilike.%madras%`, `city.ilike.%chennai%`, `city.ilike.%madras%`);
+            parts.push(orIlike("location", "chennai"), orIlike("location", "madras"), orIlike("city", "chennai"), orIlike("city", "madras"));
         } else if (lowerLoc === "gurugram" || lowerLoc === "gurgaon" || lowerLoc.includes("ncr") || lowerLoc === "noida") {
-            parts.push(`location.ilike.%gurugram%`, `location.ilike.%gurgaon%`, `location.ilike.%noida%`, `location.ilike.%ncr%`, `city.ilike.%gurugram%`, `city.ilike.%gurgaon%`, `city.ilike.%noida%`);
-        } else {
-            parts.push(`location.ilike.%${loc}%`, `city.ilike.%${loc}%`);
+            parts.push(orIlike("location", "gurugram"), orIlike("location", "gurgaon"), orIlike("location", "noida"), orIlike("location", "ncr"), orIlike("city", "gurugram"), orIlike("city", "gurgaon"), orIlike("city", "noida"));
+        } else if (loc) {
+            parts.push(orIlike("location", loc), orIlike("city", loc));
         }
 
         // Also find nearest metro for tier-2/3 cities
         const userState = (filters.country || "").toLowerCase();
         const nearestMetro = INDIAN_STATE_TO_NEAREST_METRO[userState];
         if (nearestMetro && nearestMetro.toLowerCase() !== lowerLoc) {
-            parts.push(`location.ilike.%${nearestMetro}%`, `city.ilike.%${nearestMetro.toLowerCase()}%`);
+            parts.push(orIlike("location", nearestMetro), orIlike("city", nearestMetro.toLowerCase()));
         }
 
-        parts.push(`location.ilike.%remote%`, `location.ilike.%work from home%`, `location.ilike.%wfh%`, `location.ilike.%anywhere%`, `city.ilike.%remote%`);
-        if (country) parts.push(`location.ilike.%${country}%`);
+        parts.push(orIlike("location", "remote"), orIlike("location", "work from home"), orIlike("location", "wfh"), orIlike("location", "anywhere"), orIlike("city", "remote"));
+        if (country) parts.push(orIlike("location", country));
         locationOr = parts.join(",");
-        q = q.or(locationOr);
+        if (locationOr) q = q.or(locationOr);
     }
 
     if (filters.skills && filters.skills.length > 0) {
@@ -898,18 +917,20 @@ export async function searchJobs(filters: {
             .order("posted_at", { ascending: false })
             .limit(3000);
             
-        // Re-apply ALL filters (not just query)
-        if (filters.query) {
-            retryQ = retryQ.or(`title.ilike.%${filters.query}%,company.ilike.%${filters.query}%,description.ilike.%${filters.query}%`);
+        // Re-apply ALL filters (not just query) — reuse the safe orIlike builder.
+        if (queryOr) {
+            retryQ = retryQ.or(queryOr);
         }
         if (effectiveLocation) {
-            let loc = effectiveLocation.trim().toLowerCase();
+            let loc = effectiveLocation.split(",")[0].trim().toLowerCase();
             const spellFix: Record<string, string> = { "hyderbad": "hyderabad", "banglore": "bengaluru", "bengalore": "bengaluru", "gurgon": "gurugram", "dehli": "delhi" };
             if (spellFix[loc]) loc = spellFix[loc];
-            let retryParts: string[] = [`location.ilike.%${loc}%`, `location.ilike.%remote%`];
+            let retryParts: string[] = [];
+            if (loc) retryParts.push(orIlike("location", loc));
+            retryParts.push(orIlike("location", "remote"));
             const retryCountry = (filters.country || "").trim();
-            if (retryCountry) retryParts.push(`location.ilike.%${retryCountry}%`);
-            retryQ = retryQ.or(retryParts.join(","));
+            if (retryCountry) retryParts.push(orIlike("location", retryCountry));
+            if (retryParts.length) retryQ = retryQ.or(retryParts.join(","));
         }
         if (filters.skills && filters.skills.length > 0) {
             retryQ = retryQ.overlaps("skills", filters.skills);

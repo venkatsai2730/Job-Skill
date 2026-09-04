@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import jwt from "jsonwebtoken";
-import { supabaseAdmin } from "../config/supabase.js";
+import { supabaseAdmin, createAuthClient } from "../config/supabase.js";
 
 const router = Router();
 
@@ -72,8 +72,9 @@ router.post("/login", async (req: Request, res: Response) => {
             return;
         }
 
-        // Verify credentials via Supabase
-        const { data, error } = await supabaseAdmin.auth.signInWithPassword({
+        // Verify credentials via Supabase. Use an isolated client so the resulting
+        // user session never leaks onto shared supabaseAdmin (see config/supabase.ts).
+        const { data, error } = await createAuthClient().auth.signInWithPassword({
             email,
             password,
         });
@@ -108,7 +109,7 @@ router.post("/google", async (req: Request, res: Response) => {
     try {
         const redirectTo = req.body.redirectTo || process.env.CLIENT_URL + "/dashboard";
 
-        const { data, error } = await supabaseAdmin.auth.signInWithOAuth({
+        const { data, error } = await createAuthClient().auth.signInWithOAuth({
             provider: "google",
             options: {
                 redirectTo,
@@ -272,8 +273,9 @@ router.post("/change-password", async (req: Request, res: Response) => {
             return;
         }
 
-        // Verify current password by attempting sign in
-        const { error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+        // Verify current password by attempting sign in. Isolated client so the
+        // session never leaks onto shared supabaseAdmin (see config/supabase.ts).
+        const { error: signInError } = await createAuthClient().auth.signInWithPassword({
             email: decoded.email,
             password: currentPassword,
         });
