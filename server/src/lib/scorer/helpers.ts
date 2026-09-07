@@ -67,9 +67,27 @@ export const GLOBAL_TECH_SKILLS = [
     'postman','figma','jira','agile','scrum',
 ];
 
+// Word-boundary skill matcher. Plain substring matching produced false
+// positives — 'r' matched every word, 'go' matched "category"/"organizing",
+// 'rust' matched "trust", 'java' matched "javascript". We instead require the
+// skill token to be bounded by non-alphanumeric characters (or string ends),
+// which keeps multi-word/symbol skills ("rest api", "c++", "node.js") working.
+function buildSkillRegex(skill: string): RegExp {
+    const esc = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?<![a-z0-9])${esc}(?![a-z0-9])`, 'i');
+}
+
+const SKILL_REGEXES: readonly [string, RegExp][] = GLOBAL_TECH_SKILLS.map(
+    (s) => [s, buildSkillRegex(s)] as [string, RegExp],
+);
+
+/** Returns the GLOBAL_TECH_SKILLS that appear as whole tokens in the text. */
+export function matchedGlobalSkills(text: string): string[] {
+    return SKILL_REGEXES.filter(([, re]) => re.test(text)).map(([s]) => s);
+}
+
 export function countMatchedSkills(rawText: string): number {
-    const lower = rawText.toLowerCase();
-    return GLOBAL_TECH_SKILLS.filter(s => lower.includes(s)).length;
+    return matchedGlobalSkills(rawText).length;
 }
 
 // ── TYPO COUNTER ────────────────────────────────────────────

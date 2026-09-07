@@ -694,7 +694,7 @@ const Resume = () => {
         )}
 
         {/* Keywords */}
-        {ats && (
+        {ats?.keywords && (
           <div>
             <h4 className="font-display font-semibold text-foreground text-sm mb-2 uppercase tracking-wider">Keywords Found</h4>
             <div className="flex flex-wrap gap-1.5 mb-3">

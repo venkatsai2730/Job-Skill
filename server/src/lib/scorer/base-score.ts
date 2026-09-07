@@ -10,11 +10,31 @@ import { countTypos, countMatchedSkills, getAllBullets, extractBullets } from '.
 import { DEFAULT_CONFIG, type ScoringConfig } from './scoring-config.js';
 import type { ParseFidelityReport } from './parse-fidelity.js';
 
+/** Real per-component subscores, so callers can surface an HONEST breakdown
+ *  instead of scaling every category by the overall ratio. */
+export interface BaseScoreResult {
+    total: number;
+    components: {
+        /** Quantification + power verbs (max 38) — maps to UI "Impact". */
+        quantification: number;
+        /** Professional-experience + org bonus (max ~14). */
+        experience: number;
+        /** ATS compatibility: file/format/headers (max 20). */
+        ats: number;
+        /** Style & readability: length/typos/bullets (max 14). */
+        style: number;
+        /** Skills & contact (max 10) — maps to UI "Advanced". */
+        skillsContact: number;
+        /** Achievement bonus (max 3). */
+        achievement: number;
+    };
+}
+
 export function computeBaseScore(
     resume: ParsedResume,
     config: ScoringConfig = DEFAULT_CONFIG,
     fidelity?: ParseFidelityReport,
-): number {
+): BaseScoreResult {
     const raw      = resume.rawText;
     const sections = resume.sections;
     const wc       = raw.split(/\s+/).length;
@@ -230,9 +250,18 @@ export function computeBaseScore(
         fresherBonus:    (!hasWorkExp && hasEducation) ? config.fresherBonus : 0,
     });
 
+    const components = {
+        quantification: quantificationScore,
+        experience:     experienceBonus + orgBonus,
+        ats:            atsScore,
+        style:          styleScore,
+        skillsContact:  skillsContactScore,
+        achievement:    achievementBonus,
+    };
+
     if (!hasWorkExp && hasEducation) {
-        return Math.min(config.baseCap, baseTotal + config.fresherBonus);
+        return { total: Math.min(config.baseCap, baseTotal + config.fresherBonus), components };
     }
 
-    return Math.min(config.baseCap, baseTotal);
+    return { total: Math.min(config.baseCap, baseTotal), components };
 }

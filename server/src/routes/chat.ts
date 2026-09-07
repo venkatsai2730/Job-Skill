@@ -10,6 +10,7 @@ import {
     type AIFeature,
 } from "../services/chatService.js";
 import { authenticateToken, AuthRequest } from "../middleware/auth.js";
+import { isJobInUserRegion } from "../services/locationRelevance.js";
 import {
     createConversation,
     getUserConversations,
@@ -411,23 +412,42 @@ router.post("/conversations/:id/messages", authenticateToken, chatLimiter, async
 
                 const userDegree = detectUserDegreeFromResume(ctx?.parsedData);
 
-                const relevant = rankedJobs
-                    .filter((j: any) => {
-                        const tl = (j.title || "").toLowerCase();
+                // Parse the user's preferred location ("Hyderabad, India") into
+                // city + country so we can drop out-of-region jobs. Without this
+                // a Hyderabad user sees US/foreign remote roles (searchJobs keeps
+                // every "remote" row; region narrowing happens here).
+                const locSegments = String(userLocation).split(",").map((s: string) => s.trim());
+                const filterCity = (locSegments[0] || "").toLowerCase();
+                const filterCountry = (locSegments.length > 1 ? locSegments[locSegments.length - 1] : "").toLowerCase();
 
-                        // 1. Strict PhD Mismatch Filter
-                        const isPhdJob = /\b(phd|ph\.d|doctorate)\b/i.test(tl);
-                        if (isPhdJob && userDegree !== "phd") return false;
+                // Base relevance: in-region + role/skill title match + PhD sanity.
+                // These define "is this a job the user asked for", so they are hard.
+                const passesBase = (j: any): boolean => {
+                    const tl = (j.title || "").toLowerCase();
+                    // Region — keep in-country + location-agnostic remote, drop foreign.
+                    if (!isJobInUserRegion(j.location || "", filterCity, filterCountry)) return false;
+                    // PhD mismatch — hide PhD-only roles from non-PhD users.
+                    if (/\b(phd|ph\.d|doctorate)\b/i.test(tl) && userDegree !== "phd") return false;
+                    // Title must relate to the user's field/role.
+                    return titleMatchTerms.some(kw => tl.includes(kw));
+                };
 
-                        // 2. Strict Seniority Mismatch Filter for entry level
-                        const isSeniorRole = /\b(senior|sr\.?|lead|staff|principal|manager|director|vp|architect|head)\b/i.test(tl);
-                        const isStaffRole = /\b(staff|principal|director|vp|head)\b/i.test(tl);
-                        if (isSeniorRole && userExpYears < 2) return false;
-                        if (isStaffRole && userExpYears < 4) return false;
+                // Seniority is a PREFERENCE, not a hard gate: a junior user is shown
+                // junior roles first, but if the whole in-region role pool is senior
+                // (common for niche roles) we must NOT return an empty result —
+                // surfacing senior-but-relevant jobs beats a dead end.
+                const isTooSenior = (j: any): boolean => {
+                    const tl = (j.title || "").toLowerCase();
+                    const isSeniorRole = /\b(senior|sr\.?|lead|staff|principal|manager|director|vp|architect|head)\b/i.test(tl);
+                    const isStaffRole = /\b(staff|principal|director|vp|head)\b/i.test(tl);
+                    return (isSeniorRole && userExpYears < 2) || (isStaffRole && userExpYears < 4);
+                };
 
-                        // 3. Match terms filter
-                        return titleMatchTerms.some(kw => tl.includes(kw));
-                    })
+                const baseMatches = rankedJobs.filter(passesBase);
+                const juniorFriendly = baseMatches.filter((j: any) => !isTooSenior(j));
+                // Prefer junior-appropriate roles; fall back to the full role-matched
+                // set when the seniority cut would otherwise empty the feed.
+                const relevant = (juniorFriendly.length > 0 ? juniorFriendly : baseMatches)
                     .sort((a: any, b: any) => (b.match_score || 0) - (a.match_score || 0))
                     .slice(0, 10);
 

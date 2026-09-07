@@ -1,33 +1,49 @@
 import type { ParsedSections } from "../types/resume.types";
 
-/** Attach stable IDs to all array entries that are missing them.
- *  Called once when parsed data is loaded from the server. */
+/** Attach stable IDs to all array entries and guarantee every nested array/field
+ *  exists. Called once when parsed data is loaded from the server (or AI edit).
+ *
+ *  The server parser, AI-edit endpoints, and older persisted records can emit
+ *  entries with a missing `bullets` / `items` / `tech` / `courses` array. The
+ *  resume templates and section editors call `.map`/`.join`/`.length` on those
+ *  arrays unguarded, so a single missing array throws a TypeError that unmounts
+ *  the whole app (blank page). Normalising here — the one place server data
+ *  enters the store — keeps all four templates and every editor safe. */
 export function seedIds(sections: ParsedSections): ParsedSections {
+  const s = (sections ?? {}) as ParsedSections;
+  const arr = <T,>(v: T[] | undefined | null): T[] => (Array.isArray(v) ? v : []);
+
   return {
-    ...sections,
-    name: sections.name ?? "",
-    email: sections.email ?? "",
-    phone: sections.phone ?? "",
-    location: sections.location ?? "",
-    experience: sections.experience.map((e) => ({
+    ...s,
+    name: s.name ?? "",
+    email: s.email ?? "",
+    phone: s.phone ?? "",
+    location: s.location ?? "",
+    summary: s.summary ?? "",
+    experience: arr(s.experience).map((e) => ({
       ...e,
       id: e.id || crypto.randomUUID(),
+      bullets: arr(e.bullets),
     })),
-    education: sections.education.map((e) => ({
+    education: arr(s.education).map((e) => ({
       ...e,
       id: e.id || crypto.randomUUID(),
+      courses: arr(e.courses),
     })),
-    skills: sections.skills.map((s) => ({
-      ...s,
-      id: s.id || crypto.randomUUID(),
+    skills: arr(s.skills).map((sk) => ({
+      ...sk,
+      id: sk.id || crypto.randomUUID(),
+      items: arr(sk.items),
     })),
-    projects: sections.projects.map((p) => ({
+    projects: arr(s.projects).map((p) => ({
       ...p,
       id: p.id || crypto.randomUUID(),
+      tech: arr(p.tech),
     })),
-    certifications: (sections.certifications ?? []).map((c) => ({
+    certifications: arr(s.certifications).map((c) => ({
       ...c,
       id: c.id || crypto.randomUUID(),
+      text: c.text ?? "",
     })),
   };
 }

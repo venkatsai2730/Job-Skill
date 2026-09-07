@@ -93,7 +93,7 @@ function detectLevel(sections: ParsedSections): "Fresher" | "Medium" | "Senior" 
 }
 
 // ── GLOBAL_TECH_SKILLS for keyword reporting ────────────────
-import { countMatchedSkills, GLOBAL_TECH_SKILLS } from './scorer/helpers.js';
+import { countMatchedSkills, GLOBAL_TECH_SKILLS, matchedGlobalSkills } from './scorer/helpers.js';
 
 // ── Main Scorer Function (backward compatible) ─────────────
 export function computeAdvancedATS(
@@ -111,7 +111,7 @@ export function computeAdvancedATS(
     const parseFidelity = analyzeParseFidelity(rawText, metadata, config);
 
     // ── PHASE 1: Base Score ──────────────────────────────────
-    const baseScore = computeBaseScore(resume, config, parseFidelity);
+    const { total: baseScore, components } = computeBaseScore(resume, config, parseFidelity);
 
     // ── PHASE 2: Penalty Deductions ─────────────────────────
     const allPenalties = detectAllPenalties(resume, config);
@@ -178,8 +178,12 @@ export function computeAdvancedATS(
     const mappedIssues = triggered.map(p => ({
         category: CATEGORY_MAP[p.id] || "Other Issues",
         penalty_key: p.id,
-        count: p.id === 'vague_outcomes' || p.id === 'typos'
-            ? Math.max(1, Math.round(p.deduction / (p.id === 'vague_outcomes' ? 1.2 : 2.5)))
+        // Per-item penalties: recover the item count from deduction ÷ per-item
+        // weight (config), not a magic divisor that mismatched the real weights.
+        count: p.id === 'vague_outcomes'
+            ? Math.max(1, Math.round(p.deduction / config.penalties.vague_per_bullet))
+            : p.id === 'typos'
+            ? Math.max(1, Math.round(p.deduction / config.penalties.typo_per))
             : 1,
         point_gain: p.deduction,
         is_locked: false,
@@ -271,9 +275,11 @@ export function computeAdvancedATS(
     });
 
     // ── Keywords report ─────────────────────────────────────
-    const lowerText = rawText.toLowerCase();
-    const foundKeywords = GLOBAL_TECH_SKILLS.filter(kw => lowerText.includes(kw));
-    const missingKeywords = GLOBAL_TECH_SKILLS.filter(kw => !lowerText.includes(kw));
+    // Whole-token matching (not substring) so we don't report 'r'/'go'/'rust'
+    // etc. from ordinary prose. See matchedGlobalSkills in scorer/helpers.
+    const foundSet = new Set(matchedGlobalSkills(rawText));
+    const foundKeywords = GLOBAL_TECH_SKILLS.filter(kw => foundSet.has(kw));
+    const missingKeywords = GLOBAL_TECH_SKILLS.filter(kw => !foundSet.has(kw));
 
     // ── ATS Risk ────────────────────────────────────────────
     const atsRisk: "LOW" | "MEDIUM" | "HIGH" =
@@ -286,9 +292,11 @@ export function computeAdvancedATS(
     else if (finalScore >= config.labels.good)      label = "Good";
     else if (finalScore >= config.labels.fair)      label = "Fair";
 
-    // ── Breakdown (approximate from base score components) ──
-    const totalBase = Math.max(1, baseScore);
-    const ratio = finalScore / totalBase;
+    // ── Breakdown — REAL per-component base subscores ────────
+    // (Previously every category was faked as max × overall-ratio, so a resume
+    //  with 6/38 quantification was shown as "Impact 37/38". These are the
+    //  actual component scores from computeBaseScore.)
+    const clampInt = (v: number, max: number) => Math.max(0, Math.min(max, Math.round(v)));
 
     return {
         // Legacy fields (backward compat)
@@ -299,10 +307,10 @@ export function computeAdvancedATS(
         atsRisk,
         indiaAtsScore: 0,
         breakdown: {
-            impact:   { score: Math.round(Math.min(38, 38 * ratio)), max: 38 },
-            ats:      { score: Math.round(Math.min(20, 20 * ratio)), max: 20 },
-            style:    { score: Math.round(Math.min(14, 14 * ratio)), max: 14 },
-            advanced: { score: Math.round(Math.min(10, 10 * ratio)), max: 10 },
+            impact:   { score: clampInt(components.quantification, 38), max: 38 },
+            ats:      { score: clampInt(components.ats, 20),           max: 20 },
+            style:    { score: clampInt(components.style, 14),         max: 14 },
+            advanced: { score: clampInt(components.skillsContact, 10), max: 10 },
         },
         issues,
         keywords: {

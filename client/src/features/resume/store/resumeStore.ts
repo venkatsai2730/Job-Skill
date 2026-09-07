@@ -14,6 +14,31 @@ import type { PatchOperation } from "../types/patch.types";
 
 const MAX_HISTORY = 30;
 
+/** Guarantee a persisted/AI-produced ATS object has its nested `keywords` and
+ *  `issues` shapes. Older records and AI-edit responses can store an `ats` with
+ *  a missing `keywords` object; the ATS panel reads `ats.keywords.found` etc.
+ *  unguarded, so a malformed `ats` throws and unmounts the page. Preserves any
+ *  extra fields (e.g. `atsRisk`) via spread. */
+function normalizeAts<T>(ats: T | null | undefined): T | null {
+  if (ats == null) return null;
+  const a = ats as Record<string, unknown>;
+  const kw = (a.keywords ?? {}) as Record<string, unknown>;
+  const num = (v: unknown) => (typeof v === "number" ? v : 0);
+  const arr = <U,>(v: unknown): U[] => (Array.isArray(v) ? (v as U[]) : []);
+  return {
+    ...a,
+    score: num(a.score),
+    label: typeof a.label === "string" ? a.label : "",
+    issues: arr(a.issues),
+    keywords: {
+      found: arr<string>(kw.found),
+      missing: arr<string>(kw.missing),
+      total: num(kw.total),
+      matched: num(kw.matched),
+    },
+  } as T;
+}
+
 export const EMPTY_SECTIONS: ParsedSections = {
   name: "",
   email: "",
@@ -94,7 +119,7 @@ export const useResumeStore = create<ResumeStore>()(
       setSections: (sections, ats, versions) =>
         set({
           sections: seedIds(sections),
-          ...(ats !== undefined ? { ats } : {}),
+          ...(ats !== undefined ? { ats: normalizeAts(ats) } : {}),
           ...(versions !== undefined ? { versions } : {}),
           past: [],
           future: [],
@@ -174,7 +199,7 @@ export const useResumeStore = create<ResumeStore>()(
         const { past, sections: current, aiHistory, ats: currentAts } = get();
         set({
           sections: seedIds(sections),
-          ats: ats !== undefined ? ats : currentAts,
+          ats: ats !== undefined ? normalizeAts(ats) : currentAts,
           past: [...past, current].slice(-MAX_HISTORY),
           future: [],
           isDirty: true,
