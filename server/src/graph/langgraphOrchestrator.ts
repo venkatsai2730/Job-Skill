@@ -15,7 +15,7 @@ import type { AgentGraphState, Message } from "./state.js";
 
 // ── Nodes ─────────────────────────────────────────────────────
 import { intakeNode } from "./nodes/intakeNode.js";
-import { intentRouterNode, routeFromIntent } from "./nodes/intentRouterNode.js";
+import { intentRouterNode, fanOutFromIntent } from "./nodes/intentRouterNode.js";
 import { plannerNode } from "./nodes/plannerNode.js";
 import { resumeAnalysisNode } from "./nodes/resumeAnalysisNode.js";
 import { jobsAgentNode } from "./nodes/jobsAgentNode.js";
@@ -64,24 +64,22 @@ function buildGraph() {
         .addEdge("intent_router", "planner")
 
         // ── Conditional routing from planner to agents ────────
-        .addConditionalEdges("planner", (state: typeof GraphAnnotation.State) => {
-            const branches = routeFromIntent(state as AgentGraphState);
-            // Return object mapping branch names to their target nodes
-            // LangGraph handles parallelism when multiple targets returned
-            if (branches.length === 0 || branches.includes("synthesis")) {
-                return "synthesis";
+        // Real parallel fan-out: fanOutFromIntent() returns a Send[] so every
+        // branch requested by the intent runs concurrently in one superstep,
+        // then all converge on synthesis. (Empty intents → "synthesis".)
+        .addConditionalEdges(
+            "planner",
+            (state: typeof GraphAnnotation.State) =>
+                fanOutFromIntent(state as AgentGraphState),
+            {
+                resume_analysis: "resume_analysis",
+                jobs_agent: "jobs_agent",
+                web_context: "web_context",
+                data_agent: "data_agent",
+                interview_agent: "interview_agent",
+                synthesis: "synthesis",
             }
-            // For simplicity, run the FIRST branch sequentially
-            // In production LangGraph, parallel branches use Send()
-            return branches[0];
-        }, {
-            resume_analysis: "resume_analysis",
-            jobs_agent: "jobs_agent",
-            web_context: "web_context",
-            data_agent: "data_agent",
-            interview_agent: "interview_agent",
-            synthesis: "synthesis",
-        })
+        )
 
         // ── All agent nodes converge to synthesis ─────────────
         .addEdge("resume_analysis", "synthesis")

@@ -5,6 +5,7 @@
 // Returns intent classification to drive conditional edges.
 // ═══════════════════════════════════════════════════════════════
 
+import { Send } from "@langchain/langgraph";
 import { classifyIntent } from "../../agent/intentClassifier.js";
 import { traceNodeExecution } from "../../observability/langfuse.js";
 import type { AgentGraphState, IntentResult } from "../state.js";
@@ -86,4 +87,33 @@ export function routeFromIntent(state: AgentGraphState): string[] {
     if (caps.includes("interview")) branches.push("interview_agent");
 
     return branches.length > 0 ? branches : ["synthesis"];
+}
+
+/**
+ * Fan-out routing for the planner's conditional edge.
+ *
+ * Dispatches EVERY requested branch concurrently via LangGraph's Send()
+ * primitive — all branches run in the same superstep and converge on
+ * synthesis. This replaces the old `branches[0]` behaviour where only the
+ * first branch ran.
+ *
+ * Each Send carries the current state, so every branch node receives the
+ * same planner output. The state reducers in state.ts are safe for these
+ * concurrent writes: each last-write-wins channel (resumeContext,
+ * dataContext, interviewContext) has exactly ONE writer node, and the
+ * remaining channels (jobsContext, webContext, toolCalls, …) append.
+ *
+ * NOTE: data_agent's salary-normalization reads state.jobsContext, which is
+ * empty under true parallelism (jobs_agent runs in the same superstep). Its
+ * RAG semanticJobs path is independent and still populates dataContext.
+ */
+export function fanOutFromIntent(state: AgentGraphState): "synthesis" | Send[] {
+    const branches = routeFromIntent(state);
+
+    // Empty capabilities (e.g. general_chat) → skip agents entirely.
+    if (branches.length === 0 || branches.includes("synthesis")) {
+        return "synthesis";
+    }
+
+    return branches.map((node) => new Send(node, state));
 }
