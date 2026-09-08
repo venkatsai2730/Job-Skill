@@ -31,11 +31,20 @@ import { resolveEntryIndex, type AriaEditResult } from "@/features/resume/utils/
 
 const PDF_PREVIEW_ID = "resume-pdf-capture";
 
-const TEMPLATES: { id: ResumeTemplate; label: string }[] = [
-  { id: "professional", label: "Professional" },
-  { id: "modern", label: "Modern" },
-  { id: "classic", label: "Classic" },
-  { id: "minimal", label: "Minimal" },
+interface TemplateOption {
+  id: ResumeTemplate;
+  name: string;
+  description?: string;
+  atsScore?: number;
+}
+
+// Fallback used only if GET /api/resume/templates is unreachable. The four ids
+// map 1:1 to the editor's four render-able preview components.
+const DEFAULT_TEMPLATES: TemplateOption[] = [
+  { id: "professional", name: "Professional" },
+  { id: "modern", name: "Modern" },
+  { id: "classic", name: "Classic" },
+  { id: "minimal", name: "Minimal" },
 ];
 
 // ── Keyboard shortcut: Ctrl+Z / Ctrl+Y ───────────────────────────
@@ -85,6 +94,7 @@ const Resume = () => {
   const [activeSection, setActiveSection] = useState("Summary");
   const [showVersions, setShowVersions] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [templates, setTemplates] = useState<TemplateOption[]>(DEFAULT_TEMPLATES);
   const [reparsing, setReparsing] = useState(false);
 
   const hasParsed =
@@ -128,6 +138,21 @@ const Resume = () => {
       .then((d) => { if (d.resume) setResumeFile(d.resume); })
       .catch(() => {});
   }, [token]);
+
+  // ── Load the server-served template list (falls back to DEFAULT_TEMPLATES) ──
+  useEffect(() => {
+    api.get<{ templates: TemplateOption[] }>("/api/resume/templates")
+      .then((d) => { if (d.templates?.length) setTemplates(d.templates); })
+      .catch(() => {});
+  }, []);
+
+  // ── Load the user's saved template choice (store is not persisted client-side) ──
+  useEffect(() => {
+    if (!token || !resumeFile) return;
+    api.get<{ template: ResumeTemplate | null }>("/api/resume/template")
+      .then((d) => { if (d.template) store.setTemplate(d.template); })
+      .catch(() => {});
+  }, [token, resumeFile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!token || !resumeFile) return;
@@ -378,7 +403,20 @@ const Resume = () => {
   const ats = store.ats;
   const atsScore = ats?.score ?? 0;
   const r = 40;
-  const SECTIONS = ["Summary", "Experience", "Education", "Skills", "Projects"] as const;
+  // Section nav is derived from the resume's actual content (not a hardcoded
+  // list): only sections that have data are shown, and Certifications — which
+  // the editor renders but the old static list omitted — is now included.
+  // Falls back to the full set when nothing is parsed yet.
+  const SECTION_DEFS: { key: string; has: boolean }[] = [
+    { key: "Summary",        has: !!store.sections.summary?.trim() },
+    { key: "Experience",     has: store.sections.experience.length > 0 },
+    { key: "Education",      has: store.sections.education.length > 0 },
+    { key: "Skills",         has: store.sections.skills.length > 0 },
+    { key: "Projects",       has: store.sections.projects.length > 0 },
+    { key: "Certifications", has: store.sections.certifications.length > 0 },
+  ];
+  const present = SECTION_DEFS.filter((s) => s.has).map((s) => s.key);
+  const SECTIONS = present.length > 0 ? present : SECTION_DEFS.map((s) => s.key);
 
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
@@ -458,11 +496,20 @@ const Resume = () => {
             </button>
             {showTemplates && (
               <div className="mt-1.5 space-y-1">
-                {TEMPLATES.map((t) => (
+                {templates.map((t) => (
                   <button type="button" key={t.id}
-                    onClick={() => { store.setTemplate(t.id); setShowTemplates(false); }}
+                    title={t.description}
+                    onClick={() => {
+                      store.setTemplate(t.id);
+                      setShowTemplates(false);
+                      // Persist server-side so the choice survives reloads/devices
+                      api.put("/api/resume/template", { template: t.id }).catch(() => {});
+                    }}
                     className={`w-full text-left px-3 py-1.5 rounded-lg text-xs transition-all ${store.template === t.id ? "bg-blue-electric/10 text-blue-electric" : "text-white-60 hover:bg-surface-2"}`}>
-                    {t.id === store.template && <Check className="w-3 h-3 inline mr-1.5" />}{t.label}
+                    {t.id === store.template && <Check className="w-3 h-3 inline mr-1.5" />}{t.name}
+                    {typeof t.atsScore === "number" && (
+                      <span className="float-right text-white-30">ATS {t.atsScore}</span>
+                    )}
                   </button>
                 ))}
               </div>

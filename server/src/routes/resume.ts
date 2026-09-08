@@ -30,6 +30,7 @@ import { enrichMissingSkills } from "../lib/learning-resources.js";
 import { inferSemanticSkills, applyResumeFix, getAIReply } from "../services/chatService.js";
 import { logActivity } from "../services/activityService.js";
 import { denormalizeToSections, type ResumeData } from "../types/resumePatchTypes.js";
+import { PREVIEW_TEMPLATES, resolveLatexTemplateId } from "../lib/preview-templates.js";
 
 const router = Router();
 router.use(authenticateToken);
@@ -1442,6 +1443,64 @@ router.delete("/versions/:id", async (req: AuthRequest, res: Response) => {
     }
 });
 
+// ── GET /api/resume/templates — editor preview template list ──
+// Serves the four render-able preview templates (with their mapped backend
+// LaTeX id + real ATS score) instead of the client hardcoding the list.
+router.get("/templates", (_req: AuthRequest, res: Response) => {
+    res.json({ templates: PREVIEW_TEMPLATES });
+});
+
+// ── GET /api/resume/template — user's saved template choice ──
+router.get("/template", async (req: AuthRequest, res: Response) => {
+    try {
+        const { data } = await supabaseAdmin
+            .from("resumes")
+            .select("parsed_data")
+            .eq("user_id", req.user!.userId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+        const template = (data?.parsed_data as any)?.selectedTemplate ?? null;
+        res.json({ template });
+    } catch (err: any) {
+        console.error("Get template error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// ── PUT /api/resume/template — persist template choice ──
+router.put("/template", async (req: AuthRequest, res: Response) => {
+    try {
+        const { template } = req.body;
+        if (!template || !PREVIEW_TEMPLATES.some((t) => t.id === template)) {
+            res.status(400).json({ error: "Invalid template id" });
+            return;
+        }
+
+        const { data: row } = await supabaseAdmin
+            .from("resumes")
+            .select("id, parsed_data")
+            .eq("user_id", req.user!.userId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+        if (!row) { res.status(404).json({ error: "No resume found" }); return; }
+
+        const existing = (row.parsed_data as any) ?? {};
+        await supabaseAdmin
+            .from("resumes")
+            .update({ parsed_data: { ...existing, selectedTemplate: template } })
+            .eq("id", row.id);
+
+        res.json({ template });
+    } catch (err: any) {
+        console.error("Save template error:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
 // POST /api/resume/download/latex
 router.post("/download/latex", async (req: AuthRequest, res: Response) => {
     try {
@@ -1452,7 +1511,7 @@ router.post("/download/latex", async (req: AuthRequest, res: Response) => {
             return;
         }
 
-        const latexContent = generateLatex(sections, templateId, userInfo);
+        const latexContent = generateLatex(sections, resolveLatexTemplateId(templateId), userInfo);
         res.setHeader("Content-Type", "application/x-tex");
         res.setHeader("Content-Disposition", `attachment; filename="ATS_Optimized_Resume.tex"`);
         res.send(latexContent);
@@ -1699,7 +1758,9 @@ router.post("/download/pdf-latex", async (req: AuthRequest, res: Response) => {
         return;
     }
     try {
-        const tex = generateLatex(sections as ParsedSections, templateId || "classic-academic", userInfo || {});
+        // Map editor preview ids ("professional"/"modern"/…) → real backend
+        // LaTeX template ids so the user's on-screen choice drives the PDF.
+        const tex = generateLatex(sections as ParsedSections, resolveLatexTemplateId(templateId), userInfo || {});
         const pdfBuffer = await compileLatexToPdf(tex);
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="Resume.pdf"`);
