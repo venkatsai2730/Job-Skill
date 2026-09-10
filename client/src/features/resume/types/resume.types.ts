@@ -72,11 +72,30 @@ export interface ResumeVersion {
   createdAt: string;
 }
 
+/** Visual fingerprint of the original PDF, mined at upload on the server
+ *  (see server/src/lib/resumeStyleProfile.ts). Drives the "faithful" re-render
+ *  so AI-edited resumes still look like the user's uploaded document. */
+export interface StyleProfile {
+  version: 2;
+  page: { width: number; height: number; marginLeft: number; marginRight: number; marginTop: number };
+  columns: 1 | 2;
+  sidebar: { side: "left" | "right"; widthPct: number } | null;
+  fonts: { bodyFamily: string; headingFamily: string };
+  sizes: { name: number; sectionHeading: number; body: number };
+  colors: { name: string; sectionHeading: string; body: string };
+  weights: { nameBold: boolean; headingBold: boolean };
+  lineHeight: number;
+  sectionHeadingStyle: { uppercase: boolean; smallCaps: boolean };
+  bulletGlyph: string;
+  header: { align: "left" | "center" };
+}
+
 export interface ParsedData {
   sections: ParsedSections;
   ats: ATSResult;
   rawText?: string;
   versions?: ResumeVersion[];
+  styleProfile?: StyleProfile;
 }
 
 // ── Editor state ──────────────────────────────────────────────────
@@ -102,4 +121,4 @@ export interface AIHistoryEntry {
 
 export const MAX_HISTORY = 30;
 
-export type ResumeTemplate = "classic" | "modern" | "minimal" | "professional";
+export type ResumeTemplate = "classic" | "modern" | "minimal" | "professional" | "faithful";

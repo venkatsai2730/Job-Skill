@@ -6,6 +6,7 @@ import type {
   ResumeVersion,
   AIHistoryEntry,
   ResumeTemplate,
+  StyleProfile,
 } from "../types/resume.types";
 import type { JDMatchResult } from "../schemas/resume.schema";
 import { applyPatches } from "../utils/applyPatch";
@@ -65,6 +66,8 @@ interface ResumeState {
   aiStreamText: string;
   aiHistory: AIHistoryEntry[];
   template: ResumeTemplate;
+  /** Original-PDF typography fingerprint; drives the "faithful" template. */
+  styleProfile: StyleProfile | null;
   jdResult: JDMatchResult | null;
   jobDescription: string;
 }
@@ -81,6 +84,7 @@ interface ResumeActions {
   syncVersions: (versions: ResumeVersion[]) => void;
   markClean: () => void;
   setTemplate: (template: ResumeTemplate) => void;
+  setStyleProfile: (profile: StyleProfile | null) => void;
   startAIEdit: () => void;
   appendStream: (text: string) => void;
   completeAIEdit: (
@@ -112,6 +116,7 @@ export const useResumeStore = create<ResumeStore>()(
       aiStreamText: "",
       aiHistory: [],
       template: "professional",
+      styleProfile: null,
       jdResult: null,
       jobDescription: "",
 
@@ -189,6 +194,8 @@ export const useResumeStore = create<ResumeStore>()(
       markClean: () => set({ isDirty: false }),
 
       setTemplate: (template) => set({ template }),
+
+      setStyleProfile: (profile) => set({ styleProfile: profile }),
 
       startAIEdit: () => set({ isAIEditing: true, aiStreamText: "" }),
 

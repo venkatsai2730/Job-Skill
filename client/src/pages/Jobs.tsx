@@ -305,32 +305,29 @@ export function JobCard({ job, userSkills, onSave, onMatch, onDismiss, userDomai
   userDomainLabel?: string;
 }) {
   return (
-    <div className="glass-card-hover p-5 flex flex-col group relative bg-white/60 backdrop-blur-md">
-      <div className="absolute top-4 right-4 flex items-center gap-1.5">
-        {(job.confidence_score || 100) < 60 && (
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20 flex items-center gap-1" title="Experience data may be inaccurate">
-            <AlertTriangle className="w-3 h-3" /> Verify
-          </span>
-        )}
-        <span className={`text-gray-600 text-[10px] font-bold px-2 py-1 rounded capitalize tracking-wider flex items-center gap-1 ${job.source === "jsearch" ? "bg-emerald-500/15 text-emerald-400" : "bg-gray-100"}`}>
-          {job.source === "jsearch" ? "🌐 Global" : job.source}
-        </span>
-      </div>
-
-      <div className="flex items-center gap-3.5 mb-3 mt-2">
+    <div className="glass-card-hover p-5 flex flex-col group relative bg-white/60 backdrop-blur-md h-full">
+      <div className="flex items-start gap-3.5 mb-3">
         <div className="w-12 h-12 rounded-xl bg-blue-500/15 flex items-center justify-center text-blue-500 font-display font-bold text-lg uppercase shrink-0">{job.company.charAt(0)}</div>
-        <div className="flex flex-col gap-0.5 min-w-0 pr-16">
-          <h4 className="text-foreground font-semibold text-[16px] leading-snug group-hover:text-blue-500 transition-colors truncate" title={job.title}>{job.title}</h4>
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+          <h4 className="text-foreground font-semibold text-[16px] leading-snug group-hover:text-blue-500 transition-colors line-clamp-2 break-words" title={job.title}>{job.title}</h4>
           <p className="text-gray-500 font-medium text-[14px] truncate" title={job.company}>{job.company}</p>
         </div>
       </div>
 
-      {/* Badges row — match %, selection-chance, domain-match and "Active"
-          badges intentionally removed: they were noisy and could mislead
-          (e.g. a "92% High Chance" tag on a role a fresher won't hear back on,
-          and "Active" only meant "posted within 7 days", not a live check). */}
+      {/* Badges row — seniority + data-quality + source. Match %, selection-chance,
+          domain-match and "Active" badges intentionally removed: they were noisy and
+          could mislead (e.g. a "92% High Chance" tag on a role a fresher won't hear
+          back on, and "Active" only meant "posted within 7 days", not a live check). */}
       <div className="flex items-center gap-1.5 flex-wrap mb-3">
         <SeniorityBadge level={job.seniority_level} />
+        {(job.confidence_score || 100) < 60 && (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/20 flex items-center gap-1" title="Experience data may be inaccurate">
+            <AlertTriangle className="w-3 h-3" /> Verify
+          </span>
+        )}
+        <span className={`text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded capitalize tracking-wider flex items-center gap-1 ${job.source === "jsearch" ? "bg-emerald-500/15 text-emerald-500" : "bg-gray-100"}`}>
+          {job.source === "jsearch" ? "🌐 Global" : job.source}
+        </span>
       </div>
 
       <div className="flex flex-col gap-2 mb-5 flex-1">
@@ -355,34 +352,36 @@ export function JobCard({ job, userSkills, onSave, onMatch, onDismiss, userDomai
         </div>
       </div>
 
-      <div className="flex items-center justify-between border-t border-border pt-4 mt-auto">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-gray-500 text-[11px] font-medium"><Clock className="w-3.5 h-3.5" /> {formatTimeAgo(job.posted_at)}</div>
-          <WhyThisJob job={job} userSkills={userSkills} />
-        </div>
-        <div className="flex items-center gap-2.5">
-          <button onClick={() => onSave(job)} className="text-gray-600 hover:text-cyan-500 transition-colors flex items-center justify-center p-2 rounded-lg hover:bg-cyan-500/10 outline-none" title="Save to Tracked Apps">
-            <BookmarkPlus className="w-4.5 h-4.5" />
-          </button>
-          <button onClick={() => onMatch(job)}
-            className="text-gray-600 hover:text-purple-400 transition-colors flex items-center justify-center p-2 rounded-lg hover:bg-purple-400/10 outline-none" title="Match Score via AI">
-            <Bot className="w-4.5 h-4.5" />
-          </button>
-          {onDismiss && (
-            <button onClick={() => onDismiss(job)}
-              className="text-gray-600 hover:text-red-500 transition-colors flex items-center justify-center p-2 rounded-lg hover:bg-red-500/10 outline-none"
-              title="Not for me — hide this job" aria-label="Not for me">
-              <X className="w-4.5 h-4.5" />
+      <div className="flex flex-col gap-3 border-t border-border pt-3 mt-auto">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1 min-w-0">
+            <div className="flex items-center gap-1.5 text-gray-500 text-[11px] font-medium whitespace-nowrap"><Clock className="w-3.5 h-3.5 shrink-0" /> {formatTimeAgo(job.posted_at)}</div>
+            <WhyThisJob job={job} userSkills={userSkills} />
+          </div>
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button onClick={() => onSave(job)} className="text-gray-600 hover:text-cyan-500 transition-colors flex items-center justify-center p-2 rounded-lg hover:bg-cyan-500/10 outline-none" title="Save to Tracked Apps" aria-label="Save to Tracked Apps">
+              <BookmarkPlus className="w-4.5 h-4.5" />
             </button>
-          )}
-          {/* "apply" here means the user followed the link out, not a confirmed
-              application. Don't rename without migrating stored rows. */}
-          <a href={job.job_url} target="_blank" rel="noreferrer"
-            onClick={() => logJobEvent("apply", job.id, { score: job.relevance_score })}
-            className="flex items-center gap-1.5 text-blue-500 font-bold text-[13px] hover:text-white group/link outline-none transition-colors px-4 py-2 bg-blue-500/10 hover:bg-blue-500 rounded-lg">
-            Apply Now <ExternalLink className="w-3.5 h-3.5 flex-none" />
-          </a>
+            <button onClick={() => onMatch(job)}
+              className="text-gray-600 hover:text-purple-400 transition-colors flex items-center justify-center p-2 rounded-lg hover:bg-purple-400/10 outline-none" title="Match Score via AI" aria-label="Match Score via AI">
+              <Bot className="w-4.5 h-4.5" />
+            </button>
+            {onDismiss && (
+              <button onClick={() => onDismiss(job)}
+                className="text-gray-600 hover:text-red-500 transition-colors flex items-center justify-center p-2 rounded-lg hover:bg-red-500/10 outline-none"
+                title="Not for me — hide this job" aria-label="Not for me">
+                <X className="w-4.5 h-4.5" />
+              </button>
+            )}
+          </div>
         </div>
+        {/* "apply" here means the user followed the link out, not a confirmed
+            application. Don't rename without migrating stored rows. */}
+        <a href={job.job_url} target="_blank" rel="noreferrer"
+          onClick={() => logJobEvent("apply", job.id, { score: job.relevance_score })}
+          className="flex items-center justify-center gap-1.5 w-full text-white font-bold text-[13px] outline-none transition-colors px-4 py-2.5 bg-blue-500 hover:bg-blue-600 rounded-lg">
+          Apply Now <ExternalLink className="w-3.5 h-3.5 flex-none" />
+        </a>
       </div>
     </div>
   );

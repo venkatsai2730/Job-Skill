@@ -53,35 +53,36 @@ const DashboardLayout = () => {
               <span className="font-display font-bold text-base text-foreground hidden sm:inline">JobSkill AI</span>
             </Link>
 
-            <nav className="hidden md:flex items-center gap-1 ml-8">
+            <nav className="hidden md:flex items-center gap-0.5 lg:gap-1 flex-1 justify-center min-w-0 px-2">
               {navItems.map((item) => {
                 const isActive = location.pathname === item.path;
                 return (
                   <Link
                     key={item.path}
                     to={item.path}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${isActive
+                    title={item.label}
+                    className={`flex items-center gap-2 px-2.5 lg:px-3.5 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${isActive
                       ? "bg-blue-500/10 text-blue-500"
                       : "text-gray-600 hover:bg-gray-50 hover:text-foreground"
                     }`}
                   >
-                    <item.icon className="w-4 h-4" />
-                    {item.label}
+                    <item.icon className="w-4 h-4 shrink-0" />
+                    <span className="hidden lg:inline">{item.label}</span>
                   </Link>
                 );
               })}
             </nav>
 
-            <div className="flex items-center gap-4">
-              <div className="hidden sm:flex items-center gap-2 px-3.5 py-2 rounded-full bg-gray-50 border border-border">
-                <Gift className="w-4 h-4 text-blue-500" />
-                <span className="text-sm font-medium text-foreground">{user?.dailyCreditsUsed ?? 0}/{user?.dailyCreditsLimit ?? 5}</span>
+            <div className="flex items-center gap-1.5 lg:gap-3 shrink-0">
+              <div className="hidden xl:flex items-center gap-2 px-3.5 py-2 rounded-full bg-gray-50 border border-border">
+                <Gift className="w-4 h-4 text-blue-500 shrink-0" />
+                <span className="text-sm font-medium text-foreground whitespace-nowrap">{user?.dailyCreditsUsed ?? 0}/{user?.dailyCreditsLimit ?? 5}</span>
                 <div className="w-14 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                   <div className="h-full bg-blue-500 rounded-full" style={{ width: `${((user?.dailyCreditsUsed ?? 0) / (user?.dailyCreditsLimit ?? 5)) * 100}%` }} />
                 </div>
               </div>
 
-              <Link to="/pricing" className="hidden sm:inline text-sm font-medium text-blue-500 hover:underline">
+              <Link to="/pricing" className="hidden lg:inline text-sm font-medium text-blue-500 hover:underline whitespace-nowrap">
                 Upgrade →
               </Link>
 

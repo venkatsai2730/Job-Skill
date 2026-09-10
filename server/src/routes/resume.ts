@@ -23,9 +23,11 @@ import {
     TextRun,
     HeadingLevel,
     AlignmentType,
+    BorderStyle,
 } from "docx";
 import { parseLatex } from "../lib/latex-parser.js";
 import { generateLatex } from "../lib/latex-generator.js";
+import { generateFaithfulLatex } from "../lib/faithful-latex.js";
 import { enrichMissingSkills } from "../lib/learning-resources.js";
 import { inferSemanticSkills, applyResumeFix, getAIReply } from "../services/chatService.js";
 import { logActivity } from "../services/activityService.js";
@@ -712,12 +714,16 @@ import { computeAdvancedATS, AdvancedATSResult } from "../lib/advanced-scorer.js
 import { scoreJobMatch, buildResumeFromScratch } from "../services/chatService.js";
 import { LATEX_TEMPLATES } from "../lib/latex-templates.js";
 import { simulateGreenhouse, simulateLever } from "../lib/ats-simulator.js";
+import { extractStyleProfile, StyleProfile } from "../lib/resumeStyleProfile.js";
 
 interface ParsedData {
     sections: ParsedSections;
     ats: AdvancedATSResult;
     rawText?: string;
     isLatex?: boolean;
+    /** Visual fingerprint of the original PDF (fonts/sizes/spacing) so edits can
+     *  be re-rendered to look like the user's document. Set at upload; optional. */
+    styleProfile?: StyleProfile;
     /** Normalized, UUID-based resume model (set by Aria edits); optional. */
     resume_data?: ResumeData;
 }
@@ -896,9 +902,14 @@ router.post("/upload", async (req: AuthRequest, res: Response) => {
             // Merge heuristic skills with AI semantic skills and deduplicate
             ats.inferredSkills = Array.from(new Set([...ats.inferredSkills, ...semanticSkills]));
             
+            // Mine the original PDF's typography (serif/sans, sizes, spacing) so the
+            // editor can re-render edits in a look-alike template instead of a fixed
+            // one. Best-effort: never blocks upload if it fails.
+            const styleProfile = await extractStyleProfile(fileBuffer);
+
             // Store the full extracted text (capped generously) so later rescores after
             // edits are computed on the same amount of text as the original score.
-            parsedData = { sections, ats, rawText: rawText.substring(0, 20000) };
+            parsedData = { sections, ats, rawText: rawText.substring(0, 20000), styleProfile };
         } catch (parseErr) {
             console.error("PDF parse warning (non-fatal):", parseErr);
             // Continue even if parsing fails — file is still stored
@@ -1236,7 +1247,40 @@ router.get("/download/docx", async (req: AuthRequest, res: Response) => {
             }
         }
 
+        // ── Faithful styling: drive DOCX fonts/sizes/colors/heading style from the
+        //    original PDF's StyleProfile so the .docx echoes the uploaded look
+        //    instead of hardcoded defaults. Falls back gracefully when absent. ──
+        const sp = pd.styleProfile;
+        const docxFont = (fam?: string) =>
+            fam === "sans-serif" ? "Calibri" : fam === "monospace" ? "Consolas" : "Times New Roman";
+        const hp = (pt: number) => Math.round(pt * 2); // docx sizes are half-points
+        const hex = (c?: string) => (c && /^#?[0-9a-fA-F]{6}$/.test(c) ? c.replace("#", "") : "222222");
+        const bodyFont = docxFont(sp?.fonts.bodyFamily);
+        const headFont = docxFont(sp?.fonts.headingFamily);
+
         const doc = new Document({
+            styles: {
+                default: {
+                    document: { run: { font: bodyFont, size: hp(sp?.sizes.body ?? 10.5), color: hex(sp?.colors.body) } },
+                    title: {
+                        run: { font: headFont, size: hp(sp?.sizes.name ?? 20), bold: sp?.weights.nameBold ?? true, color: hex(sp?.colors.name) },
+                        paragraph: { alignment: sp?.header.align === "left" ? AlignmentType.LEFT : AlignmentType.CENTER },
+                    },
+                    heading1: {
+                        run: {
+                            font: headFont,
+                            size: hp(sp?.sizes.sectionHeading ?? 12),
+                            bold: sp?.weights.headingBold ?? true,
+                            color: hex(sp?.colors.sectionHeading),
+                            allCaps: sp?.sectionHeadingStyle.uppercase ?? true,
+                        },
+                        paragraph: {
+                            spacing: { before: 220, after: 80 },
+                            border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: hex(sp?.colors.sectionHeading), space: 1 } },
+                        },
+                    },
+                },
+            },
             sections: [{ children }],
         });
 
@@ -1752,15 +1796,19 @@ router.post("/compile-latex", aiResumeLimiter, async (req: any, res: any) => {
 // Used by the frontend when AI edits exist, to produce a proper PDF
 // with embedded hyperlinks (instead of html2canvas raster export).
 router.post("/download/pdf-latex", async (req: AuthRequest, res: Response) => {
-    const { sections, templateId, userInfo } = req.body;
+    const { sections, templateId, userInfo, styleProfile } = req.body;
     if (!sections) {
         res.status(400).json({ error: "sections is required" });
         return;
     }
     try {
-        // Map editor preview ids ("professional"/"modern"/…) → real backend
-        // LaTeX template ids so the user's on-screen choice drives the PDF.
-        const tex = generateLatex(sections as ParsedSections, resolveLatexTemplateId(templateId), userInfo || {});
+        // "faithful" → generate a look-alike LaTeX doc from the original PDF's
+        // StyleProfile (vector output that echoes the user's fonts/colors). Any
+        // other id → the fixed backend LaTeX templates.
+        const tex =
+            templateId === "faithful" && styleProfile
+                ? generateFaithfulLatex(sections as ParsedSections, styleProfile as StyleProfile, userInfo || {})
+                : generateLatex(sections as ParsedSections, resolveLatexTemplateId(templateId), userInfo || {});
         const pdfBuffer = await compileLatexToPdf(tex);
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="Resume.pdf"`);

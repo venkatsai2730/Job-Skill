@@ -41,6 +41,7 @@ interface TemplateOption {
 // Fallback used only if GET /api/resume/templates is unreachable. The four ids
 // map 1:1 to the editor's four render-able preview components.
 const DEFAULT_TEMPLATES: TemplateOption[] = [
+  { id: "faithful", name: "Match Original" },
   { id: "professional", name: "Professional" },
   { id: "modern", name: "Modern" },
   { id: "classic", name: "Classic" },
@@ -159,7 +160,10 @@ const Resume = () => {
     setLoadingParsed(true);
     api.get<{ parsed: ParsedData | null }>("/api/resume/parsed")
       .then((d) => {
-        if (d.parsed) store.setSections(d.parsed.sections, d.parsed.ats, d.parsed.versions);
+        if (d.parsed) {
+          store.setSections(d.parsed.sections, d.parsed.ats, d.parsed.versions);
+          store.setStyleProfile(d.parsed.styleProfile ?? null);
+        }
       })
       .catch(() => {})
       .finally(() => setLoadingParsed(false));
@@ -200,7 +204,13 @@ const Resume = () => {
       }>("/api/resume/upload", { fileName: file.name, fileData: base64 });
 
       setResumeFile(meta.resume);
-      if (meta.parsed) store.setSections(meta.parsed.sections, meta.parsed.ats);
+      if (meta.parsed) {
+        store.setSections(meta.parsed.sections, meta.parsed.ats);
+        store.setStyleProfile(meta.parsed.styleProfile ?? null);
+        // Default a freshly uploaded resume to the look-alike template so any AI
+        // edit re-renders in the user's original style, not a fixed template.
+        if (meta.parsed.styleProfile) store.setTemplate("faithful");
+      }
       setHasAIEdits(false);
       setViewMode("preview");
       // loadPdfBlob runs automatically via the resumeFile effect above
@@ -240,6 +250,7 @@ const Resume = () => {
       const d = await api.post<{ parsed: ParsedData | null }>("/api/resume/reparse", {});
       if (d.parsed) {
         store.setSections(d.parsed.sections, d.parsed.ats, d.parsed.versions);
+        if (d.parsed.styleProfile) store.setStyleProfile(d.parsed.styleProfile);
         setHasAIEdits(true);
         setViewMode("preview");
         toast.success("Resume re-scanned with improved parser ✦");
@@ -258,6 +269,33 @@ const Resume = () => {
       if (!hasAIEdits) {
         // No AI edits yet — download the original uploaded PDF
         await api.downloadBlob("/api/resume/download/pdf", name);
+      } else if (store.template === "faithful") {
+        // "Match Original" — prefer a crisp VECTOR PDF compiled from a LaTeX doc
+        // parameterized by the original PDF's StyleProfile (selectable text). If
+        // compilation fails (e.g. the profile trips LaTeX), fall back to the DOM
+        // raster capture so the download always succeeds and still matches.
+        try {
+          await api.downloadBlob(
+            "/api/resume/download/pdf-latex",
+            name,
+            "POST",
+            {
+              sections: store.sections,
+              templateId: "faithful",
+              styleProfile: store.styleProfile,
+              userInfo: {
+                name: store.sections.name,
+                phone: store.sections.phone,
+                email: store.sections.email,
+                linkedin: store.sections.links?.linkedin || "",
+                github: store.sections.links?.github || "",
+                portfolio: store.sections.links?.portfolio || "",
+              },
+            }
+          );
+        } catch {
+          await exportPDF(PDF_PREVIEW_ID, name);
+        }
       } else {
         // AI has edited the resume — compile via LaTeX for a PDF with embedded hyperlinks
         await api.downloadBlob(
@@ -639,7 +677,7 @@ const Resume = () => {
                   // ── AI-edited: show React-rendered preview ──
                   <div className="h-full overflow-y-auto flex justify-center p-6 bg-gray-200">
                     <div className="shadow-2xl">
-                      <ResumePreview sections={store.sections} template={store.template} />
+                      <ResumePreview sections={store.sections} template={store.template} styleProfile={store.styleProfile ?? undefined} />
                     </div>
                   </div>
                 ) : (
@@ -786,7 +824,7 @@ const Resume = () => {
 
       {/* ── Hidden A4 preview for PDF export (always in DOM) ── */}
       <div aria-hidden="true" className="absolute -left-[9999px] top-0 w-[794px] pointer-events-none">
-        <ResumePreview sections={store.sections} template={store.template} id={PDF_PREVIEW_ID} />
+        <ResumePreview sections={store.sections} template={store.template} id={PDF_PREVIEW_ID} styleProfile={store.styleProfile ?? undefined} />
       </div>
 
       {/* ── Floating AI chat bubble ──────────────────────── */}

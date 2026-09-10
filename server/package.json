@@ -29,7 +29,8 @@
         "helmet": "^8.3.0",
         "jsonwebtoken": "^9.0.2",
         "multer": "^2.1.0",
-        "pdf-parse": "^2.4.5"
+        "pdf-parse": "^2.4.5",
+        "pdfjs-dist": "^4.10.38"
     },
     "devDependencies": {
         "@types/bcryptjs": "^2.4.6",
