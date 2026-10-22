@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Gift, TrendingUp, FileText, Briefcase, Target, Trophy, Flame, Zap, ArrowUpRight, ArrowDownRight, Minus, Share2, Users, Check } from "lucide-react";
+import {
+  Gift, TrendingUp, FileText, Briefcase, Target, Trophy, Flame,
+  Zap, ArrowUpRight, ArrowDownRight, Minus, Share2, Users, Check,
+  Kanban, Sparkles, Chrome
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTracking } from "@/hooks/useTracking";
@@ -8,11 +12,10 @@ import { api } from "@/lib/api";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 const MetricRing = ({ score, label, color = "blue" }: { score: number; label: string; color?: string }) => {
-// ...
   const r = 44;
   const c = 2 * Math.PI * r;
   const offset = c - (score / 100) * c;
-// ...
+
   return (
     <div className="flex flex-col items-center">
       <svg width="110" height="110" viewBox="0 0 110 110">
@@ -53,6 +56,9 @@ const MetricRing = ({ score, label, color = "blue" }: { score: number; label: st
 const quickActions = [
   { icon: FileText, label: "Fix Resume", desc: "AI-powered resume scoring", path: "/dashboard/resume" },
   { icon: Target, label: "Find Jobs", desc: "Real-time from Greenhouse & Lever", path: "/dashboard/jobs" },
+  { icon: Kanban, label: "Pipeline", desc: "Live Kanban application tracker", path: "/dashboard/applications" },
+  { icon: Sparkles, label: "Interview Prep", desc: "FAANG questions & AI scoring", path: "/dashboard/interview-prep" },
+  { icon: Chrome, label: "Autofill Extension", desc: "1-click ATS application copilot", path: "/dashboard/extension" },
   { icon: TrendingUp, label: "AI Coach", desc: "Smart career coaching", path: "/dashboard/chat" },
 ];
 

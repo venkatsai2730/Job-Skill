@@ -1,16 +1,24 @@
 import { Link, useLocation, useNavigate, Outlet } from "react-router-dom";
-import { Shield, LayoutDashboard, MessageSquare, Briefcase, FileText, Linkedin, Settings, Gift, LogOut, ChevronDown, Bell } from "lucide-react";
+import {
+  Shield, LayoutDashboard, MessageSquare, Briefcase, FileText,
+  Linkedin, Settings, Gift, LogOut, ChevronDown, Bell,
+  Kanban, Sparkles, Users, Building2, Chrome
+} from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
-  { label: "AI Chat", icon: MessageSquare, path: "/dashboard/chat" },
+  { label: "Pipeline", icon: Kanban, path: "/dashboard/applications" },
   { label: "Jobs", icon: Briefcase, path: "/dashboard/jobs" },
+  { label: "Interview", icon: Sparkles, path: "/dashboard/interview-prep" },
+  { label: "Networking", icon: Users, path: "/dashboard/networking" },
+  { label: "Companies", icon: Building2, path: "/dashboard/companies" },
   { label: "Resume", icon: FileText, path: "/dashboard/resume" },
   { label: "LinkedIn", icon: Linkedin, path: "/dashboard/linkedin" },
-  { label: "Settings", icon: Settings, path: "/dashboard/settings" },
+  { label: "Extension", icon: Chrome, path: "/dashboard/extension" },
+  { label: "AI Chat", icon: MessageSquare, path: "/dashboard/chat" },
 ];
 
 const DashboardLayout = () => {
