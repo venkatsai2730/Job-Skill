@@ -18,6 +18,12 @@ import Resume from "./pages/Resume";
 import LinkedInOptimizer from "./pages/LinkedInOptimizer";
 import SettingsPage from "./pages/Settings";
 import CoverLetter from "./pages/CoverLetter";
+import Templates from "./pages/Templates";
+import Applications from "./pages/Applications";
+import InterviewPrep from "./pages/InterviewPrep";
+import Networking from "./pages/Networking";
+import CompanyInsights from "./pages/CompanyInsights";
+import ExtensionPortal from "./pages/ExtensionPortal";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -39,9 +45,15 @@ const App = () => (
               <Route index element={<DashboardHome />} />
               <Route path="chat" element={<Chat />} />
               <Route path="jobs" element={<Jobs />} />
+              <Route path="applications" element={<Applications />} />
+              <Route path="interview-prep" element={<InterviewPrep />} />
+              <Route path="networking" element={<Networking />} />
+              <Route path="companies" element={<CompanyInsights />} />
+              <Route path="extension" element={<ExtensionPortal />} />
               <Route path="resume" element={<Resume />} />
               <Route path="linkedin" element={<LinkedInOptimizer />} />
               <Route path="cover-letter" element={<CoverLetter />} />
+              <Route path="templates" element={<Templates />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />

@@ -51,6 +51,7 @@ export function seedIds(sections: ParsedSections): ParsedSections {
 /** Sanitise a user-supplied AI prompt: strip control characters, cap length. */
 export function sanitisePrompt(raw: string): string {
   return raw
+    // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "") // control chars
     .trim()
     .slice(0, 500);

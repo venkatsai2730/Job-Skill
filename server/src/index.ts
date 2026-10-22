@@ -21,7 +21,6 @@ import notificationRoutes from "./routes/notifications.js";
 import geocodeRoutes from "./routes/geocode.js";
 import chatbotRoutes from "./routes/chatbot.js";
 import activityRoutes from "./routes/activity.js";
-import resumeDataRoutes from "./routes/resumeData.js";
 import applicationsRoutes from "./routes/applications.js";
 import coverLetterRoutes from "./routes/cover-letter.js";
 import interviewRoutes from "./routes/interview.js";
@@ -29,6 +28,9 @@ import templatesRoutes from "./routes/templates.js";
 import usersRoutes from "./routes/users.js";
 import resumeRewriteRoutes from "./routes/resume-rewrite.js";
 import jobInteractionsRoutes from "./routes/jobInteractions.js";
+import autofillRoutes from "./routes/autofill.js";
+import companiesRoutes from "./routes/companies.js";
+import networkingRoutes from "./routes/networking.js";
 import { fetchAtsJobs, autoExpireJobs, verifyTopJobs } from "./services/jobFetcher.js";
 import { startMCPJobCron } from "./mcp/jobSyncCron.js";
 
@@ -62,7 +64,7 @@ const ALLOWED_ORIGINS = [
 
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.startsWith("chrome-extension://")) {
             callback(null, true);
         } else {
             callback(new Error(`CORS: origin ${origin} not allowed`));
@@ -105,7 +107,6 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/geocode", geocodeRoutes);
 app.use("/api/chatbot", chatbotRoutes);
 app.use("/api/activity", activityRoutes);
-app.use("/api/resume/data", resumeDataRoutes);
 app.use("/api/resume-rewrite", resumeRewriteRoutes);
 app.use("/api/applications", applicationsRoutes);
 app.use("/api/cover-letter", coverLetterRoutes);
@@ -113,6 +114,9 @@ app.use("/api/interview", interviewRoutes);
 app.use("/api/templates", templatesRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/job-interactions", jobInteractionsRoutes);
+app.use("/api/autofill", autofillRoutes);
+app.use("/api/companies", companiesRoutes);
+app.use("/api/networking", networkingRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {

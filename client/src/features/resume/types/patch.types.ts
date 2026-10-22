@@ -17,7 +17,7 @@ export interface ResumePatch {
   summary: string;
 }
 
-// ── Actions dispatched to useResumeEditor ────────────────────────
+// ── Resume Actions ──────────────────────────────────────────────
 export type ResumeAction =
   | { type: "SET_SECTIONS"; sections: ParsedSections; ats?: import("./resume.types").ATSResult }
   | { type: "PATCH"; patches: PatchOperation[] }

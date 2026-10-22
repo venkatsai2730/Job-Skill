@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JobSkill AI Copilot</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- HEADER -->
+    <header class="header">
+      <div class="brand">
+        <div class="logo-icon">⚡</div>
+        <span class="brand-name">JobSkill <span class="copilot-tag">Copilot</span></span>
+      </div>
+      <div id="status-pill" class="status-pill status-disconnected">
+        <span class="status-dot"></span>
+        <span id="status-text">Connecting...</span>
+      </div>
+    </header>
+
+    <!-- VIEW 1: AUTH SETUP (when not connected) -->
+    <div id="auth-section" class="section hidden">
+      <div class="card auth-card">
+        <h3>Connect Your Account</h3>
+        <p class="subtext">Connect your JobSkill AI account to enable 1-click ATS autofill & tracking.</p>
+        
+        <div class="form-group">
+          <label>API Base URL</label>
+          <input type="text" id="input-api-url" value="http://localhost:3001" placeholder="http://localhost:3001" />
+        </div>
+
+        <div class="form-group">
+          <label>JobSkill Auth Token</label>
+          <input type="password" id="input-auth-token" placeholder="Paste your JWT token or get it from Dashboard" />
+        </div>
+
+        <button id="btn-save-auth" class="btn btn-primary">Connect Account</button>
+        <p class="help-text">Tip: Open your JobSkill Dashboard and go to <strong>Extension Hub</strong> to copy your 1-click token.</p>
+      </div>
+    </div>
+
+    <!-- VIEW 2: ACTIVE PROFILE & COPILOT (when connected) -->
+    <div id="main-section" class="section hidden">
+      <!-- Profile Snapshot Card -->
+      <div class="card profile-card">
+        <div class="profile-info">
+          <div class="avatar" id="user-avatar">JS</div>
+          <div>
+            <div class="user-name" id="user-name">Loading...</div>
+            <div class="user-email" id="user-email">...</div>
+          </div>
+        </div>
+        <div class="score-badge" id="ats-score-badge">
+          <span class="score-num" id="ats-score-num">--</span>
+          <span class="score-label">ATS Score</span>
+        </div>
+      </div>
+
+      <!-- Quick Action Buttons -->
+      <div class="actions-grid">
+        <button id="btn-popup-autofill" class="action-card action-primary">
+          <span class="action-icon">⚡</span>
+          <div class="action-text">
+            <strong>Autofill Form</strong>
+            <span>Fill current job application</span>
+          </div>
+        </button>
+
+        <button id="btn-popup-clip" class="action-card action-secondary">
+          <span class="action-icon">📌</span>
+          <div class="action-text">
+            <strong>Track This Job</strong>
+            <span>Save to Kanban board</span>
+          </div>
+        </button>
+      </div>
+
+      <!-- Live AI Answer Generator -->
+      <div class="card ai-card">
+        <div class="card-header">
+          <span>✍️ AI ATS Question Assistant</span>
+        </div>
+        <textarea id="input-ai-question" placeholder="Paste any application question (e.g. 'Why do you want to work here?')..." rows="2"></textarea>
+        <button id="btn-generate-ai" class="btn btn-sm btn-secondary">Generate Tailored Answer</button>
+        <div id="ai-answer-box" class="ai-answer hidden">
+          <div class="answer-header">
+            <span>Tailored Response:</span>
+            <button id="btn-copy-answer" class="btn-copy">Copy</button>
+          </div>
+          <p id="ai-answer-text"></p>
+        </div>
+      </div>
+
+      <!-- Footer Links -->
+      <div class="footer">
+        <button id="btn-sync-profile" class="footer-btn">🔄 Refresh Profile</button>
+        <button id="btn-disconnect" class="footer-btn text-muted">Disconnect</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

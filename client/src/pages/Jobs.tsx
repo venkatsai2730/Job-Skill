@@ -631,7 +631,25 @@ export default function Jobs() {
         salary: formatSalary(job.salary_min, job.salary_max), status: "Saved",
         match_score: job.match_score || 0, job_description: job.description, job_url: job.job_url,
       });
-      toast.success("Job saved to Tracked Applications!");
+
+      // Also sync into Kanban Application Pipeline
+      try {
+        await api.post("/api/applications", {
+          company: job.company,
+          role: job.title,
+          status: "Wishlist",
+          interview_progress: JSON.stringify({
+            location: job.location || "Remote",
+            salary: formatSalary(job.salary_min, job.salary_max),
+            job_url: job.job_url,
+            notes: (job.description || "").slice(0, 300),
+          }),
+        });
+      } catch (_) {
+        // Non-fatal if already present
+      }
+
+      toast.success("Job saved to Pipeline & Tracked Apps!");
       fetchTrackedJobs();
     } catch { toast.error("Failed to save job"); }
   };
